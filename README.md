@@ -152,8 +152,8 @@ separate construction.
 When testing $\mu_0$, set $\eta=\mu_0$, fill its data and templates, and
 **freeze that observable throughout both numerator and denominator fits**.
 Spline interpolation is in the observable construction parameter $\eta$.
-Physical \(\mu\)-dependence continues to use the exact coefficients above.
-Exhaustive bins have process totals independent of \(\eta\), so interpolated
+Physical $\mu$-dependence continues to use the exact coefficients above.
+Exhaustive bins have process totals independent of $\eta$, so interpolated
 bin fractions are constrained to sum to one and multiplied by separate yields.
 
 ## What the comparisons establish
