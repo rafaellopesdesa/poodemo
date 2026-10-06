@@ -26,7 +26,8 @@ plugin packages, then checks double-precision JIT computation and gradients on
 the selected device before training. GPU initialization failures are reported
 instead of silently switching to CPU. Restart the runtime once when switching
 from the previous CPU-only setup or after a JAX plugin error.
-Keep the same run name: saved samples and trained networks are reused.
+For a runtime-only repair, keep the same run name: saved samples and trained
+networks are reused. A changed physics model requires a new run, as below.
 The source checkout lives in the temporary runtime; **datasets, checkpoints,
 workspace files, and results live in Google Drive**. Use the same `RUN_NAME`
 and `MODE` in every notebook. Set `MODE = "smoke"` for a short workflow check;
@@ -43,10 +44,12 @@ written into files, Git remotes, shell arguments, or notebook output. Alternativ
 upload a repository ZIP to `/content/poodemo_source.zip`; no token is then needed.
 An existing `/content/poodemo` checkout is reused. Delete that checkout to fetch
 new source after updating the repository; your Drive run is separate.
-For this NI-only revision, use the new default `RUN_NAME = "demo-ni-v1"`.
+For the stronger-interference benchmark, use the new default
+`RUN_NAME = "paper-interference-v1"` and rerun notebooks 1–5.
 If you ran an earlier version, start a fresh Colab runtime (or refresh the
 temporary source checkout and restart the runtime) before proceeding. Existing
-run manifests from the earlier model are incompatible and are not reused.
+run manifests from the earlier physics model are incompatible and are not
+reused. The new run keeps those earlier Drive files intact.
 """
 
 BOOTSTRAP = r'''
@@ -54,7 +57,7 @@ import os
 import sys
 from pathlib import Path
 
-RUN_NAME = "demo-ni-v1"
+RUN_NAME = "paper-interference-v1"
 MODE = os.environ.get("POODEMO_MODE", "production")  # production or smoke
 CONFIG_OVERRIDES = {}  # e.g. {"quadrature_per_process": 500_000, "epochs": 150}
 JAX_BACKEND = os.environ.get("POODEMO_JAX_BACKEND", "auto")  # auto, gpu, or cpu
@@ -316,6 +319,9 @@ It is stacked above \(\nu_{NI,i}(\eta)\). Combine the three coherent terms
 their physical sum is nonnegative. The curves are not normalized to unit area.
 NI's total yield stays fixed even though its distribution in \(z_\eta\) changes.
 
+The default anchors include the generating value, the nominal total-rate
+turnover, and the other equal-rate solution when those lie in the scan range.
+These rate landmarks need not coincide with full-likelihood extrema.
 Edit `ETA_VALUES` and `HIST_BINS` below to explore other choices. All panels
 use the same bins and axes; `LOG_Y = True` exposes the tails (set it to `False`
 for linear axes). After running setup, this cell can run independently
@@ -330,11 +336,25 @@ from scipy.special import expit
 from poodemo.pipeline import prepare_quadrature, _score
 from poodemo.inference import histogram_components
 
-ETA_VALUES = [0.1, 0.5, 1.0, 3.0]
+quad = prepare_quadrature(run)
+selected_s, selected_sbi, selected_b, _ = quad["nominal"] @ quad["weights"]
+rate_kappa = (selected_s + selected_b - selected_sbi) / selected_s
+rate_turnover = (rate_kappa / 2)**2 if rate_kappa > 0 else np.nan
+other_root = rate_kappa - np.sqrt(run.config["asimov_mu"])
+rate_partner = other_root**2 if other_root >= 0 else np.nan
+candidate_anchors = [run.config["mu_min"], run.config["asimov_mu"], rate_turnover, rate_partner,
+                     (run.config["mu_min"] + run.config["mu_max"]) / 2, run.config["mu_max"]]
+ETA_VALUES = []
+for anchor in candidate_anchors:
+    if (np.isfinite(anchor) and run.config["mu_min"] <= anchor <= run.config["mu_max"]
+            and not any(np.isclose(anchor, old) for old in ETA_VALUES)):
+        ETA_VALUES.append(float(anchor))
+    if len(ETA_VALUES) == 4:
+        break
+ETA_VALUES = sorted(ETA_VALUES)  # Replace with your own anchors to explore.
 HIST_BINS = 128
 LOG_Y = True
 edges = np.linspace(0., 1., HIST_BINS + 1)
-quad = prepare_quadrature(run)
 distributions = []
 for eta in ETA_VALUES:
     z_eta = expit(_score(run, quad, eta) / run.config["score_scale"])
@@ -416,6 +436,9 @@ def build():
 
     Five million generated events per sample provide Monte Carlo precision; the
     expected event yields of the statistical experiment are separate quantities.
+    This benchmark is designed to make interference and nuisance effects visible;
+    it illustrates the method and is not a numerical reproduction of an ATLAS
+    measurement.
     """)
     cells += [
         md(r"""
@@ -429,9 +452,10 @@ def build():
         \qquad A_{NI}(x)=\sqrt{\lambda_{NI}\phi_{NI}(x)}.
         \]
         Their square roots are Gaussian functions, so these are Gaussian
-        wavefunctions. We choose \(\cos\varphi=-0.65\), distinct means and
-        positive-definite covariance matrices, and inclusive yields
-        \(\lambda_S=100,\lambda_B=1000,\lambda_{NI}=10000\).
+        wavefunctions. The configured phase gives destructive interference.
+        The means, positive-definite covariance matrices, phase, and inclusive
+        yields are displayed below and saved with this run. Similar S and B
+        shapes make two different signal strengths harder to distinguish.
 
         The coherent process at \(\mu=1\) is
         \[
@@ -450,13 +474,20 @@ def build():
         \]
         The negative coefficients in this basis are physical algebra; the total
         amplitude model remains positive.
+
+        Destructive interference alone does **not** guarantee a second likelihood
+        minimum. Its visibility also depends on the signal/background shapes,
+        selection, event rates, and scanned parameter range. Shape information
+        can separate two hypotheses with the same total expected yield. Notebook
+        3 measures the actual unbinned likelihood landscape after preselection.
         """),
         md(r"""
         ### Shape uncertainties and statistically independent roles
 
-        The only nuisance is \(\alpha_{NI}\). A reproducibly chosen unit direction
-        \(v_{NI}\) shifts the NI amplitude mean by
-        \(\Delta m_{NI}=0.1\|m_{NI}\|v_{NI}\) for one standard deviation.
+        The only nuisance is \(\alpha_{NI}\). Its ±1 anchors shift the NI
+        amplitude mean along the configured direction with the configured
+        magnitude. The actual shift vector is displayed below, so its strength
+        remains explicit when the benchmark is changed.
         S, B, and their coherent SBI process are fixed with respect to this
         nuisance. The exact NI shift vector and all model settings are saved in
         the run configuration. The inclusive NI yield stays fixed; its selected
@@ -483,6 +514,15 @@ def build():
         """),
         code(r'''
         display(pd.Series(run.model.to_dict(), name="amplitude model"))
+        display(pd.DataFrame({
+            "process": ["S", "SBI", "B", "NI"],
+            "inclusive_yield": [run.model.component_yield(p) for p in ["S", "SBI", "B", "NI"]],
+        }))
+        ni_nominal_mean = run.model.mean("NI", alpha_ni=0.)
+        ni_shift = run.model.mean("NI", alpha_ni=1.) - ni_nominal_mean
+        print("NI mean at alpha=0:", ni_nominal_mean)
+        print("NI +1 sigma mean displacement:", ni_shift)
+        print("Displacement magnitude:", np.linalg.norm(ni_shift))
         '''),
         code("from poodemo.pipeline import generate_data\n\nsample_summary = generate_data(run)\ndisplay(sample_summary)"),
         code(r'''
@@ -522,9 +562,9 @@ def build():
 
     cells = start("2. Multiclass preselection", r"""
     Train a three-class classifier on S, B, and NI, then freeze a cut on its S
-    output. The aim is to improve the physical S/NI yield ratio from 0.01 to
-    approximately 0.1, without using the eventual inference sample to choose the
-    cut. Run notebook 1 first. A GPU is recommended in production mode.
+    output. The aim is to improve the physical S/NI yield ratio toward the
+    configured target, without using the eventual inference sample to choose
+    the cut. Run notebook 1 first. A GPU is recommended in production mode.
     """)
     cells += [
         md(r"""
@@ -538,14 +578,14 @@ def build():
         A threshold \(c\) is chosen on held-out calibration events to satisfy
         \[
         \frac{\lambda_S\epsilon_S(c)}
-             {\lambda_{NI}\epsilon_{NI}(c)}\simeq0.1.
+             {\lambda_{NI}\epsilon_{NI}(c)}\simeq\rho_{\rm target}.
         \]
         Within the available threshold choices, preserving signal efficiency
         matters. The target is approximate because efficiencies are estimated
         with finite samples. The same frozen cut is applied to every process,
         every nuisance variation, and all subsequent parameter hypotheses.
         """),
-        code("from poodemo.pipeline import run_preselection\n\nselection = run_preselection(run)\ndisplay(selection)"),
+        code("from poodemo.pipeline import run_preselection\n\nprint('Inclusive S/NI:', run.model.component_yield('S') / run.model.component_yield('NI'))\nprint('Selected S/NI target:', run.config['target_s_over_ni'])\nselection = run_preselection(run)\ndisplay(selection)"),
         md(r"""
         ### Selection is part of the statistical experiment
 
@@ -570,6 +610,29 @@ def build():
             if isinstance(value, pd.DataFrame):
                 print(key)
                 display(value)
+        '''),
+        md(r"""
+        ### Inspect the NI variation after selection
+
+        The stronger NI shape variation can change the accepted NI yield even
+        when its inclusive yield is fixed. The table and plot below use the
+        independent integration partition, with the same frozen cut for all
+        three NI anchors. These finite-sample acceptance estimates are a
+        diagnostic; the later analytical comparison uses the common quadrature.
+        """),
+        code(r'''
+        ni_selection = selection["selection"].query("split == 'integration'").set_index("sample")
+        ni_selection = ni_selection.loc[["NI_down", "NI", "NI_up"]].copy()
+        ni_selection["relative_to_nominal"] = ni_selection["expected_yield"] / ni_selection.loc["NI", "expected_yield"]
+        display(ni_selection[["efficiency", "expected_yield", "relative_to_nominal"]])
+        fig, ax = plt.subplots()
+        ax.bar([-1, 0, 1], ni_selection["expected_yield"], width=.6, color=["#56B4E9", "0.55", "#E69F00"])
+        ax.set(xticks=[-1, 0, 1], xlabel=r"NI nuisance anchor $\alpha_{NI}$",
+               ylabel="Expected selected NI events", title="NI acceptance variation after the frozen cut")
+        fig.tight_layout()
+        (ROOT / "plots").mkdir(exist_ok=True)
+        fig.savefig(ROOT / "plots" / "02_ni_selection_yields.pdf", bbox_inches="tight")
+        plt.show()
         '''),
         md(r"""
         ### What to inspect
@@ -656,7 +719,7 @@ def build():
         Poisson pseudo-experiments. The extended likelihood retains the total
         expected yield and includes the Gaussian NI auxiliary measurement.
 
-        At the generating point \((\mu_*,\alpha_{NI,*})=(1,0)\),
+        At the configured generating point \((\mu_*,\alpha_{NI,*})=(\mu_*,0)\),
         an exact intensity model gives
         \[
         t_A(\mu,\alpha_{NI})=2\int\!dx\,
@@ -671,6 +734,77 @@ def build():
         code("from poodemo.pipeline import run_unbinned\n\nunbinned = run_unbinned(run)\ndisplay(unbinned['scans'])"),
         code(PLOT_HELPER),
         code("plot_scans(unbinned['scans'], 'Unbinned Asimov likelihood scans', '03_unbinned_scans.pdf');"),
+        md(r"""
+        ### Why a second minimum can appear
+
+        At nominal NI nuisance and with the selection fixed, write the selected
+        total yield as
+        \[
+        \Lambda_\mu=\lambda_S\mu+\lambda_I\sqrt\mu+\lambda_B+\lambda_{NI},
+        \qquad \lambda_I=\lambda_{SBI}-\lambda_S-\lambda_B<0.
+        \]
+        Equating this yield to the generating yield gives
+        \[
+        \Lambda_\mu-\Lambda_{\mu_*}
+        =(\sqrt\mu-\sqrt{\mu_*})
+        [\lambda_S(\sqrt\mu+\sqrt{\mu_*})+\lambda_I]=0.
+        \]
+        Besides \(\mu=\mu_*\), there is an equal-rate solution
+        \[
+        \mu_{\rm rate}=\left(-\lambda_I/\lambda_S-\sqrt{\mu_*}\right)^2
+        \]
+        when the expression in parentheses is nonnegative. This is an exact
+        statement about the **total rate at nominal nuisance**, not an exact
+        degeneracy of the full event distribution. Similar signal and
+        interference shapes can leave a second likelihood minimum nearby;
+        shape information can lift it. Profiling NI can change its depth and
+        location, with the Gaussian constraint penalizing the required shift.
+
+        The following analytical-only panels separate fixed-NI and profiled-NI
+        curves. Dots mark interior minima on the evaluated grid, rather than
+        claiming a more precise optimizer location.
+        """),
+        code(r'''
+        from poodemo.pipeline import prepare_quadrature
+
+        landscape_quad = prepare_quadrature(run)
+        selected_s, selected_sbi, selected_b, selected_ni = landscape_quad["nominal"] @ landscape_quad["weights"]
+        selected_interference = selected_sbi - selected_s - selected_b
+        truth_mu = run.config["asimov_mu"]
+        other_root = -selected_interference / selected_s - np.sqrt(truth_mu)
+        equal_rate_mu = float(other_root**2) if other_root >= 0 else np.nan
+        display(pd.Series({"selected_lambda_S": selected_s,
+                           "selected_lambda_I": selected_interference,
+                           "generating_mu": truth_mu,
+                           "other_equal_rate_mu_at_alpha_NI_0": equal_rate_mu}, name="rate diagnostic"))
+        analytical_scans = unbinned["scans"].query("model == 'analytic unbinned'")
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharex=True, sharey=True)
+        minima = []
+        for ax, systematic in zip(axes, [False, True]):
+            frame = analytical_scans[analytical_scans["systematics"] == systematic].sort_values("mu")
+            mu_values = frame["mu"].to_numpy()
+            q_values = frame["q"].to_numpy()
+            ax.plot(mu_values, q_values, color="#D55E00" if systematic else "#0072B2", lw=2)
+            for index in range(1, len(frame) - 1):
+                nearby = q_values[index-1:index+2]
+                if np.all(np.isfinite(nearby)) and nearby[1] <= min(nearby[0], nearby[2]):
+                    ax.scatter(mu_values[index], q_values[index], color="black", zorder=4)
+                    minima.append({"systematics": systematic, "mu_grid_minimum": mu_values[index], "q": q_values[index]})
+            ax.axvline(truth_mu, color="0.35", ls=":", label="Generating value")
+            if np.isfinite(equal_rate_mu) and run.config["mu_min"] <= equal_rate_mu <= run.config["mu_max"]:
+                ax.axvline(equal_rate_mu, color="0.6", ls="--", label="Other nominal equal-rate value")
+            ax.axhline(1., color="0.7", ls=":")
+            ax.set(xlabel=r"Tested signal strength $\mu_0$", ylabel=r"$t_A(\mu_0)$", ylim=(0, None),
+                   title="Analytical: NI profiled" if systematic else "Analytical: NI fixed at zero")
+            ax.legend(fontsize=8)
+        fig.tight_layout()
+        for extension in ("pdf", "png"):
+            fig.savefig(ROOT / "plots" / f"03_analytical_landscape.{extension}", bbox_inches="tight", dpi=160)
+        plt.show()
+        display(pd.DataFrame(minima))
+        print("Scan range:", (run.config["mu_min"], run.config["mu_max"]))
+        print("Fit bounds:", run.config["mu_fit_bounds"])
+        '''),
         md(r"""
         ### Check the numerical expectation itself
 
@@ -710,8 +844,8 @@ def build():
         These Asimov curves alone do not demonstrate interval coverage or
         establish Wilks' theorem at a boundary. The scan uses positive signal
         strengths; the derivative of the \(\sqrt\mu\) model is singular at zero.
-        The default scan is \(0.1\le\mu\le3\); the fit domain is
-        \(0.001\le\mu\le4\). The lower fit bound is a numerical floor for
+        The scan range and fit bounds are printed above from the run configuration.
+        The positive lower fit bound is a numerical floor for
         this regular interior demonstration, not an implementation of a
         discovery test at the physical boundary \(\mu=0\).
 
@@ -760,7 +894,10 @@ def build():
         The constant normalization term ensures zero mean under the selected
         normalized distribution. Keeping the event count separately preserves
         rate information. The bounded observable is
-        \(z_\eta=1/[1+\exp(-o_\eta/a)]\), with **\(a=1\)**.
+        \(z_\eta=1/[1+\exp(-o_\eta/a)]\), with one fixed positive scale
+        \(a=\texttt{run.config['score\_scale']}\) for the run. This invertible
+        transformation preserves the unbinned score information. Its scale
+        affects how efficiently a finite uniform binning resolves the score.
         """),
         md(SCORE_DISTRIBUTIONS_INTRO),
         code(SCORE_DISTRIBUTIONS),
@@ -817,6 +954,82 @@ def build():
             (ROOT / "plots").mkdir(exist_ok=True)
             ax.figure.savefig(ROOT / "plots" / "04_binning_diagnostics.pdf", bbox_inches="tight")
             plt.show()
+        '''),
+        md(r"""
+        ### Estimator and local uncertainty versus the frozen observable
+
+        Now hold the generating experiment fixed at \((\mu_*,\alpha_{NI})=(\mu_*,0)\)
+        and vary only the observable anchor \(\eta\). Each row refills the
+        **same Asimov expectation**, freezes that histogram, and fits physical
+        \(\mu\), with NI either fixed or profiled. For an identified, correctly
+        modeled Asimov experiment, \(\hat\mu(\eta)\) should remain at the
+        generating value. This is not a study of finite-sample fluctuations.
+
+        The width is evaluated from the local Fisher information at the fixed
+        truth, using the extended likelihood and the NI auxiliary constraint:
+        \[
+        \sigma_\mu^{\rm fixed}(\eta)=1/\sqrt{I_{\mu\mu}^{(\eta)}},\qquad
+        \sigma_\mu^{\rm profiled}(\eta)
+        =\sqrt{[(\mathbf I^{(\eta)})^{-1}]_{\mu\mu}}.
+        \]
+        This is the local Asimov curvature of **each frozen-observable fit**.
+        It is neither the curvature of the scan that changes \(\eta=\mu_0\)
+        at every point nor a global confidence interval. A second likelihood
+        minimum can produce additional accepted parameter regions that a local
+        width cannot describe.
+
+        The full unbinned reference does not depend on \(\eta\). For the binned
+        comparison, profiled widths use nuisance morphing after binning, as in
+        notebook 5; its difference from integrating the unbinned morphing is a
+        separate model effect. Inspect anomalous fitted values for optimizer
+        failure or multiple equally good minima before interpreting them as
+        compression bias.
+        """),
+        code(r'''
+        from poodemo.diagnostics import run_estimator_study
+
+        estimator_study = run_estimator_study(run)
+        display(estimator_study)
+        invalid_rows = estimator_study[~estimator_study["fit_valid"] | ~estimator_study["width_valid"]]
+        if len(invalid_rows):
+            print("Invalid fits or local widths (omitted from the corresponding curves):")
+            display(invalid_rows)
+        print("Saved estimator table:", ROOT / "results" / "estimator_eta.csv")
+        '''),
+        code(r'''
+        fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True, squeeze=False)
+        truth_mu = float(estimator_study["truth"].iloc[0])
+        for row, systematic in enumerate([False, True]):
+            subset = estimator_study[estimator_study["systematics"] == systematic]
+            group_columns = [c for c in ["model", "n_bins"] if c in subset.columns]
+            for label, values in subset.groupby(group_columns, dropna=False, sort=False):
+                values = values.sort_values("eta")
+                label_values = label if isinstance(label, tuple) else (label,)
+                parts = [f"{int(value)} bins" if name == "n_bins" else str(value)
+                         for name, value in zip(group_columns, label_values)
+                         if pd.notna(value) and (name != "n_bins" or float(value) > 0)]
+                legend_label = " | ".join(parts)
+                line_style = "--" if "unbinned" in str(label_values[0]).lower() else "-"
+                sigma = values["sigma_mu"].replace([np.inf, -np.inf], np.nan).where(values["width_valid"])
+                axes[row, 0].plot(values["eta"], sigma, line_style, label=legend_label)
+                axes[row, 1].plot(values["eta"], values["mu_hat"].where(values["fit_valid"]), line_style, label=legend_label)
+            nuisance_label = "NI profiled" if systematic else "NI fixed at zero"
+            axes[row, 0].set(title=nuisance_label, ylabel=r"Local width $\sigma_\mu(\eta)$")
+            axes[row, 1].axhline(truth_mu, color="black", ls=":", label="Generating value")
+            axes[row, 1].set(title=nuisance_label + ": same Asimov experiment", ylabel=r"$\hat\mu(\eta)$")
+            finite_estimates = subset.loc[subset["fit_valid"], "mu_hat"].to_numpy()
+            finite_estimates = finite_estimates[np.isfinite(finite_estimates)]
+            lower = min(truth_mu, finite_estimates.min()) if len(finite_estimates) else truth_mu
+            upper = max(truth_mu, finite_estimates.max()) if len(finite_estimates) else truth_mu
+            margin = max(.03 * (run.config["mu_max"] - run.config["mu_min"]), .1 * (upper - lower))
+            axes[row, 1].set_ylim(lower - margin, upper + margin)
+            for ax in axes[row]:
+                ax.set_xlabel(r"Frozen observable anchor $\eta$")
+                ax.legend(fontsize=7)
+        fig.tight_layout()
+        for extension in ("pdf", "png"):
+            fig.savefig(ROOT / "plots" / f"04_estimator_eta.{extension}", bbox_inches="tight", dpi=160)
+        plt.show()
         '''),
         md("Next: **05_spline_templates.ipynb**."),
     ]
@@ -915,7 +1128,7 @@ def build():
         plt.show()
         '''),
         md(r"""
-        For comparison, the next plot fixes \(\eta=1\) and varies the **physical**
+        For comparison, the next plot fixes \(\eta=\mu_*\) and varies the **physical**
         \(\mu\). This dependence comes from the signal/interference coefficients,
         not from the spline. The two plots answer different questions.
         """),
@@ -926,7 +1139,7 @@ def build():
         for bin_number, values in physical[physical["bin"].isin(shown_bins)].groupby("bin"):
             ax.plot(values["mu"], values["yield_value"], label=f"bin {bin_number}")
         ax.set(xlabel=r"Physical signal strength $\mu$", ylabel="Expected total bin yield",
-               title=r"Physical scaling with the observable fixed at $\eta=1$")
+               title=fr"Physical scaling with the observable fixed at $\eta={run.config['asimov_mu']:g}$")
         ax.legend(fontsize=8)
         fig.tight_layout()
         fig.savefig(ROOT / "plots" / "05_physical_bin_yields.pdf", bbox_inches="tight")
@@ -950,6 +1163,11 @@ def build():
         preserve all profiled information. A joint score vector, or a suitable
         efficient score, is a natural extension. This example measures the
         agreement obtained by the requested scalar construction.
+
+        Notebook 4's \(\sigma_\mu(\eta)\) and \(\hat\mu(\eta)\) study uses the
+        same frozen-fit convention. Those local widths help explain sensitivity
+        near the generating minimum; this complete profile scan also reveals
+        the secondary minimum and any disconnected low-test-statistic regions.
         """),
         code(r'''
         print("All stages finished. Results are stored under:", ROOT)
@@ -963,7 +1181,7 @@ def build():
         ### Further experiments
 
         Increase the integration statistics to test numerical stability; widen
-        the scan to expose interference effects; compare a fixed \(\eta=1\)
+        the scan to expose interference effects; compare a fixed \(\eta=\mu_*\)
         score with the moving score; or add nuisance-score components. An
         interval-coverage study would require genuine pseudo-experiments and
         calibration of the chosen statistic, beyond these Asimov comparisons.

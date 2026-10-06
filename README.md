@@ -4,13 +4,16 @@ Five Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
 neural simulation-based inference, and a parameterized binned approximation
 built from the likelihood score. Data and trained models persist in your Google
 Drive; the source lives in this repository.
+The stronger-interference benchmark makes secondary-minimum and nuisance effects
+visible. It is an illustrative toy, not a numerical reproduction of an ATLAS
+measurement.
 
 | Notebook | Purpose | Open in Colab |
 |---|---|---|
 | [01_generate_amplitudes.ipynb](notebooks/01_generate_amplitudes.ipynb) | Generate coherent S/B amplitudes, SBI and NI samples, and nuisance variations | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/01_generate_amplitudes.ipynb) |
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
-| [04_score_histograms.ipynb](notebooks/04_score_histograms.ipynb) | Compute the analytical score and study progressively finer Poisson histograms | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/04_score_histograms.ipynb) |
+| [04_score_histograms.ipynb](notebooks/04_score_histograms.ipynb) | Study score histograms, local widths, and fitted signal strength versus the observable anchor | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/04_score_histograms.ipynb) |
 | [05_spline_templates.ipynb](notebooks/05_spline_templates.ipynb) | Interpolate moving bin fractions, validate splines, and compare profiled scans | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/05_spline_templates.ipynb) |
 
 ## Run in Colab
@@ -23,8 +26,9 @@ Drive; the source lives in this repository.
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
    The other notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
-   `RUN_NAME = "demo-ni-v1"` and `MODE = "production"`. For an initial short check,
-   choose `MODE = "smoke"` and a distinct run name such as `smoke-ni-v1`.
+   `RUN_NAME = "paper-interference-v1"` and `MODE = "production"`. For an initial
+   short check, choose `MODE = "smoke"` and a distinct run name such as
+   `paper-interference-smoke-v1`.
    Computational budgets can be changed through `CONFIG_OVERRIDES`, for example
    `{"quadrature_per_process": 500_000, "epochs": 150}`. Use identical overrides
    in every notebook and a new run name when changing the configuration.
@@ -47,7 +51,7 @@ double-precision JIT value and gradient on the selected device before training.
 A detected/requested GPU that fails to initialize raises an error rather than
 silently running the fit on CPU. Startup prints `backend=gpu` on a GPU runtime.
 JAX memory preallocation is disabled by default so it can share the GPU with
-PyTorch. If switching from the previous CPU-only setup or recovering from the
+PyTorch. For a runtime-only repair, such as switching from the previous CPU-only setup or recovering from the
 `register_custom_type_handler` error, restart the runtime once, reopen the
 updated notebook, and rerun setup with the same `RUN_NAME`.
 Completed networks and samples in Drive are reused; retraining is not required.
@@ -56,10 +60,13 @@ stale reuse after its model or threshold changes.
 Use a new run name when changing the configuration: incompatible saved settings
 are rejected rather than silently mixed.
 
-For this NI-only revision, use a new run directory such as `demo-ni-v1`.
+For this changed physics benchmark, use the new run directory
+`paper-interference-v1` and rerun notebooks 1–5. Schema-4 manifests prevent reuse
+of the earlier physics configuration.
 If an earlier version was already run in Colab, start a fresh runtime, or
 refresh `/content/poodemo` and restart the runtime, so that the new source is
-loaded. Earlier run manifests are incompatible and are not reused.
+loaded. Earlier Drive runs remain intact, but their samples and trained models
+must not be reused for the changed amplitudes and NI variation.
 
 Production generates **5 million events in each of six samples**: S, SBI, B,
 NI, NI_up, and NI_down, for 30 million events total. The raw three-coordinate
@@ -79,15 +86,16 @@ $\phi_j=\mathcal N_3(m_j,\Sigma_j)$, use
 $$
 A_S=\sqrt{\lambda_S\phi_S},\qquad
 A_B=e^{i\varphi}\sqrt{\lambda_B\phi_B},\qquad
-\cos\varphi=-0.65.
+\cos\varphi<0.
 $$
 
-These are Gaussian wavefunctions. The expected inclusive yields are
-$\lambda_S=100$, $\lambda_B=1000$, and $\lambda_{NI}=10000$.
-Means and correlated covariance matrices differ between processes and are
-recorded in `run.json`. The SBI template is a positive process with intensity
+These are Gaussian wavefunctions. Inclusive yields, the destructive phase,
+means, and correlated covariance matrices are displayed in notebook 1 and
+recorded in `run.json`. S and B shapes are deliberately close to make the
+interference ambiguity visible. The SBI template is a positive process with intensity
 \(D_{SBI}=|A_S+A_B|^2\). Its integral is calculated analytically, including
-interference; the default is approximately 820.26 events. NI is incoherent.
+interference, and is reported rather than assigned an independent normalization.
+NI is incoherent.
 
 The physical intensity is
 
@@ -102,8 +110,28 @@ $\mu\ge0$. SBI is sampled with rejection sampling using an exact envelope.
 The number of generated Monte Carlo events is independent of the expected
 number of events in the statistical experiment.
 
+Destructive interference alone does not guarantee a second likelihood minimum:
+shape information, preselection, and the scan range also matter. At nominal NI
+nuisance, the selected total rate is
+
+$$
+\Lambda_\mu=\lambda_S\mu+\lambda_I\sqrt\mu+\lambda_B+\lambda_{NI},\qquad
+\lambda_I=\lambda_{SBI}-\lambda_S-\lambda_B.
+$$
+
+Besides the generating value $\mu_*$, the same total rate occurs at
+$\mu_{\rm rate}=(-\lambda_I/\lambda_S-\sqrt{\mu_*})^2$ when the term in
+parentheses is nonnegative. Equal rates do not imply equal event distributions.
+Notebook 3 calculates this rate diagnostic after selection and plots the actual
+analytical likelihood, separately with NI fixed and profiled. Any secondary
+minimum must be established from those curves rather than inferred from the
+sign of interference alone.
+
 The only nuisance is $\alpha_{NI}$. It shifts the NI amplitude mean by
-$\pm0.1\|m_{NI}\|v_{NI}$, where $v_{NI}$ is a fixed, seeded random unit vector.
+the configured magnitude along the direction toward the signal mean. This
+deliberate direction makes the shape variation more relevant to signal-strength
+inference. Notebook 1 prints the exact displacement vector and its magnitude;
+notebook 2 shows the resulting NI± acceptance and selected yields.
 S, B, and their coherent SBI process retain their nominal shapes and yields.
 The inclusive NI yield stays fixed, while its selected yield can vary through
 the selection efficiency. The nominal and ±1 NI anchors define an
@@ -167,15 +195,20 @@ $$
 o_\eta(x)=\left.\partial_\mu\log p(x;\mu)\right|_\eta
 =\frac{D'_\eta(x)}{D_\eta(x)}
  -\frac{\Lambda'_\eta}{\Lambda_\eta},\qquad
-z_\eta=\frac1{1+e^{-o_\eta}}.
+z_\eta=\frac1{1+e^{-o_\eta/a}}.
 $$
+
+The positive scale $a$ is saved as `score_scale`; it is fixed throughout the run.
+It preserves unbinned information while controlling the resolution of a finite
+uniform histogram in $z$.
 
 Every component includes its yield. The total-rate denominator contains only
 yields, not a residual $p_{NI}(x)$ factor. Total-count information is retained
 by the extended likelihood. Positive score anchors avoid the nonregular
 $\sqrt\mu$ derivative at $\mu=0$.
-The default scan covers $0.1\le\mu\le3$, while the fit domain is
-$0.001\le\mu\le4$. The lower fit bound is a numerical floor for an interior
+The actual scan and fit domain are printed from `mu_min`, `mu_max`, and
+`mu_fit_bounds`. The scan extends across the interference turnover and the
+possible secondary minimum. The positive lower fit bound is a numerical floor for an interior
 inference demonstration; testing the physical $\mu=0$ boundary needs a
 separate construction.
 
@@ -185,6 +218,29 @@ Spline interpolation is in the observable construction parameter $\eta$.
 Physical $\mu$-dependence continues to use the exact coefficients above.
 Exhaustive bins have process totals independent of $\eta$, so interpolated
 bin fractions are constrained to sum to one and multiplied by separate yields.
+
+Notebook 4 also varies $\eta$ while holding the **same generating Asimov
+experiment** fixed. It compares $\hat\mu(\eta)$ and the local uncertainty
+
+$$
+\sigma_\mu^{\rm fixed}(\eta)=1/\sqrt{I_{\mu\mu}^{(\eta)}},\qquad
+\sigma_\mu^{\rm profiled}(\eta)
+=\sqrt{[(\mathbf I^{(\eta)})^{-1}]_{\mu\mu}}
+$$
+
+between direct score histograms and the analytical unbinned reference. Fisher
+information is evaluated at the fixed generating truth and includes total-rate
+information and the NI Gaussian constraint. These widths describe the local
+curvature of each frozen-observable fit; they are not the curvature of the
+moving-observable test-statistic scan or global multimodal confidence intervals.
+For an identified, correctly modeled Asimov experiment, the fitted values should
+remain at the generating value. This comparison does not simulate finite-sample
+fluctuations. Profiled histogram widths use morphing after binning, with the
+same morph-order distinction studied in notebook 5.
+
+The diagnostic table is saved as `results/estimator_eta.csv`; its figure is
+`plots/04_estimator_eta.pdf` (also PNG). The analytical likelihood panels are
+saved as `plots/03_analytical_landscape.pdf` (also PNG).
 
 ## What the comparisons establish
 
@@ -223,7 +279,7 @@ claiming a physics-level closure precision.
 ```bash
 python -m pip install -r requirements-colab.txt
 python -m pip install -e '.[dev]'
-export POODEMO_ROOT=/absolute/path/to/poodemo-runs/smoke-ni-v1
+export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-interference-smoke-v1
 export POODEMO_MODE=smoke
 ```
 
@@ -253,16 +309,36 @@ changes a configurable budget without editing the package. Unknown or protected
 configuration keys are rejected, and existing runs must match their saved
 settings.
 
+Physics parameters can be varied with `physics_overrides`, for example
+`CONFIG_OVERRIDES = {"physics_overrides": {"shift_fraction_ni": 0.4}}`.
+Use a new run name for any such change. The paper defaults use 81 scan grid
+points and 601 spline grid points, plus the generating value; half of the
+regular scan points are withheld from the spline grid. The denser spline
+grid resolves the changing score near the interference turnover. Its accuracy
+must still be checked against direct histograms with the available integration
+statistics.
+
+An analytical benchmark check can be run before training:
+
+```bash
+python scripts/validate_benchmark.py --output /tmp/poodemo-benchmark.json
+```
+
+This uses an ideal multiclass selector with a separately calibrated frozen
+cut. It verifies the interference minima, NI profiling effect, and score
+resolution; it does not validate trained ratios or replace notebook results.
+
 Notebook sources are maintained in `scripts/build_notebooks.py`:
 
 ```bash
 python scripts/build_notebooks.py
 python -m pytest
-python scripts/smoke.py --root /tmp/poodemo-smoke-ni
+python scripts/smoke.py --root /tmp/poodemo-paper-interference-smoke
 ```
 
-The notebook generator produces clean notebooks; user-committed numerical
-outputs and plots are retained when applying targeted fixes. Toolkit
+The notebook generator produces clean notebooks. This intentional physics
+revision clears earlier numerical outputs so that all five notebooks can be
+rerun consistently; targeted runtime fixes normally preserve user outputs. Toolkit
 source is pinned to commit `fc09848fc6540fd32310faebbe9db6eea7ecd17b`;
 `requirements-colab.txt` includes the dependencies its package metadata does
 not declare. Compatible PyTorch ranges allow Colab's GPU-enabled build to be

@@ -7,7 +7,7 @@ import pytest
 
 from poodemo.data import Run, SPLITS, create_run, generate_samples, materialize_selection
 from poodemo.physics import PhysicsModel
-from poodemo.pipeline import RATIO_TASKS, _score
+from poodemo.pipeline import RATIO_TASKS, _score, mu_fit_starts
 
 
 def test_disjoint_stage_partitions_and_cached_selected_score(tmp_path):
@@ -57,7 +57,23 @@ def test_ni_only_generation_and_training_inventory(tmp_path):
     # An old cached nuisance layout must not silently supply extra parameters.
     manifest_path = run.path("run.json")
     manifest = json.loads(manifest_path.read_text())
-    manifest["config"]["schema_version"] = 2
+    manifest["config"]["schema_version"] = 3
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="Choose a new RUN_NAME"):
         create_run(tmp_path, "smoke", {"n_per_sample": 64, "generation_chunk": 32})
+
+
+def test_physics_overrides_are_recorded_and_cannot_reuse_another_model(tmp_path):
+    overrides = {"physics_overrides": {"shift_fraction_ni": .4}}
+    run = create_run(tmp_path, "smoke", overrides)
+    assert run.model.shift_fraction_ni == .4
+    saved = json.loads((tmp_path / "run.json").read_text())
+    assert saved["physics"]["shift_fraction_ni"] == .4
+    assert create_run(tmp_path, "smoke", overrides).config == run.config
+    with pytest.raises(ValueError, match="Choose a new RUN_NAME"):
+        create_run(tmp_path, "smoke")
+    starts = mu_fit_starts(run)
+    assert run.config["asimov_mu"] in starts
+    assert min(starts) == run.config["mu_fit_bounds"][0]
+    assert max(starts) == run.config["mu_fit_bounds"][1]
+    assert any(6 < value < 10 for value in starts)

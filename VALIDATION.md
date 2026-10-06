@@ -5,6 +5,78 @@ PyTorch Lightning 2.5.5, PyTorch 2.14.1 (CPU execution), NumPy 2.3.5,
 SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:
 `fc09848fc6540fd32310faebbe9db6eea7ecd17b`.
 
+## Paper benchmark (schema 4)
+
+The `paper-interference-v1` revision changes the physics model and requires a
+fresh run of notebooks 1–5. S and B now have nearby but distinct Gaussian
+shapes, while the destructive phase remains -0.65. NI alone has a 30% mean
+displacement toward S, with the same unit-Gaussian auxiliary constraint.
+The physical scan covers 0.1–12 and fits cover 0.001–14. The logistic score
+scale is 0.075, avoiding unnecessarily narrow score histograms.
+
+- **57 automated tests passed.** New checks cover the secondary full-shape
+  likelihood basin, the stronger NI effect, Fisher versus numerical Asimov
+  Hessians and profiled curvature, fixed-data estimator fits, reuse of checked
+  toolkit baselines, and rejection of incompatible physics caches.
+- **All 38 code cells in all five regenerated notebooks executed** against a
+  fresh smoke run, including generation, selector and ratio training, toolkit
+  fits, histograms, local-width/MLE diagnostics, splines, and all figures.
+  Execution used the local bootstrap and CPU; the authenticated Colab session
+  and the new full production training were not run here.
+- The trained smoke selector achieved calibration S/NI = **0.10056**, with
+  independent holdout S/NI = **0.12308** at its small integration budget.
+  The analytical unbinned scans clearly show the second basin. At the coarse
+  smoke grid point mu = 7.5375, the statistic is **2.485** with NI fixed and
+  **1.192** with NI profiled; the intervening sampled peaks are about 7.88
+  and 4.45, respectively.
+- The analytical unbinned local widths are **0.3470** and **0.4227** (fixed
+  and profiled NI). Across the frozen-eta direct histograms, the largest
+  Asimov MLE displacement from truth was **4.8e-8**. All estimator/width rows
+  were valid. These are local widths at the fixed generating truth, not
+  global confidence intervals across the second minimum.
+- The smoke ratio fits remain deliberately undertrained: fitted mu values
+  were **1.425** (fixed NI) and **2.505** (profiled NI), versus generating mu=1.
+  Production training must establish ratio closure independently; analytical
+  results are never substituted for failed learned-model closure.
+- The 32-bin, 61-anchor smoke spline/direct comparison had a largest absolute
+  statistic difference of **2.16**. This is an approximation error, not a
+  coverage result. The paper defaults use 601 spline grid points and 81 scan
+  grid points, plus truth; 40 regular scan points remain between anchors.
+  Denser anchors alone cannot remove finite quadrature noise. Notebook 5
+  reports both held-out bin-fraction errors and fitted likelihood differences.
+
+A separate higher-statistics spline check used 65,536 Sobol points per
+proposal component (123,355 selected nodes), an ideal frozen selector, and
+128 score bins. At 49 held-out or targeted eta points, 601 uniform anchors
+plus truth gave no support or fit failures. The largest absolute statistic
+differences were **0.080** with NI fixed and **0.105** after profiling. The
+coarser 121-anchor trial had empty-support failures and larger distortions.
+This supports the denser default but is not a uniform error guarantee; the
+production run still validates its own learned selection and quadrature.
+
+An independent analytical preflight uses an ideal balanced multiclass
+selector with a separately calibrated, frozen cut; it does not use the
+trained smoke selector. Reproduce it with:
+
+```bash
+python scripts/validate_benchmark.py --power 15 --seed 100 --output /tmp/poodemo-benchmark.json
+```
+
+| Analytical oracle diagnostic | NI fixed | NI profiled |
+|---|---:|---:|
+| Secondary minimum mu | 7.7652 | 7.1490 |
+| Secondary minimum statistic | 2.6367 | 1.0982 |
+| Intervening barrier statistic | 8.0686 | 4.3955 |
+| Local sigma_mu at truth | 0.3434 | 0.4243 |
+
+Doubling the quadrature with independent Sobol scrambles changes the secondary
+minimum statistics by about 0.001. In this oracle study, 128/256/512 score bins
+retain at least 99.08%/99.75%/99.94% of extended Fisher information across the
+tested anchors. These numerical checks motivate the defaults; the production
+notebooks report their own results after the learned selection.
+
+The remaining sections record earlier schema-3 validation and runtime fixes.
+
 ## Notebook 5 spline-anchor regression
 
 The committed notebook stopped after eta=0.4625 with `profile fit failed:

@@ -54,7 +54,8 @@ def default_config(mode="production"):
     if mode not in ("production", "smoke"):
         raise ValueError("mode must be production or smoke")
     small = mode == "smoke"
-    return dict(schema_version=3, mode=mode, seed=20261006,
+    return dict(schema_version=4, mode=mode, seed=20261006,
+                physics_overrides={},
                 toolkit_commit=TOOLKIT_COMMIT,
                 n_per_sample=12_000 if small else 5_000_000,
                 generation_chunk=10_000 if small else 250_000,
@@ -67,11 +68,11 @@ def default_config(mode="production"):
                 ensemble_size=1 if small else 3,
                 quadrature_per_process=1500 if small else 250_000,
                 asimov_mu=1., target_s_over_ni=.1,
-                score_scale=1., mu_min=.10, mu_max=3.,
-                mu_points=9 if small else 41,
+                score_scale=.075, mu_min=.10, mu_max=12.,
+                mu_points=17 if small else 81,
                 bin_counts=[8, 16, 32] if small else [8, 16, 32, 64, 128, 256, 512],
-                spline_anchors=31 if small else 61,
-                nuisance_bounds=[-3., 3.], mu_fit_bounds=[.001, 4.])
+                spline_anchors=61 if small else 601,
+                nuisance_bounds=[-3., 3.], mu_fit_bounds=[.001, 14.])
 
 
 def create_run(root, mode="production", overrides=None):
@@ -98,7 +99,9 @@ def create_run(root, mode="production", overrides=None):
         raise ValueError("The generating Asimov mu must lie within the scan/anchor range")
     if not config["bin_counts"] or any(not isinstance(b, int) or b < 2 for b in config["bin_counts"]):
         raise ValueError("bin_counts must be a nonempty list of integers >= 2")
-    model = PhysicsModel()
+    if not isinstance(config["physics_overrides"], dict):
+        raise ValueError("physics_overrides must be a dictionary of PhysicsModel parameters")
+    model = PhysicsModel(**config["physics_overrides"])
     manifest = {"config": config, "physics": model.to_dict(),
                 "splits": {k: list(v) for k, v in SPLITS.items()}}
     path = root / "run.json"

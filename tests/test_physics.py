@@ -44,7 +44,7 @@ class PhysicsTests(unittest.TestCase):
         up = self.model.mean("NI", alpha_ni=1.)
         down = self.model.mean("NI", alpha_ni=-1.)
         np.testing.assert_allclose(up - nominal, nominal - down, atol=1e-15)
-        self.assertAlmostEqual(np.linalg.norm(up - nominal), .1 * np.linalg.norm(nominal), places=14)
+        self.assertAlmostEqual(np.linalg.norm(up - nominal), self.model.shift_fraction_ni * np.linalg.norm(nominal), places=14)
         self.assertFalse(np.array_equal(self.model.component_pdf(self.x, "NI", alpha_ni=1.),
                                        self.model.component_pdf(self.x, "NI")))
         for alpha in (-1., 1.):

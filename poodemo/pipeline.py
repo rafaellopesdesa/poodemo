@@ -195,6 +195,13 @@ def mu_grid(run):
     return np.unique(np.r_[np.linspace(c["mu_min"], c["mu_max"], c["mu_points"]), c["asimov_mu"]])
 
 
+def mu_fit_starts(run):
+    """Cover both interference branches over the configured fit domain."""
+    low, high = run.config["mu_fit_bounds"]
+    return np.unique(np.r_[np.linspace(low, high, 7),
+                           np.clip(run.config["asimov_mu"], low, high)]).tolist()
+
+
 def run_unbinned(run):
     from .toolkit import build_workspace, load_model, make_fitter
     q = prepare_quadrature(run)
@@ -252,7 +259,7 @@ def _fit_test(run, model, mu, systematics):
     result = model.test_statistic(mu, systematics=systematics,
                                  mu_bounds=tuple(run.config["mu_fit_bounds"]),
                                  alpha_bounds=tuple(run.config["nuisance_bounds"]),
-                                 mu_starts=[.05, .3, 1., 2.5, 3.8])
+                                 mu_starts=mu_fit_starts(run))
     null, best = result["null_fit"], result["best_fit"]
     valid = bool(null.success and best.success)
     return dict(q=result["t"] if valid else np.nan, valid=valid,

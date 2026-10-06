@@ -52,8 +52,10 @@ class PhysicsModel:
     ``arccos(phase_cos)``.  At the default phase, destructive interference
     cannot create exact zeros in ``SBI``.  ``exposure`` scales every yield.
 
-    The sole nuisance displaces the NI Gaussian mean by 10% of the norm
-    of its nominal mean, along a reproducible random direction. S, B and
+    S and B have similar, distinct shapes so their destructive interference
+    leaves a second likelihood basin that shape information only partly lifts.
+    The sole nuisance displaces the NI Gaussian mean by 30% of the norm
+    of its nominal mean, toward S in the paper benchmark. S, B and
     their coherent SBI sum remain fixed under this variation.
     """
 
@@ -63,20 +65,20 @@ class PhysicsModel:
     exposure: float = 1.0
     phase_cos: float = -0.65
     mean_s: tuple[float, ...] = (1.5, 1.1, 0.7)
-    mean_b: tuple[float, ...] = (0.4, 0.65, -0.45)
+    mean_b: tuple[float, ...] = (1.341481215, 0.986772297, 0.654708919)
     mean_ni: tuple[float, ...] = (-0.6, -0.4, 0.1)
     cov_s: tuple[tuple[float, ...], ...] = (
         (0.72, 0.18, 0.06), (0.18, 0.64, 0.10), (0.06, 0.10, 0.81)
     )
     cov_b: tuple[tuple[float, ...], ...] = (
-        (1.00, 0.28, -0.12), (0.28, 0.90, 0.18), (-0.12, 0.18, 1.10)
+        (0.7416, 0.1854, 0.0618), (0.1854, 0.6592, 0.1030), (0.0618, 0.1030, 0.8343)
     )
     cov_ni: tuple[tuple[float, ...], ...] = (
         (1.35, -0.15, 0.12), (-0.15, 1.10, 0.22), (0.12, 0.22, 1.25)
     )
-    shift_fraction_ni: float = 0.1
+    shift_fraction_ni: float = 0.3
     nuisance_seed: int = 314159
-    direction_ni: tuple[float, ...] | None = None
+    direction_ni: tuple[float, ...] | None = (0.792593924, 0.566138517, 0.226455407)
     _precision: dict[str, FloatArray] = field(init=False, repr=False, compare=False)
     _log_norm: dict[str, float] = field(init=False, repr=False, compare=False)
 

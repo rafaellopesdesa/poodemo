@@ -222,7 +222,7 @@ def _toolkit_classes():
             if mu_fixed is None and "mu" not in frozen:
                 # Interference likelihoods can have separated local maxima.
                 # Multi-start fits prevent silently subtracting a local minimum.
-                for mu in (.05, .3, 1.0, 2.5, 3.8):
+                for mu in np.unique(np.r_[1.0, np.linspace(*self.bounds[0], 7)]):
                     if self.bounds[0][0] <= mu <= self.bounds[0][1]:
                         trial = values.copy()
                         trial[0] = mu

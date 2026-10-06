@@ -8,6 +8,7 @@ import argparse
 from poodemo.pipeline import (create_run, generate_data, run_preselection,
                               train_ratios, run_unbinned, run_binning_study,
                               run_spline_study)
+from poodemo.diagnostics import run_estimator_study
 
 
 def main():
@@ -23,6 +24,8 @@ def main():
     print(unbinned["diagnostics"].to_string(index=False))
     bins = run_binning_study(run)
     print(bins["fidelity"].groupby("n_bins").information_fraction.min())
+    estimators = run_estimator_study(run)
+    print(estimators.groupby(["model", "systematics"])[["sigma_mu", "mu_hat"]].agg(["min", "max"]))
     spline = run_spline_study(run)
     print("Spline bins:", spline["n_bins"])
     print(spline["validation"].groupby("variation").max_fraction_error.max())
