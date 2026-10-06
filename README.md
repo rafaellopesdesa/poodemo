@@ -80,12 +80,12 @@ D(x;\mu)=|\sqrt\mu A_S+A_B|^2+D_{NI}
 $$
 
 The Gaussian-amplitude construction makes this intensity positive for
-\(\mu\ge0\). SBI is sampled with rejection sampling using an exact envelope.
+$\mu\ge0$. SBI is sampled with rejection sampling using an exact envelope.
 The number of generated Monte Carlo events is independent of the expected
 number of events in the statistical experiment.
 
 A B shape nuisance shifts its mean by
-\(\pm0.1\|m_B\|v_B\), where \(v_B\) is a fixed, seeded random unit vector.
+$\pm0.1\|m_B\|v_B$, where $v_B$ is a fixed, seeded random unit vector.
 SBI is regenerated coherently with that shifted B amplitude, including the
 changed SBI yield. A second, independent mean-shift nuisance is added for NI
 to support the varied NI histogram study in notebook 5. The nominal and ±1
@@ -141,17 +141,17 @@ z_\eta=\frac1{1+e^{-o_\eta}}.
 $$
 
 Every component includes its yield. The total-rate denominator contains only
-yields, not a residual \(p_{NI}(x)\) factor. Total-count information is retained
+yields, not a residual $p_{NI}(x)$ factor. Total-count information is retained
 by the extended likelihood. Positive score anchors avoid the nonregular
-\(\sqrt\mu\) derivative at \(\mu=0\).
-The default scan covers \(0.1\le\mu\le3\), while the fit domain is
-\(0.001\le\mu\le4\). The lower fit bound is a numerical floor for an interior
-inference demonstration; testing the physical \(\mu=0\) boundary needs a
+$\sqrt\mu$ derivative at $\mu=0$.
+The default scan covers $0.1\le\mu\le3$, while the fit domain is
+$0.001\le\mu\le4$. The lower fit bound is a numerical floor for an interior
+inference demonstration; testing the physical $\mu=0$ boundary needs a
 separate construction.
 
-When testing \(\mu_0\), set \(\eta=\mu_0\), fill its data and templates, and
+When testing $\mu_0$, set $\eta=\mu_0$, fill its data and templates, and
 **freeze that observable throughout both numerator and denominator fits**.
-Spline interpolation is in the observable construction parameter \(\eta\).
+Spline interpolation is in the observable construction parameter $\eta$.
 Physical \(\mu\)-dependence continues to use the exact coefficients above.
 Exhaustive bins have process totals independent of \(\eta\), so interpolated
 bin fractions are constrained to sum to one and multiplied by separate yields.
