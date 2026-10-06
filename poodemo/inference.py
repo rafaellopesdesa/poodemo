@@ -435,6 +435,8 @@ class YieldFractionSpline:
     clipped; a materially negative interpolation raises an error.  The
     final normalization restores the sum of fractions to one, since
     independently interpolated bin fractions need not sum exactly to one.
+    Queries within floating-point roundoff of an anchor restore its stored
+    fractions, including exact zeros shared by nominal and varied templates.
     No eta extrapolation is allowed.
 
     This object interpolates EXPECTED templates only.  Observed/Asimov
@@ -457,6 +459,7 @@ class YieldFractionSpline:
         if not np.allclose(sums, self.totals[None, ...], rtol=1e-8, atol=1e-10):
             raise ValueError("component totals must not change with the observable eta")
         fractions = self.bin_yields / self.totals[None, ..., None]
+        self._anchor_fractions = fractions
         self.active_bins = np.any(fractions > 0, axis=0)
         self._spline = PchipInterpolator(self.etas, fractions, axis=0, extrapolate=False)
 
@@ -465,6 +468,19 @@ class YieldFractionSpline:
         if np.any(~np.isfinite(eta)) or np.any(eta < self.etas[0]) or np.any(eta > self.etas[-1]):
             raise ValueError("eta is outside the spline anchor range; extrapolation is forbidden")
         fractions = self._spline(eta)
+        # Independent linspace grids can represent the same anchor one ULP
+        # apart (e.g. 0.535 vs 0.5349999999999999). PCHIP evaluation near an
+        # empty anchor can leave different tiny residues in nominal/up/down
+        # templates, making multiplicative nuisance interpolation undefined.
+        # Restore the anchor's exact zero pattern; never floor sparse bins.
+        right = np.clip(np.searchsorted(self.etas, eta), 0, len(self.etas) - 1)
+        left = np.maximum(right - 1, 0)
+        nearest = np.where(np.abs(eta - self.etas[left]) <= np.abs(eta - self.etas[right]),
+                           left, right)
+        anchor_tolerance = 8 * np.finfo(float).eps * np.maximum(1., np.abs(self.etas[nearest]))
+        at_anchor = np.abs(eta - self.etas[nearest]) <= anchor_tolerance
+        mask = at_anchor.reshape(eta.shape + (1,) * (self.bin_yields.ndim - 1))
+        fractions = np.where(mask, self._anchor_fractions[nearest], fractions)
         tolerance = 64 * np.finfo(float).eps
         if np.any(~np.isfinite(fractions)) or np.any(fractions < -tolerance):
             raise FloatingPointError("fraction PCHIP violated nonnegativity beyond roundoff")

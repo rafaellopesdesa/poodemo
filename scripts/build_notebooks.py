@@ -880,8 +880,10 @@ def build():
         the residual loss. The splines are shape-preserving piecewise cubic
         Hermite interpolants (PCHIP) of nonnegative bin fractions, followed by
         explicit normalization. This preserves zero-valued anchors without a
-        logarithmic floor. No extrapolation beyond the anchor
-        range is permitted.
+        logarithmic floor. Queries that differ from an anchor only by
+        floating-point roundoff reuse its stored bin fractions, so nominal
+        and varied templates keep their exact empty-bin support. No
+        extrapolation beyond the anchor range is permitted.
         """),
         code(r'''
         from poodemo.data import PROCESSES

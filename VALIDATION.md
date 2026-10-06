@@ -5,6 +5,36 @@ PyTorch Lightning 2.5.5, PyTorch 2.14.1 (CPU execution), NumPy 2.3.5,
 SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:
 `fc09848fc6540fd32310faebbe9db6eea7ecd17b`.
 
+## Notebook 5 spline-anchor regression
+
+The committed notebook stopped after eta=0.4625 with `profile fit failed:
+conditional=No free parameters; unrestricted=No scalar bracket converged`.
+This was reproduced at the next scan point, `0.5349999999999999`, which is
+one floating-point step below the spline anchor `0.535`. PCHIP left tiny
+residues in otherwise empty bins, differing among the nominal and varied
+templates. The exponential-polynomial interpolation then rejected their
+inconsistent support or nonpositive ratios, making every likelihood
+evaluation invalid.
+
+Spline queries within roundoff of an anchor now restore its stored fractions,
+including exact zeros. This also applies at endpoints. No positive floor is
+added to empty bins; interpolation away from anchors and the prohibition on
+extrapolation are unchanged.
+
+**23 targeted tests passed**, including four new sparse-template regression
+cases covering exact and one-step-adjacent anchors, scalar and batched queries,
+stat-only/profiled fits, and strict rejection of extrapolation.
+
+The failure was reproduced using the existing smoke quadrature with 128 bins
+and the production eta grids (61 spline grid points and 41 scan grid points,
+plus the truth anchor). After the fix, **all notebook 5 analysis cells executed**
+and all **84 stat-only/profiled direct-versus-spline comparisons were finite**.
+This checks execution and numerical stability using smoke data, not a rerun
+of the user's production samples. The largest spline/direct test-statistic
+difference in this finer-grid smoke check was 0.800; interpolation accuracy
+remains a separate diagnostic. The saved failed-cell output was cleared;
+other completed notebook outputs were retained.
+
 ## Colab JAX plugin regression
 
 Notebook 3's committed output showed an incompatible CUDA 13 JAX plugin calling

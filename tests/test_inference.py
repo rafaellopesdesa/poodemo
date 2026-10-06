@@ -188,7 +188,7 @@ def test_fraction_spline_handles_zero_anchor_bins_without_log_floor():
     spline = YieldFractionSpline(etas, total * fractions)
     restored = spline(etas)
     np.testing.assert_allclose(restored, total * fractions, rtol=2e-15, atol=2e-14)
-    np.testing.assert_allclose(restored[fractions == 0], 0, atol=2e-14)
+    np.testing.assert_array_equal(restored[fractions == 0], 0)
     intermediate = spline(np.linspace(etas[0], etas[-1], 151))
     assert np.all(intermediate >= 0)
     np.testing.assert_array_equal(intermediate[:, -1], 0)
@@ -196,6 +196,68 @@ def test_fraction_spline_handles_zero_anchor_bins_without_log_floor():
     # An empty endpoint transitioning to a populated bin has a finite,
     # positive interpolation; no arbitrary positive anchor floor enters.
     assert spline(0.5)[0] > 0
+
+
+def sparse_spline_templates():
+    # A moving bin becomes empty at eta=.535. The nuisance templates have
+    # common support, but different slopes as they approach the empty bin.
+    etas = np.array([.1, .39, .535, 3.])
+    fractions = np.array([[.2, .8, 0], [.5, .5, 0],
+                          [0, 1, 0], [.4, .6, 0]])
+    nominal = fractions[:, None, :] * np.array([3., 11., 8., 12.])[None, :, None]
+    down, up = nominal.copy(), nominal.copy()
+    lower, upper = fractions.copy(), fractions.copy()
+    lower[:2, :2] = [[.1, .9], [.3, .7]]
+    upper[:2, :2] = [[.4, .6], [.7, .3]]
+    down[:, 3] = 10 * lower
+    up[:, 3] = 15 * upper
+    templates = np.stack([nominal, down, up], axis=1)
+    return etas, templates, YieldFractionSpline(etas, templates)
+
+
+def test_sparse_spline_preserves_exact_support_at_float_equivalent_anchors():
+    etas, templates, spline = sparse_spline_templates()
+    # The independent 41-point fit grid and 61-point spline grid used in
+    # production represent this same anchor one floating-point step apart.
+    assert np.linspace(.1, 3, 41)[6] == np.nextafter(etas[2], -np.inf)
+    queries = np.array([[etas[0], np.nextafter(etas[0], np.inf), etas[1]],
+                        [np.nextafter(etas[2], -np.inf), etas[2],
+                         np.nextafter(etas[2], np.inf)],
+                        [np.nextafter(etas[-1], -np.inf), etas[-1], etas[-1]]])
+    indices = np.argmin(np.abs(queries[..., None] - etas), axis=-1)
+    expected = templates[indices]
+    restored = spline(queries)
+    np.testing.assert_array_equal(restored == 0, expected == 0)
+    np.testing.assert_allclose(restored, expected, rtol=2e-15, atol=0)
+    for eta, index in zip(queries.flat, indices.flat):
+        scalar = spline(eta)
+        np.testing.assert_array_equal(scalar == 0, templates[index] == 0)
+        np.testing.assert_allclose(scalar, templates[index], rtol=2e-15, atol=0)
+    # Genuine interior values still interpolate, and snapping is not allowed
+    # to admit even a one-ULP extrapolation beyond the supported domain.
+    assert np.all(spline(.53)[..., 0] > 0)
+    for outside in (np.nextafter(etas[0], -np.inf), np.nextafter(etas[-1], np.inf)):
+        with pytest.raises(ValueError, match="extrapolation"):
+            spline(outside)
+
+
+@pytest.mark.parametrize("query", [.535, np.nextafter(.535, -np.inf),
+                                  np.nextafter(.535, np.inf)])
+def test_sparse_spline_anchor_support_allows_nominal_and_profile_fits(query):
+    _, templates, spline = sparse_spline_templates()
+    nominal, down, up = spline(query)
+    # Refill data from the exact anchor; do not make a self-Asimov data set
+    # from interpolated templates, which could hide a support mismatch.
+    truth = templates[2, 0, 1] + templates[2, 0, 3]
+    model = TemplateLikelihood(nominal, down[None], up[None], np.ones(3), truth)
+    assert model.nll(1, [0]) == pytest.approx(0., abs=1e-12)
+    assert np.all(np.isfinite([model.nll(1, [alpha]) for alpha in (-1., .4, 1.)]))
+    for systematics in (False, True):
+        result = model.test_statistic(.535, systematics=systematics)
+        assert result["null_fit"].success
+        assert result["best_fit"].success
+        assert np.isfinite(result["t"]) and result["t"] > 0
+        assert result["best_fit"].mu == pytest.approx(1., abs=2e-4)
 
 
 def test_histogram_rejects_unaccounted_tail_events():
