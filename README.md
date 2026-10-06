@@ -18,7 +18,8 @@ Drive; the source lives in this repository.
 1. Open notebook 1, then run notebooks in numerical order. For a private
    repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
-2. Choose a GPU runtime for notebooks 2–3. The other notebooks can use a CPU.
+2. Choose a GPU runtime for notebooks 2–3. PyTorch uses the GPU for training;
+   JAX likelihood fits use the CPU. The other notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
    `RUN_NAME = "demo-ni-v1"` and `MODE = "production"`. For an initial short check,
    choose `MODE = "smoke"` and a distinct run name such as `smoke-ni-v1`.
@@ -38,6 +39,12 @@ Each notebook can start in a fresh Colab runtime. Its bootstrap downloads the
 source and installs the pinned toolkit. An existing `/content/poodemo` checkout
 is reused; remove that temporary checkout to fetch a newer source version.
 Completed data files and stage products can be reused after disconnection.
+Setup installs matching JAX/JAXlib 0.5.3 packages, removes incompatible
+preinstalled JAX CUDA plugins, and checks the live JAX backend before training.
+These changes leave PyTorch's GPU support available. If you encountered the
+`register_custom_type_handler` JAX plugin error, restart the runtime once,
+reopen the updated notebook, and rerun setup with the same `RUN_NAME`.
+Completed networks and samples in Drive are reused; retraining is not required.
 Selected-data and quadrature caches record the selector fingerprint and reject
 stale reuse after its model or threshold changes.
 Use a new run name when changing the configuration: incompatible saved settings
@@ -234,7 +241,8 @@ python -m pytest
 python scripts/smoke.py --root /tmp/poodemo-smoke-ni
 ```
 
-Notebooks are committed without execution output or credentials. Toolkit
+The notebook generator produces clean notebooks; user-committed numerical
+outputs and plots are retained when applying targeted fixes. Toolkit
 source is pinned to commit `fc09848fc6540fd32310faebbe9db6eea7ecd17b`;
 `requirements-colab.txt` includes the dependencies its package metadata does
 not declare. Compatible PyTorch ranges allow Colab's GPU-enabled build to be

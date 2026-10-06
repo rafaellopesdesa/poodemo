@@ -19,6 +19,11 @@ SETUP_INTRO = r"""
 ### Runtime and persistent run
 
 In Colab, choose **Runtime → Change runtime type → GPU** for notebooks 2–3.
+PyTorch uses the GPU for training; the JAX likelihood fits run on the CPU.
+Setup removes preinstalled JAX CUDA plugins that are incompatible with the pinned
+JAX version, then checks the JAX runtime before training. If an earlier session
+reported a JAX plugin error, restart the runtime once before rerunning setup.
+Keep the same run name: saved samples and trained networks are reused.
 The source checkout lives in the temporary runtime; **datasets, checkpoints,
 workspace files, and results live in Google Drive**. Use the same `RUN_NAME`
 and `MODE` in every notebook. Set `MODE = "smoke"` for a short workflow check;
@@ -57,6 +62,9 @@ except ImportError:
     IN_COLAB = False
 
 if IN_COLAB:
+    # JAX likelihood fits use the validated CPU runtime. This does not change
+    # PyTorch's CUDA visibility or GPU training.
+    os.environ["JAX_PLATFORMS"] = "cpu"
     from google.colab import drive
     drive.mount("/content/drive", force_remount=False)
     ROOT = Path(os.environ.get("POODEMO_ROOT", f"/content/drive/MyDrive/poodemo/runs/{RUN_NAME}"))
@@ -141,8 +149,25 @@ if IN_COLAB:
 
     import subprocess
     if os.environ.get("POODEMO_SKIP_INSTALL") != "1":
+        # JAX discovers plugins even with JAX_PLATFORMS=cpu. Colab can retain
+        # newer CUDA plugins when pip installs an older jax/jaxlib pair.
+        subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "-q",
+                               "jax-cuda12-plugin", "jax-cuda12-pjrt",
+                               "jax-cuda13-plugin", "jax-cuda13-pjrt"])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", str(REPO_DIR / "requirements-colab.txt")])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(REPO_DIR)])
+
+        # Check the live notebook kernel before any expensive network training.
+        import jax
+        import jaxlib
+        if jax.__version__ != "0.5.3" or jaxlib.__version__ != "0.5.3":
+            raise RuntimeError("JAX packages are stale in this kernel. Restart the runtime and rerun setup.")
+        jax.config.update("jax_platforms", "cpu")
+        jax.config.update("jax_enable_x64", True)
+        jax_devices = jax.devices()
+        if any(device.platform != "cpu" for device in jax_devices):
+            raise RuntimeError("Expected the CPU JAX backend for likelihood fits. Restart the runtime and rerun setup.")
+        print(f"JAX {jax.__version__} / jaxlib {jaxlib.__version__}: {jax_devices}")
 
     # A new editable install is not activated in an already-running kernel.
     # Expose the inner package directly, including after a failed import cached

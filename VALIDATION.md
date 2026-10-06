@@ -5,6 +5,24 @@ PyTorch Lightning 2.5.5, PyTorch 2.14.1 (CPU execution), NumPy 2.3.5,
 SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:
 `fc09848fc6540fd32310faebbe9db6eea7ecd17b`.
 
+## Colab JAX plugin regression
+
+Notebook 3's committed output showed an incompatible CUDA 13 JAX plugin calling
+the missing `jaxlib.xla_client.register_custom_type_handler` API. The traceback
+was logged during plugin discovery; no completed unbinned-fit output was saved.
+The setup now removes the four JAX CUDA 12/13 plugin/PJRT distributions, pins
+both JAX and JAXlib to 0.5.3, selects CPU likelihood fits, and checks the live
+kernel before training. PyTorch CUDA support and saved training products are
+retained. A runtime restart is needed after the earlier plugin error.
+
+The regression reproduces the reported plugin failure using real JAX with an
+isolated incompatible plugin fixture, including when `JAX_PLATFORMS=cpu` is
+set. Setup recovery and JIT execution are checked without a GPU or live Colab
+account. **Nine targeted tests passed:** the new JAX regression, three notebook
+bootstrap checks, and five actual toolkit likelihood/fit checks. Completed
+notebook diagnostics and figures are retained; transient
+training-progress widget state and the superseded error output are removed.
+
 ## Colab import regression
 
 The output committed in notebook 1 reproduced `ModuleNotFoundError: No module
@@ -22,8 +40,8 @@ All regenerated notebooks also pass format and Python syntax validation.
 
 ## NI-only scientific workflow checks
 
-The following results are from the NI-only revision before the setup-only import
-fix; the scientific code and configuration are unchanged by that fix.
+The following results are from the NI-only revision before the setup-only
+fixes; the scientific code and configuration are unchanged by those fixes.
 
 - **33 automated tests passed.** These include coherent amplitude positivity,
   Gaussian overlap normalization, exact SBI sampling moments, analytic score
@@ -43,7 +61,7 @@ fix; the scientific code and configuration are unchanged by that fix.
   training the selector and all five ratio tasks, constructing workspaces,
   fitting the Asimov scans, filling and fitting histograms, fitting splines,
   and producing all eight PDF figures. This was a fresh NI-only run with six
-  samples and one nuisance parameter. Notebook files remain free of outputs.
+  samples and one nuisance parameter. Those test executions did not save outputs.
 - Notebook format and Python syntax were validated. Models and generated
   samples are runtime products and are not committed to the repository.
 
