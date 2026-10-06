@@ -114,7 +114,9 @@ def create_run(root, mode="production", overrides=None):
     from importlib.metadata import version, PackageNotFoundError
     import platform
     versions = {}
-    for name in ("numpy", "scipy", "pandas", "torch", "pytorch-lightning", "jax", "jaxlib", "iminuit", "nsbi-common-utils"):
+    for name in ("numpy", "scipy", "pandas", "torch", "pytorch-lightning", "jax", "jaxlib",
+                 "jax-cuda12-plugin", "jax-cuda12-pjrt", "jax-cuda13-plugin", "jax-cuda13-pjrt",
+                 "iminuit", "nsbi-common-utils"):
         try:
             versions[name] = version(name)
         except PackageNotFoundError:

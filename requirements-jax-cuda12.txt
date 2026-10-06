@@ -1,0 +1,7 @@
+# Install together with requirements-colab.txt on an NVIDIA GPU runtime.
+# Explicit with-cuda fixes the 0.5.3 extras-name issue documented by JAX:
+# https://github.com/jax-ml/jax/issues/27874
+jax==0.5.3
+jaxlib==0.5.3
+jax-cuda12-plugin[with-cuda]==0.5.3
+jax-cuda12-pjrt==0.5.3

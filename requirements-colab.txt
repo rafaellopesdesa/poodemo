@@ -14,8 +14,7 @@ joblib>=1.4,<2
 mplhep>=0.4,<1
 uproot>=5.5,<6
 awkward>=2.7,<3
-# CPU likelihood fits; Colab setup removes incompatible preinstalled JAX GPU plugins.
-# PyTorch retains its CUDA-enabled build for network training.
+# Shared CPU/GPU core. The notebook adds the matched CUDA 12 plugin on GPU runtimes.
 jax==0.5.3
 jaxlib==0.5.3
 iminuit>=2.30,<3

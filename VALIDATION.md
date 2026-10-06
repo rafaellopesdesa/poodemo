@@ -10,18 +10,31 @@ SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:
 Notebook 3's committed output showed an incompatible CUDA 13 JAX plugin calling
 the missing `jaxlib.xla_client.register_custom_type_handler` API. The traceback
 was logged during plugin discovery; no completed unbinned-fit output was saved.
-The setup now removes the four JAX CUDA 12/13 plugin/PJRT distributions, pins
-both JAX and JAXlib to 0.5.3, selects CPU likelihood fits, and checks the live
-kernel before training. PyTorch CUDA support and saved training products are
-retained. A runtime restart is needed after the earlier plugin error.
+The initial repair selected CPU fits. The current setup selects GPU when an
+NVIDIA device is detected, installs matching JAX/JAXlib/CUDA 12 plugin/PJRT
+packages at 0.5.3, and removes incompatible plugins. CPU remains available for
+CPU runtimes or an explicit choice. A GPU initialization error is reported
+instead of silently falling back. The live kernel checks double-precision JIT
+values and gradients on the requested device before training. Saved training
+products remain compatible; restart once after the earlier error or CPU setup.
 
 The regression reproduces the reported plugin failure using real JAX with an
 isolated incompatible plugin fixture, including when `JAX_PLATFORMS=cpu` is
-set. Setup recovery and JIT execution are checked without a GPU or live Colab
-account. **Nine targeted tests passed:** the new JAX regression, three notebook
-bootstrap checks, and five actual toolkit likelihood/fit checks. Completed
-notebook diagnostics and figures are retained; transient
-training-progress widget state and the superseded error output are removed.
+set. Setup recovery and CPU JIT execution are checked without a GPU or live
+Colab account; GPU selection and failure handling use simulated devices in the
+bootstrap tests. The four-package CUDA stack resolves successfully for Python
+3.13 Linux x86_64, and matching wheels are available. The explicit hyphenated
+`with-cuda` extra follows the JAX maintainers' documented 0.5.3 installation fix.
+
+**16 targeted tests passed for this GPU setup revision:** five JAX environment
+checks, three notebook bootstrap checks, five toolkit likelihood checks, and
+three pipeline checks. All five notebooks pass format and Python syntax
+validation; analysis cells and their saved outputs are unchanged.
+
+**No physical GPU is available in this validation environment.** CUDA execution
+and CPU/GPU timing have not been measured here. The Colab preflight verifies
+actual GPU execution when the notebooks run there. Completed notebook
+diagnostics and figures are retained.
 
 ## Colab import regression
 

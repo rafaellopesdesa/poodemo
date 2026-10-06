@@ -19,10 +19,13 @@ SETUP_INTRO = r"""
 ### Runtime and persistent run
 
 In Colab, choose **Runtime → Change runtime type → GPU** for notebooks 2–3.
-PyTorch uses the GPU for training; the JAX likelihood fits run on the CPU.
-Setup removes preinstalled JAX CUDA plugins that are incompatible with the pinned
-JAX version, then checks the JAX runtime before training. If an earlier session
-reported a JAX plugin error, restart the runtime once before rerunning setup.
+Both PyTorch training and JAX likelihood fits use the GPU when available.
+`JAX_BACKEND = "auto"` detects the Colab NVIDIA GPU; choose `"gpu"` to require it,
+or `"cpu"` for an explicit CPU run. Setup installs matching JAX/JAXlib and CUDA 12
+plugin packages, then checks double-precision JIT computation and gradients on
+the selected device before training. GPU initialization failures are reported
+instead of silently switching to CPU. Restart the runtime once when switching
+from the previous CPU-only setup or after a JAX plugin error.
 Keep the same run name: saved samples and trained networks are reused.
 The source checkout lives in the temporary runtime; **datasets, checkpoints,
 workspace files, and results live in Google Drive**. Use the same `RUN_NAME`
@@ -54,6 +57,7 @@ from pathlib import Path
 RUN_NAME = "demo-ni-v1"
 MODE = os.environ.get("POODEMO_MODE", "production")  # production or smoke
 CONFIG_OVERRIDES = {}  # e.g. {"quadrature_per_process": 500_000, "epochs": 150}
+JAX_BACKEND = os.environ.get("POODEMO_JAX_BACKEND", "auto")  # auto, gpu, or cpu
 
 try:
     import google.colab
@@ -62,9 +66,24 @@ except ImportError:
     IN_COLAB = False
 
 if IN_COLAB:
-    # JAX likelihood fits use the validated CPU runtime. This does not change
-    # PyTorch's CUDA visibility or GPU training.
-    os.environ["JAX_PLATFORMS"] = "cpu"
+    import subprocess
+    requested_backend = JAX_BACKEND.strip().lower()
+    if requested_backend not in ("auto", "gpu", "cpu"):
+        raise ValueError("JAX_BACKEND must be auto, gpu, or cpu")
+    selected_backend = requested_backend
+    if requested_backend == "auto":
+        try:
+            gpu_probe = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                       capture_output=True, text=True, timeout=10)
+            gpu_present = gpu_probe.returncode == 0 and bool(gpu_probe.stdout.strip())
+        except (OSError, subprocess.TimeoutExpired):
+            gpu_present = False
+        selected_backend = "gpu" if gpu_present else "cpu"
+    # CUDA-only selection fails visibly if initialization fails. Keep PyTorch's
+    # CUDA visibility and avoid JAX reserving most GPU memory before training.
+    jax_platform = "cuda" if selected_backend == "gpu" else "cpu"
+    os.environ["JAX_PLATFORMS"] = jax_platform
+    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     from google.colab import drive
     drive.mount("/content/drive", force_remount=False)
     ROOT = Path(os.environ.get("POODEMO_ROOT", f"/content/drive/MyDrive/poodemo/runs/{RUN_NAME}"))
@@ -147,27 +166,58 @@ if IN_COLAB:
             shutil.copytree(candidates[0], REPO_DIR, dirs_exist_ok=True)
         del archive_bytes
 
-    import subprocess
     if os.environ.get("POODEMO_SKIP_INSTALL") != "1":
-        # JAX discovers plugins even with JAX_PLATFORMS=cpu. Colab can retain
-        # newer CUDA plugins when pip installs an older jax/jaxlib pair.
-        subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "-q",
-                               "jax-cuda12-plugin", "jax-cuda12-pjrt",
-                               "jax-cuda13-plugin", "jax-cuda13-pjrt"])
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", str(REPO_DIR / "requirements-colab.txt")])
+        from importlib.metadata import version, PackageNotFoundError
+        # JAX discovers every installed plugin, even when selecting CPU.
+        # Retain already-matched CUDA 12 packages when rerunning GPU setup.
+        remove_plugins = []
+        for package in ("jax-cuda12-plugin", "jax-cuda12-pjrt", "jax-cuda13-plugin", "jax-cuda13-pjrt"):
+            try:
+                installed_version = version(package)
+            except PackageNotFoundError:
+                continue
+            if not (selected_backend == "gpu" and package.startswith("jax-cuda12-") and installed_version == "0.5.3"):
+                remove_plugins.append(package)
+        if remove_plugins:
+            subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "-q", *remove_plugins])
+        gpu_requirements = (["jax==0.5.3", "jaxlib==0.5.3",
+                             "jax-cuda12-plugin[with-cuda]==0.5.3", "jax-cuda12-pjrt==0.5.3"]
+                            if selected_backend == "gpu" else [])
+        # Resolve with the base requirements so PyTorch's CUDA dependencies are
+        # considered together with JAX's. Avoid blanket --upgrade changes.
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r",
+                               str(REPO_DIR / "requirements-colab.txt"), *gpu_requirements])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(REPO_DIR)])
 
         # Check the live notebook kernel before any expensive network training.
         import jax
         import jaxlib
+        import jax.numpy as jnp
         if jax.__version__ != "0.5.3" or jaxlib.__version__ != "0.5.3":
             raise RuntimeError("JAX packages are stale in this kernel. Restart the runtime and rerun setup.")
-        jax.config.update("jax_platforms", "cpu")
+        if selected_backend == "gpu":
+            for package in ("jax-cuda12-plugin", "jax-cuda12-pjrt"):
+                if version(package) != "0.5.3":
+                    raise RuntimeError(f"{package} must match JAX 0.5.3. Restart the runtime and rerun setup.")
+        jax.config.update("jax_platforms", jax_platform)
         jax.config.update("jax_enable_x64", True)
-        jax_devices = jax.devices()
-        if any(device.platform != "cpu" for device in jax_devices):
-            raise RuntimeError("Expected the CPU JAX backend for likelihood fits. Restart the runtime and rerun setup.")
-        print(f"JAX {jax.__version__} / jaxlib {jaxlib.__version__}: {jax_devices}")
+        try:
+            jax_devices = jax.devices()
+            if not jax_devices or any(device.platform != selected_backend for device in jax_devices):
+                raise RuntimeError(f"Expected {selected_backend} devices; found {jax_devices}")
+            probe_value, probe_gradient = jax.jit(jax.value_and_grad(lambda x: jnp.sum(x*x)))(
+                jnp.asarray([1., 2., 3.], dtype=jnp.float64))
+            probe_gradient.block_until_ready()
+            if (float(probe_value) != 14. or list(probe_gradient) != [2., 4., 6.]
+                    or probe_gradient.dtype != jnp.float64
+                    or any(device.platform != selected_backend for device in probe_gradient.devices())):
+                raise RuntimeError("JAX double-precision value/gradient check failed")
+        except Exception as error:
+            raise RuntimeError(
+                f"JAX {selected_backend} startup failed. Select a Colab GPU runtime if requesting GPU, "
+                "then restart the runtime and rerun setup. Use JAX_BACKEND='cpu' only for an intentional CPU run."
+            ) from error
+        print(f"JAX {jax.__version__} / jaxlib {jaxlib.__version__}: backend={selected_backend}, {jax_devices}; float64 JIT/gradient OK")
 
     # A new editable install is not activated in an already-running kernel.
     # Expose the inner package directly, including after a failed import cached

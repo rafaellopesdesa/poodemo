@@ -18,8 +18,10 @@ Drive; the source lives in this repository.
 1. Open notebook 1, then run notebooks in numerical order. For a private
    repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
-2. Choose a GPU runtime for notebooks 2–3. PyTorch uses the GPU for training;
-   JAX likelihood fits use the CPU. The other notebooks can use a CPU runtime.
+2. Choose a GPU runtime for notebooks 2–3. Both PyTorch training and JAX
+   likelihood fits use the GPU. `JAX_BACKEND = "auto"` detects an NVIDIA GPU;
+   use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
+   The other notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
    `RUN_NAME = "demo-ni-v1"` and `MODE = "production"`. For an initial short check,
    choose `MODE = "smoke"` and a distinct run name such as `smoke-ni-v1`.
@@ -39,11 +41,15 @@ Each notebook can start in a fresh Colab runtime. Its bootstrap downloads the
 source and installs the pinned toolkit. An existing `/content/poodemo` checkout
 is reused; remove that temporary checkout to fetch a newer source version.
 Completed data files and stage products can be reused after disconnection.
-Setup installs matching JAX/JAXlib 0.5.3 packages, removes incompatible
-preinstalled JAX CUDA plugins, and checks the live JAX backend before training.
-These changes leave PyTorch's GPU support available. If you encountered the
-`register_custom_type_handler` JAX plugin error, restart the runtime once,
-reopen the updated notebook, and rerun setup with the same `RUN_NAME`.
+GPU setup installs JAX, JAXlib, the CUDA 12 plugin, and CUDA 12 PJRT at version
+0.5.3. It removes incompatible preinstalled JAX plugins and checks a
+double-precision JIT value and gradient on the selected device before training.
+A detected/requested GPU that fails to initialize raises an error rather than
+silently running the fit on CPU. Startup prints `backend=gpu` on a GPU runtime.
+JAX memory preallocation is disabled by default so it can share the GPU with
+PyTorch. If switching from the previous CPU-only setup or recovering from the
+`register_custom_type_handler` error, restart the runtime once, reopen the
+updated notebook, and rerun setup with the same `RUN_NAME`.
 Completed networks and samples in Drive are reused; retraining is not required.
 Selected-data and quadrature caches record the selector fingerprint and reject
 stale reuse after its model or threshold changes.
@@ -220,6 +226,20 @@ python -m pip install -e '.[dev]'
 export POODEMO_ROOT=/absolute/path/to/poodemo-runs/smoke-ni-v1
 export POODEMO_MODE=smoke
 ```
+
+For a local NVIDIA GPU installation, resolve both requirement files together:
+
+```bash
+python -m pip install -r requirements-colab.txt -r requirements-jax-cuda12.txt
+```
+
+The explicit `jax-cuda12-plugin[with-cuda]==0.5.3` requirement follows the
+[JAX maintainers' workaround](https://github.com/jax-ml/jax/issues/27874) for
+the extras-name issue in that release. JAX/JAXlib and both CUDA plugin packages
+must have matching versions; incompatible preinstalled CUDA 13 plugins must be
+removed. The Colab setup handles this automatically. Local users should select
+their backend before importing JAX; the automatic setup described above runs
+in Colab.
 
 Run the notebooks in Jupyter with that environment, or use the high-level
 functions in `poodemo.pipeline`. `create_run` validates and saves the run
