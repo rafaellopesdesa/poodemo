@@ -19,7 +19,7 @@ import numpy as np
 
 TOOLKIT_COMMIT = "fc09848fc6540fd32310faebbe9db6eea7ecd17b"
 PROCESSES = ("S", "SBI", "B", "NI")
-NUISANCES = ("alpha_B", "alpha_NI")
+NUISANCES = ("alpha_NI",)
 
 
 @dataclass
@@ -146,6 +146,8 @@ def _toolkit_classes():
                 value = (2.0 * (rate - observed_rate
                          - jnp.sum(data["weights"] * jnp.log(
                              safe_ratio / data["truth_ratio"])))
+                         # Standard-normal auxiliary measurement at zero:
+                         # -2 log[G(alpha_NI;0,1)/G(0;0,1)] = alpha_NI**2.
                          + jnp.sum(param_vec[1:] ** 2))
                 return jnp.where(valid & jnp.isfinite(value), value, jnp.inf)
 
@@ -153,7 +155,7 @@ def _toolkit_classes():
             return (jax.jit(objective),
                     jax.jit(jax.value_and_grad(objective, argnums=0)))
 
-        def component_intensity_ratios(self, alpha=(0.0, 0.0)):
+        def component_intensity_ratios(self, alpha=(0.0,)):
             """Return lambda_j(alpha) p_j(x;alpha) / p_S(x;0)."""
             fields, _, valid = self._jit_components(
                 jnp.asarray([1.0, *alpha]), self._model_data
@@ -297,7 +299,7 @@ def _toolkit_classes():
             if parameter_name != "mu" or isConstrainedNP:
                 raise ValueError("This demo adapter profiles the POI mu only")
             if freeze_params and set(freeze_params) != set(NUISANCES):
-                raise ValueError("Freeze both nuisances or neither for this scan")
+                raise ValueError("Freeze alpha_NI or leave it free for this scan")
             grid = np.linspace(*bound_range, int(size))
             main = self.scan(grid, systematics=not bool(freeze_params), strategy=fit_strategy)
             if doStatOnly:
@@ -310,11 +312,11 @@ def _toolkit_classes():
 
 def build_workspace(root: str | Path, nominal, down, up, quadrature_weights,
                     truth_intensity, *, parameter_bounds=((1.e-3, 4.0),
-                    (-3.0, 3.0), (-3.0, 3.0))) -> dict:
+                    (-3.0, 3.0))) -> dict:
     """Build/write an actual toolkit workspace from common quadrature arrays.
 
-    ``nominal`` is (4,N), in S,SBI,B,NI order. ``down``/``up`` are (2,4,N),
-    in alpha_B,alpha_NI order, including identical nominal fields for unaffected
+    ``nominal`` is (4,N), in S,SBI,B,NI order. ``down``/``up`` are (1,4,N),
+    with the single alpha_NI variation, including nominal fields for unaffected
     components. All entries are *absolute intensities*, not normalized PDFs.
     ``quadrature_weights`` integrate dx at the common proposal points; the
     observed Asimov weights are quadrature_weights * truth_intensity.
@@ -331,15 +333,15 @@ def build_workspace(root: str | Path, nominal, down, up, quadrature_weights,
     weights = np.asarray(quadrature_weights, dtype=np.float64)
     truth = np.asarray(truth_intensity, dtype=np.float64)
     n = len(weights)
-    if (nominal.shape != (4, n) or down.shape != (2, 4, n)
-            or up.shape != (2, 4, n) or truth.shape != (n,)):
-        raise ValueError("Expected nominal(4,N), down/up(2,4,N), weights/truth(N)")
+    if (nominal.shape != (4, n) or down.shape != (1, 4, n)
+            or up.shape != (1, 4, n) or truth.shape != (n,)):
+        raise ValueError("Expected nominal(4,N), down/up(1,4,N), weights/truth(N)")
     for name, a in [("nominal", nominal), ("down", down), ("up", up),
                     ("quadrature_weights", weights), ("truth_intensity", truth)]:
         if not np.all(np.isfinite(a)) or np.any(a <= 0):
             raise ValueError(f"{name} must contain positive finite values")
     bounds = np.asarray(parameter_bounds, dtype=float)
-    if (bounds.shape != (3, 2) or np.any(bounds[:, 0] >= bounds[:, 1])
+    if (bounds.shape != (2, 2) or np.any(bounds[:, 0] >= bounds[:, 1])
             or bounds[0, 0] <= 0):
         raise ValueError("Use finite ordered bounds with a strictly positive mu floor")
     if not np.all(np.isfinite(bounds)):

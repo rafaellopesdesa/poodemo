@@ -52,10 +52,9 @@ class PhysicsModel:
     ``arccos(phase_cos)``.  At the default phase, destructive interference
     cannot create exact zeros in ``SBI``.  ``exposure`` scales every yield.
 
-    A unit nuisance shift displaces the relevant Gaussian mean by 10% of
-    the norm of its nominal mean, along a reproducible random direction.
-    The B displacement also changes SBI, including its analytic yield.
-    NI has its own independent shape variation and does not enter SBI.
+    The sole nuisance displaces the NI Gaussian mean by 10% of the norm
+    of its nominal mean, along a reproducible random direction. S, B and
+    their coherent SBI sum remain fixed under this variation.
     """
 
     lambda_s: float = 100.0
@@ -75,10 +74,8 @@ class PhysicsModel:
     cov_ni: tuple[tuple[float, ...], ...] = (
         (1.35, -0.15, 0.12), (-0.15, 1.10, 0.22), (0.12, 0.22, 1.25)
     )
-    shift_fraction_b: float = 0.1
     shift_fraction_ni: float = 0.1
     nuisance_seed: int = 314159
-    direction_b: tuple[float, ...] | None = None
     direction_ni: tuple[float, ...] | None = None
     _precision: dict[str, FloatArray] = field(init=False, repr=False, compare=False)
     _log_norm: dict[str, float] = field(init=False, repr=False, compare=False)
@@ -94,9 +91,8 @@ class PhysicsModel:
             raise ValueError("S and B cannot both have zero yield.")
         if not np.isfinite(self.phase_cos) or not -1 <= self.phase_cos <= 1:
             raise ValueError("phase_cos must lie in [-1, 1].")
-        for name in ("shift_fraction_b", "shift_fraction_ni"):
-            if not np.isfinite(getattr(self, name)) or getattr(self, name) < 0:
-                raise ValueError(f"{name} must be finite and nonnegative.")
+        if not np.isfinite(self.shift_fraction_ni) or self.shift_fraction_ni < 0:
+            raise ValueError("shift_fraction_ni must be finite and nonnegative.")
 
         precision, log_norm = {}, {}
         for name in ("s", "b", "ni"):
@@ -119,16 +115,16 @@ class PhysicsModel:
         object.__setattr__(self, "_precision", precision)
         object.__setattr__(self, "_log_norm", log_norm)
 
+        # Preserve the NI direction from the original seeded model. The first
+        # three draws are reserved so removing another nuisance does not change NI.
         rng = np.random.default_rng(self.nuisance_seed)
-        for name in ("b", "ni"):
-            supplied = getattr(self, f"direction_{name}")
-            generated = rng.normal(size=3)
-            direction = generated if supplied is None else np.asarray(supplied, dtype=float)
-            if (direction.shape != (3,) or not np.all(np.isfinite(direction))
-                    or np.linalg.norm(direction) == 0):
-                raise ValueError(f"direction_{name} must be a nonzero finite 3-vector.")
-            direction = direction / np.linalg.norm(direction)
-            object.__setattr__(self, f"direction_{name}", tuple(direction.tolist()))
+        generated = rng.normal(size=(2, 3))[1]
+        direction = generated if self.direction_ni is None else np.asarray(self.direction_ni, dtype=float)
+        if (direction.shape != (3,) or not np.all(np.isfinite(direction))
+                or np.linalg.norm(direction) == 0):
+            raise ValueError("direction_ni must be a nonzero finite 3-vector.")
+        direction = direction / np.linalg.norm(direction)
+        object.__setattr__(self, "direction_ni", tuple(direction.tolist()))
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable, reproducible model configuration."""
@@ -144,39 +140,38 @@ class PhysicsModel:
     def from_dict(cls, config: Mapping[str, Any]) -> "PhysicsModel":
         return cls(**dict(config))
 
-    def mean(self, name: str, *, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> FloatArray:
+    def mean(self, name: str, *, alpha_ni: float = 0.0) -> FloatArray:
         """Return a primitive Gaussian mean including its shape nuisance."""
         component = _component_name(name)
         if component == "SBI":
             raise ValueError("SBI is coherent and has no single Gaussian mean.")
-        if not np.isfinite(alpha_b) or not np.isfinite(alpha_ni):
-            raise ValueError("Nuisance parameters must be finite.")
+        if not np.isfinite(alpha_ni):
+            raise ValueError("alpha_ni must be finite.")
         key = component.lower()
         mean = np.asarray(getattr(self, f"mean_{key}"), dtype=float)
-        if component != "S":
-            alpha = alpha_b if component == "B" else alpha_ni
-            distance = getattr(self, f"shift_fraction_{key}") * np.linalg.norm(mean)
-            mean = mean + alpha * distance * np.asarray(getattr(self, f"direction_{key}"))
+        if component == "NI":
+            distance = self.shift_fraction_ni * np.linalg.norm(mean)
+            mean = mean + alpha_ni * distance * np.asarray(self.direction_ni)
         return mean
 
-    def _gaussian_logpdf(self, x: FloatArray, name: str, alpha_b: float, alpha_ni: float) -> FloatArray:
-        delta = x - self.mean(name, alpha_b=alpha_b, alpha_ni=alpha_ni)
+    def _gaussian_logpdf(self, x: FloatArray, name: str, alpha_ni: float) -> FloatArray:
+        delta = x - self.mean(name, alpha_ni=alpha_ni)
         quadratic = np.einsum("...i,ij,...j->...", delta, self._precision[name], delta)
         return self._log_norm[name] - 0.5 * quadratic
 
-    def _primitive_log_densities(self, x: FloatArray, alpha_b: float, alpha_ni: float) -> dict[str, FloatArray]:
+    def _primitive_log_densities(self, x: FloatArray, alpha_ni: float) -> dict[str, FloatArray]:
         result = {}
         for name in ("S", "B", "NI"):
             rate = self.exposure * getattr(self, f"lambda_{name.lower()}")
             log_rate = np.log(rate) if rate > 0 else -np.inf
-            result[name] = log_rate + self._gaussian_logpdf(x, name, alpha_b, alpha_ni)
+            result[name] = log_rate + self._gaussian_logpdf(x, name, alpha_ni)
         return result
 
-    def gaussian_overlap(self, alpha_b: float = 0.0) -> float:
+    def gaussian_overlap(self) -> float:
         """Exact integral of sqrt(f_S f_B): the Gaussian Bhattacharyya coefficient."""
         covariance_s, covariance_b = np.asarray(self.cov_s), np.asarray(self.cov_b)
         midpoint_covariance = 0.5 * (covariance_s + covariance_b)
-        delta = self.mean("S") - self.mean("B", alpha_b=alpha_b)
+        delta = self.mean("S") - self.mean("B")
         log_overlap = (
             0.25 * np.linalg.slogdet(covariance_s)[1]
             + 0.25 * np.linalg.slogdet(covariance_b)[1]
@@ -185,21 +180,21 @@ class PhysicsModel:
         )
         return float(np.exp(log_overlap))
 
-    def component_yield(self, name: str, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> float:
+    def component_yield(self, name: str, alpha_ni: float = 0.0) -> float:
         """Analytic full-space expected count of a positive process."""
         component = _component_name(name)
-        if not np.isfinite(alpha_b) or not np.isfinite(alpha_ni):
-            raise ValueError("Nuisance parameters must be finite.")
+        if not np.isfinite(alpha_ni):
+            raise ValueError("alpha_ni must be finite.")
         if component != "SBI":
             return float(self.exposure * getattr(self, f"lambda_{component.lower()}"))
-        interference = 2 * self.phase_cos * np.sqrt(self.lambda_s * self.lambda_b) * self.gaussian_overlap(alpha_b)
+        interference = 2 * self.phase_cos * np.sqrt(self.lambda_s * self.lambda_b) * self.gaussian_overlap()
         return float(self.exposure * (self.lambda_s + self.lambda_b + interference))
 
-    def component_yields(self, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> dict[str, float]:
-        return {name: self.component_yield(name, alpha_b, alpha_ni) for name in COMPONENTS}
+    def component_yields(self, alpha_ni: float = 0.0) -> dict[str, float]:
+        return {name: self.component_yield(name, alpha_ni) for name in COMPONENTS}
 
     def component_densities(
-        self, x: ArrayLike, alpha_b: float = 0.0, alpha_ni: float = 0.0,
+        self, x: ArrayLike, alpha_ni: float = 0.0,
         order: Sequence[str] = COMPONENTS,
     ) -> FloatArray:
         """Return yield-weighted densities with component axis last.
@@ -208,34 +203,34 @@ class PhysicsModel:
         ``x.shape[:-1] + (4,)``.
         """
         points = _points(x)
-        logs = self._primitive_log_densities(points, alpha_b, alpha_ni)
+        logs = self._primitive_log_densities(points, alpha_ni)
         densities = {name: np.exp(value) for name, value in logs.items()}
         interference = 2 * self.phase_cos * np.exp(0.5 * (logs["S"] + logs["B"]))
         densities["SBI"] = densities["S"] + densities["B"] + interference
         return np.stack([densities[_component_name(name)] for name in order], axis=-1)
 
-    def component_density(self, x: ArrayLike, name: str, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> FloatArray:
+    def component_density(self, x: ArrayLike, name: str, alpha_ni: float = 0.0) -> FloatArray:
         """Yield-weighted event density, as distinct from component_pdf."""
-        return self.component_densities(x, alpha_b, alpha_ni, order=(name,))[..., 0]
+        return self.component_densities(x, alpha_ni, order=(name,))[..., 0]
 
-    def component_pdf(self, x: ArrayLike, name: str, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> FloatArray:
+    def component_pdf(self, x: ArrayLike, name: str, alpha_ni: float = 0.0) -> FloatArray:
         """Normalized density of one of the four positive sample sources."""
         component = _component_name(name)
         points = _points(x)
         if component != "SBI":
-            return np.exp(self._gaussian_logpdf(points, component, alpha_b, alpha_ni))
-        rate = self.component_yield(component, alpha_b, alpha_ni)
+            return np.exp(self._gaussian_logpdf(points, component, alpha_ni))
+        rate = self.component_yield(component, alpha_ni)
         if rate <= 0:
             raise ValueError("SBI has zero yield and therefore no normalized pdf.")
-        return self.component_density(points, component, alpha_b, alpha_ni) / rate
+        return self.component_density(points, component, alpha_ni) / rate
 
-    def amplitude(self, x: ArrayLike, name: str, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> NDArray[np.complex128]:
+    def amplitude(self, x: ArrayLike, name: str, alpha_ni: float = 0.0) -> NDArray[np.complex128]:
         """Complex primitive wavefunction; SBI is the coherent S+B sum."""
         component = _component_name(name)
         if component == "SBI":
-            return self.amplitude(x, "S", alpha_b, alpha_ni) + self.amplitude(x, "B", alpha_b, alpha_ni)
+            return self.amplitude(x, "S", alpha_ni) + self.amplitude(x, "B", alpha_ni)
         phase = np.arccos(self.phase_cos) if component == "B" else 0.0
-        magnitude = np.sqrt(self.component_yield(component) * self.component_pdf(x, component, alpha_b, alpha_ni))
+        magnitude = np.sqrt(self.component_yield(component) * self.component_pdf(x, component, alpha_ni))
         return magnitude * np.exp(1j * phase)
 
     @staticmethod
@@ -251,22 +246,22 @@ class PhysicsModel:
         inverse = 0.5 / np.sqrt(value)
         return np.asarray((1 - inverse, inverse, -inverse, 0.0))
 
-    def intensity(self, x: ArrayLike, mu: float, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> FloatArray:
+    def intensity(self, x: ArrayLike, mu: float, alpha_ni: float = 0.0) -> FloatArray:
         """Physical intensity mu*S + sqrt(mu)*I + B + NI."""
         value = _positive_mu(mu)
-        logs = self._primitive_log_densities(_points(x), alpha_b, alpha_ni)
+        logs = self._primitive_log_densities(_points(x), alpha_ni)
         interference = 2 * self.phase_cos * np.exp(0.5 * (logs["S"] + logs["B"]))
         return value * np.exp(logs["S"]) + np.sqrt(value) * interference + np.exp(logs["B"]) + np.exp(logs["NI"])
 
-    def mu_derivative(self, x: ArrayLike, mu: float, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> FloatArray:
+    def mu_derivative(self, x: ArrayLike, mu: float, alpha_ni: float = 0.0) -> FloatArray:
         """Derivative of physical intensity with respect to mu (mu > 0)."""
         value = _positive_mu(mu, derivative=True)
-        logs = self._primitive_log_densities(_points(x), alpha_b, alpha_ni)
+        logs = self._primitive_log_densities(_points(x), alpha_ni)
         return np.exp(logs["S"]) + self.phase_cos / np.sqrt(value) * np.exp(0.5 * (logs["S"] + logs["B"]))
 
-    def _yield_vector(self, selected_yields: Mapping[str, float] | Sequence[float] | None, alpha_b: float, alpha_ni: float) -> FloatArray:
+    def _yield_vector(self, selected_yields: Mapping[str, float] | Sequence[float] | None, alpha_ni: float) -> FloatArray:
         if selected_yields is None:
-            values = np.asarray([self.component_yield(name, alpha_b, alpha_ni) for name in COMPONENTS])
+            values = np.asarray([self.component_yield(name, alpha_ni) for name in COMPONENTS])
         elif isinstance(selected_yields, Mapping):
             canonical = {str(key).upper(): value for key, value in selected_yields.items()}
             values = np.asarray([canonical[name] for name in COMPONENTS], dtype=float)
@@ -277,28 +272,28 @@ class PhysicsModel:
         return values
 
     def total_yield(
-        self, mu: float, alpha_b: float = 0.0, alpha_ni: float = 0.0,
+        self, mu: float, alpha_ni: float = 0.0,
         selected_yields: Mapping[str, float] | Sequence[float] | None = None,
     ) -> float:
-        result = float(self.coefficients(mu) @ self._yield_vector(selected_yields, alpha_b, alpha_ni))
+        result = float(self.coefficients(mu) @ self._yield_vector(selected_yields, alpha_ni))
         if result <= 0:
             raise ValueError("The physical total yield must be positive.")
         return result
 
     def yield_mu_derivative(
-        self, mu: float, alpha_b: float = 0.0, alpha_ni: float = 0.0,
+        self, mu: float, alpha_ni: float = 0.0,
         selected_yields: Mapping[str, float] | Sequence[float] | None = None,
     ) -> float:
-        return float(self.derivative_coefficients(mu) @ self._yield_vector(selected_yields, alpha_b, alpha_ni))
+        return float(self.derivative_coefficients(mu) @ self._yield_vector(selected_yields, alpha_ni))
 
-    def pdf(self, x: ArrayLike, mu: float, alpha_b: float = 0.0, alpha_ni: float = 0.0) -> FloatArray:
+    def pdf(self, x: ArrayLike, mu: float, alpha_ni: float = 0.0) -> FloatArray:
         """Normalized physical full-space density."""
-        return self.intensity(x, mu, alpha_b, alpha_ni) / self.total_yield(mu, alpha_b, alpha_ni)
+        return self.intensity(x, mu, alpha_ni) / self.total_yield(mu, alpha_ni)
 
     def score(
         self, x: ArrayLike, eta: float,
         selected_yields: Mapping[str, float] | Sequence[float] | None = None,
-        alpha_b: float = 0.0, alpha_ni: float = 0.0,
+        alpha_ni: float = 0.0,
     ) -> FloatArray:
         """Exact local *shape* score d_mu log p_mu at the fixed anchor eta.
 
@@ -311,18 +306,18 @@ class PhysicsModel:
         Gaussian tails.  eta=0 is excluded because sqrt(mu) is not regular there.
         """
         value = _positive_mu(eta, derivative=True)
-        logs = self._primitive_log_densities(_points(x), alpha_b, alpha_ni)
+        logs = self._primitive_log_densities(_points(x), alpha_ni)
         scale = np.maximum(np.maximum(logs["S"], logs["B"]), logs["NI"])
         s, b, ni = (np.exp(logs[name] - scale) for name in ("S", "B", "NI"))
         interference = 2 * self.phase_cos * np.exp(0.5 * (logs["S"] + logs["B"]) - scale)
         numerator = s + interference / (2 * np.sqrt(value))
         denominator = value * s + np.sqrt(value) * interference + b + ni
-        shape_normalization = self.yield_mu_derivative(value, alpha_b, alpha_ni, selected_yields) / self.total_yield(value, alpha_b, alpha_ni, selected_yields)
+        shape_normalization = self.yield_mu_derivative(value, alpha_ni, selected_yields) / self.total_yield(value, alpha_ni, selected_yields)
         return numerator / denominator - shape_normalization
 
     def sample_component(
         self, name: str, n: int, rng: np.random.Generator | int | None = None,
-        alpha_b: float = 0.0, alpha_ni: float = 0.0,
+        alpha_ni: float = 0.0,
     ) -> FloatArray:
         """Draw exact independent events from a normalized component density.
 
@@ -339,12 +334,12 @@ class PhysicsModel:
             return np.empty((0, 3), dtype=float)
         if component != "SBI":
             return generator.multivariate_normal(
-                self.mean(component, alpha_b=alpha_b, alpha_ni=alpha_ni),
+                self.mean(component, alpha_ni=alpha_ni),
                 np.asarray(getattr(self, f"cov_{component.lower()}")), size=n,
             )
         yield_s, yield_b = self.component_yield("S"), self.component_yield("B")
         mixture_yield = yield_s + yield_b
-        efficiency = self.component_yield("SBI", alpha_b, alpha_ni) / (2 * mixture_yield)
+        efficiency = self.component_yield("SBI", alpha_ni) / (2 * mixture_yield)
         if efficiency <= 0:
             raise ValueError("Cannot sample a zero-yield SBI component.")
         output = np.empty((n, 3), dtype=float)
@@ -353,9 +348,9 @@ class PhysicsModel:
             batch = min(250_000, max(256, int(np.ceil(1.05 * (n - filled) / efficiency))))
             from_s = generator.random(batch) < yield_s / mixture_yield
             candidates = np.empty((batch, 3), dtype=float)
-            candidates[from_s] = self.sample_component("S", int(from_s.sum()), generator, alpha_b, alpha_ni)
-            candidates[~from_s] = self.sample_component("B", int((~from_s).sum()), generator, alpha_b, alpha_ni)
-            logs = self._primitive_log_densities(candidates, alpha_b, alpha_ni)
+            candidates[from_s] = self.sample_component("S", int(from_s.sum()), generator, alpha_ni)
+            candidates[~from_s] = self.sample_component("B", int((~from_s).sum()), generator, alpha_ni)
+            logs = self._primitive_log_densities(candidates, alpha_ni)
             overlap_fraction = np.exp(0.5 * (logs["S"] + logs["B"]) - np.logaddexp(logs["S"], logs["B"]))
             acceptance = 0.5 + self.phase_cos * overlap_fraction
             accepted = candidates[generator.random(batch) < acceptance]

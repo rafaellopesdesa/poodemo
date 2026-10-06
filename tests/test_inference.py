@@ -17,15 +17,15 @@ def small_model():
     w[[0, -1]] /= 2
     signal = 3 * np.exp(-x**2 / 0.7)
 
-    def fields(alpha_b=0, alpha_ni=0):
-        background = 8 * np.exp(-(x - 0.3 - 0.2 * alpha_b)**2 / 1.4)
+    def fields(alpha_ni=0):
+        background = 8 * np.exp(-(x - 0.3)**2 / 1.4)
         interference = 0.35 * np.sqrt(signal * background) * np.sin(x)
-        ni = 4 * np.exp(-x**2 / 3 + 0.15 * alpha_ni * x)
+        ni = 4 * np.exp(-(x - 0.2 * alpha_ni)**2 / 3)
         return np.stack([signal, signal + background + interference, background, ni])
 
     nominal = fields()
-    down = np.stack([fields(-1, 0), fields(0, -1)])
-    up = np.stack([fields(1, 0), fields(0, 1)])
+    down = np.stack([fields(-1)])
+    up = np.stack([fields(1)])
     truth = nominal[1] + nominal[3]
     return x, TemplateLikelihood(nominal, down, up, w, truth)
 
@@ -62,21 +62,24 @@ def test_exp_poly_anchor_values_and_c2_matching():
 
 def test_common_quadrature_and_nuisance_anchors():
     _, model = small_model()
-    assert abs(model.nll(1, [0, 0])) < 1e-12
-    assert model.nll(1.2, [0, 0]) > 0
-    for k in range(2):
-        alpha = np.zeros(2)
+    assert model.n_nuisance == 1
+    assert abs(model.nll(1, [0])) < 1e-12
+    assert model.nll(1.2, [0]) > 0
+    for k in range(model.n_nuisance):
+        alpha = np.zeros(model.n_nuisance)
         alpha[k] = -1
         np.testing.assert_allclose(model.components(alpha), model.down[k], rtol=2e-12)
         alpha[k] = 1
         np.testing.assert_allclose(model.components(alpha), model.up[k], rtol=2e-12)
-    alpha = np.array([0.45, -0.3])
+    alpha = np.array([0.45])
     morphed_rates = model.rates.copy()
     for k, value in enumerate(alpha):
         morphed_rates *= exp_poly_factor(value, model.rates_down[k] / model.rates,
                                         model.rates_up[k] / model.rates)
     np.testing.assert_allclose(model.components(alpha) @ model.quadrature_weights,
                                morphed_rates, rtol=2e-12)
+    # This demonstration has only an NI nuisance: S, SBI, and B stay fixed.
+    np.testing.assert_allclose(model.components(alpha)[:3], model.nominal[:3], rtol=2e-12)
 
 
 def test_poisson_kl_handles_empty_bins_and_physical_domain():
@@ -95,8 +98,8 @@ def test_histogram_refills_truth_and_morph_order_does_not_commute():
     manual_counts = np.histogram(scores, bins=edges, weights=model.asimov_weights)[0]
     np.testing.assert_allclose(before.data_counts, manual_counts)
     np.testing.assert_allclose(after.data_counts, manual_counts)
-    np.testing.assert_allclose(before.components([0, 0]), after.components([0, 0]))
-    alpha = [0.55, -0.45]
+    np.testing.assert_allclose(before.components([0]), after.components([0]))
+    alpha = [-0.45]
     integrated = histogram_components(scores, model.components(alpha), model.quadrature_weights, edges)
     np.testing.assert_allclose(before.components(alpha), integrated)
     assert np.max(np.abs(before.components(alpha) - after.components(alpha))) > 1e-6
@@ -107,16 +110,53 @@ def test_histogram_refills_truth_and_morph_order_does_not_commute():
 
 def test_fit_recovers_model_asimov_truth():
     _, model = small_model()
-    fit = model.fit(initial_mu=0.65, initial_alpha=[0.2, -0.1], mu_starts=[0.5, 1.4])
+    fit = model.fit(initial_mu=0.65, initial_alpha=[-0.1], mu_starts=[0.5, 1.4])
     assert fit.success, fit.message
-    np.testing.assert_allclose(fit.parameters, [1, 0, 0], atol=2e-4)
+    np.testing.assert_allclose(fit.parameters, [1, 0], atol=2e-4)
     assert abs(fit.nll) < 1e-7
     statistic = model.test_statistic(1)
     assert statistic["t"] < 1e-7
     fixed_nuisance = model.fit(initial_mu=0.65, systematics=False)
     assert fixed_nuisance.success
-    np.testing.assert_array_equal(fixed_nuisance.alpha, [0, 0])
+    np.testing.assert_array_equal(fixed_nuisance.alpha, [0])
     assert abs(fixed_nuisance.mu - 1) < 2e-4
+
+
+def test_unit_ni_gaussian_constraint_survives_histograms_and_spline_templates():
+    x, base = small_model()
+    # Neutral NI anchors isolate the auxiliary likelihood from morphing.
+    # A unit Gaussian exp(-alpha_NI**2/2) adds alpha_NI**2 to -2 log L.
+    neutral = TemplateLikelihood(base.nominal, base.nominal[None], base.nominal[None],
+                                 base.quadrature_weights, base.truth_intensity)
+    edges = np.linspace(0, 1, 9)
+    eta = 0.8
+    scores = expit(eta * x)
+    direct_before = neutral.binned(scores, edges, morph_order="before", eta=eta)
+    direct_after = neutral.binned(scores, edges, morph_order="after", eta=eta)
+
+    anchors = np.array([0.4, 1.0, 1.7])
+    templates = []
+    for anchor in anchors:
+        nominal = histogram_components(expit(anchor * x), neutral.nominal,
+                                       neutral.quadrature_weights, edges)
+        templates.append(np.stack([nominal, nominal, nominal]))
+    spline = YieldFractionSpline(anchors, np.stack(templates))
+    nominal, down, up = spline(eta)
+    # Data are refilled at this held-out eta, never interpolated by the spline.
+    counts = np.histogram(scores, edges, weights=neutral.asimov_weights)[0]
+    splined = TemplateLikelihood(nominal, down[None], up[None], np.ones(len(counts)), counts)
+
+    for model in (neutral, direct_before, direct_after, splined):
+        np.testing.assert_array_equal(model.aux_center, [0])
+        np.testing.assert_array_equal(model.aux_sigma, [1])
+        baseline = model.nll(1, [0])
+        for alpha_ni in [-2.0, -0.4, 0.6, 1.5]:
+            difference = model.nll(1, [alpha_ni]) - baseline
+            assert difference == pytest.approx(alpha_ni**2, abs=2e-12)
+            assert np.exp(-difference / 2) == pytest.approx(np.exp(-alpha_ni**2 / 2), rel=2e-12)
+        fitted = model.fit(mu_fixed=1, initial_alpha=[0.8])
+        assert fitted.success, fitted.message
+        assert abs(fitted.alpha[0]) < 1e-6
 
 
 def test_fraction_spline_preserves_rates_and_rejects_extrapolation():

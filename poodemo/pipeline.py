@@ -46,8 +46,6 @@ def run_preselection(run):
 
 
 RATIO_TASKS = [("SBI", "S"), ("B", "S"), ("NI", "S"),
-               ("B_up", "B"), ("B_down", "B"),
-               ("SBI_up", "SBI"), ("SBI_down", "SBI"),
                ("NI_up", "NI"), ("NI_down", "NI")]
 
 
@@ -73,10 +71,10 @@ def train_ratios(run):
             directory, cfg, numerator_label=num, denominator_label=den)
         normalization = normalize_ratio(predictor, selected_split(run, den, "calibration"))
         def exact_log_ratio(x):
-            cp, ab, an = SAMPLES[num]
-            dp, db, dn = SAMPLES[den]
-            numerator = run.model.component_pdf(x, cp, alpha_b=ab, alpha_ni=an)*run.model.component_yield(cp, alpha_b=ab, alpha_ni=an)/accepted_rates[num]
-            denominator = run.model.component_pdf(x, dp, alpha_b=db, alpha_ni=dn)*run.model.component_yield(dp, alpha_b=db, alpha_ni=dn)/accepted_rates[den]
+            cp, an = SAMPLES[num]
+            dp, dn = SAMPLES[den]
+            numerator = run.model.component_pdf(x, cp, alpha_ni=an)*run.model.component_yield(cp, alpha_ni=an)/accepted_rates[num]
+            denominator = run.model.component_pdf(x, dp, alpha_ni=dn)*run.model.component_yield(dp, alpha_ni=dn)/accepted_rates[den]
             return np.log(numerator)-np.log(denominator)
         report = ratio_diagnostics(predictor, selected_split(run, num, "integration"),
                                    selected_split(run, den, "integration"), exact_log_ratio=exact_log_ratio)
@@ -119,10 +117,8 @@ def prepare_quadrature(run):
     proposal = sum(run.model.component_pdf(x, p) for p in ("S", "B", "NI"))/3.
     weights = 1./(3*n*proposal)
     nominal = run.model.component_densities(x).T
-    down = np.stack([run.model.component_densities(x, alpha_b=-1.).T,
-                     run.model.component_densities(x, alpha_ni=-1.).T])
-    up = np.stack([run.model.component_densities(x, alpha_b=1.).T,
-                   run.model.component_densities(x, alpha_ni=1.).T])
+    down = run.model.component_densities(x, alpha_ni=-1.).T[None, ...]
+    up = run.model.component_densities(x, alpha_ni=1.).T[None, ...]
     truth = run.model.intensity(x, run.config["asimov_mu"])
     result = dict(x=x, weights=weights, nominal=nominal, down=down, up=up, truth=truth,
                   stratum=stratum, half=half)
@@ -181,17 +177,15 @@ def _learned_fields(run, quad):
         integral = float(shape @ w)
         normalization.append(dict(sample=p, variation="nominal", raw_integral=integral))
         nominal[j] = rates[j]*shape/integral
-    down = np.stack([nominal.copy(), nominal.copy()])
+    down = nominal[None, ...].copy()
     up = down.copy()
-    for k, processes in enumerate((("B", "SBI"), ("NI",))):
-        for p in processes:
-            j = PROCESSES.index(p)
-            for label, array, exact in (("up", up, quad["up"]), ("down", down, quad["down"])):
-                predictor = load_predictor(_ratio_path(run, f"{p}_{label}", p))
-                shape = nominal[j]/rates[j]*predictor.predict_ratio(x)
-                integral = float(shape @ w)
-                normalization.append(dict(sample=p, variation=label, raw_integral=integral))
-                array[k, j] = (exact[k, j] @ w)*shape/integral
+    j = PROCESSES.index("NI")
+    for label, array, exact in (("up", up, quad["up"]), ("down", down, quad["down"])):
+        predictor = load_predictor(_ratio_path(run, f"NI_{label}", "NI"))
+        shape = nominal[j]/rates[j]*predictor.predict_ratio(x)
+        integral = float(shape @ w)
+        normalization.append(dict(sample="NI", variation=label, raw_integral=integral))
+        array[0, j] = (exact[0, j] @ w)*shape/integral
     pd.DataFrame(normalization).to_csv(run.path("results", "workspace_normalization.csv"), index=False)
     return nominal, down, up
 
@@ -211,17 +205,17 @@ def run_unbinned(run):
         workspace = build_workspace(run.path("workspaces", label.split()[0]), *fields,
                                     q["weights"], q["truth"],
                                     parameter_bounds=[run.config["mu_fit_bounds"],
-                                                      run.config["nuisance_bounds"],run.config["nuisance_bounds"]])
+                                                      run.config["nuisance_bounds"]])
         fitter = make_fitter(load_model(workspace))
         for syst in (False, True):
             scan = fitter.scan(mu_grid(run), systematics=syst)
             for i, mu in enumerate(scan["mu"]):
                 records.append(dict(mu=mu, q=scan["t_mu"][i], model=label, systematics=syst,
-                                    alpha_B=scan["parameters"][i, 1], alpha_NI=scan["parameters"][i, 2],
+                                    alpha_NI=scan["parameters"][i, 1],
                                     valid=bool(scan["valid"][i]), edm=scan["edm"][i]))
             best = fitter.last_fit
             diagnostics.append(dict(model=label, systematics=syst, mu_hat=best.parameters[0],
-                                    alpha_B_hat=best.parameters[1], alpha_NI_hat=best.parameters[2],
+                                    alpha_NI_hat=best.parameters[1],
                                     nll=best.nll, valid=best.valid, edm=best.edm))
     scans, diagnostic_frame = pd.DataFrame(records), pd.DataFrame(diagnostics)
     scans.to_csv(run.path("results", "unbinned_scans.csv"), index=False)
@@ -262,8 +256,7 @@ def _fit_test(run, model, mu, systematics):
     null, best = result["null_fit"], result["best_fit"]
     valid = bool(null.success and best.success)
     return dict(q=result["t"] if valid else np.nan, valid=valid,
-                mu_hat=best.mu, alpha_B=null.alpha[0] if len(null.alpha) else 0.,
-                alpha_NI=null.alpha[1] if len(null.alpha)>1 else 0.,
+                mu_hat=best.mu, alpha_NI=null.alpha[0] if len(null.alpha) else 0.,
                 fit_message=null.message + "; " + best.message)
 
 
@@ -327,15 +320,14 @@ def run_binning_study(run):
 
 def _histogram_anchors(quad, z, edges):
     from .inference import histogram_components
-    fields = [quad["nominal"], quad["down"][0], quad["up"][0],
-              quad["down"][1], quad["up"][1]]
+    fields = [quad["nominal"], quad["down"][0], quad["up"][0]]
     return np.stack([histogram_components(z, value, quad["weights"], edges) for value in fields])
 
 
 def _histogram_model(anchors, counts):
     from .inference import TemplateLikelihood
     nominal = anchors[0]
-    down, up = anchors[[1, 3]], anchors[[2, 4]]
+    down, up = anchors[[1]], anchors[[2]]
     return TemplateLikelihood(nominal, down, up, np.ones(len(counts)), counts)
 
 
@@ -364,7 +356,7 @@ def run_spline_study(run):
               dict(n_bins=nbins, worst_information_fraction=float(worst.loc[nbins]),
                    passed_99_percent=bool(len(qualified)), n_anchors=len(etas),
                    note="PCHIP acts on nonnegative bin fractions, renormalized to sum one; totals are eta-independent."))
-    variations = ("nominal", "B_down", "B_up", "NI_down", "NI_up")
+    variations = ("nominal", "NI_down", "NI_up")
     records_yields, validation = [], []
     for ai, eta in enumerate(etas):
         for vi, variation in enumerate(variations):
@@ -399,9 +391,9 @@ def run_spline_study(run):
         # integrals. Quantify this model difference separately at fixed anchors.
         if np.any(np.isclose(mu, check_mus)):
             before, after = parent.binned(z, edges, "before", eta), parent.binned(z, edges, "after", eta)
-            for alpha in ([.5, 0.], [0., .5], [.5, -.5], [1., 0.], [0., 1.]):
+            for alpha in ([-1.], [-.5], [.5], [1.], [1.5]):
                 a, b = before.intensity(mu, alpha), after.intensity(mu, alpha)
-                morph_comparison.append(dict(eta=eta, alpha_B=alpha[0], alpha_NI=alpha[1],
+                morph_comparison.append(dict(eta=eta, alpha_NI=alpha[0],
                                              l1_relative_difference=float(np.sum(np.abs(a-b))/np.sum(a)),
                                              nll_difference=after.nll(mu, alpha)-before.nll(mu, alpha)))
         print(f"Spline and direct profile fits at eta={eta:.3g} ready", flush=True)

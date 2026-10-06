@@ -35,6 +35,10 @@ written into files, Git remotes, shell arguments, or notebook output. Alternativ
 upload a repository ZIP to `/content/poodemo_source.zip`; no token is then needed.
 An existing `/content/poodemo` checkout is reused. Delete that checkout to fetch
 new source after updating the repository; your Drive run is separate.
+For this NI-only revision, use the new default `RUN_NAME = "demo-ni-v1"`.
+If you ran an earlier version, start a fresh Colab runtime (or refresh the
+temporary source checkout and restart the runtime) before proceeding. Existing
+run manifests from the earlier model are incompatible and are not reused.
 """
 
 BOOTSTRAP = r'''
@@ -42,7 +46,7 @@ import os
 import sys
 from pathlib import Path
 
-RUN_NAME = "demo-v1"
+RUN_NAME = "demo-ni-v1"
 MODE = os.environ.get("POODEMO_MODE", "production")  # production or smoke
 CONFIG_OVERRIDES = {}  # e.g. {"quadrature_per_process": 500_000, "epochs": 150}
 
@@ -267,16 +271,16 @@ def build():
         md(r"""
         ### Shape uncertainties and statistically independent roles
 
-        A reproducibly chosen unit direction \(v_B\) shifts the B amplitude mean
-        by \(\Delta m_B=0.1\|m_B\|v_B\) for one standard deviation.
-        The corresponding SBI templates are regenerated with the **same shifted
-        B amplitude**, so interference changes coherently. We also generate an
-        independent NI mean-shift nuisance, enabling the varied NI templates in
-        notebook 5. The exact shift vectors and all model settings are saved in
-        the run configuration.
+        The only nuisance is \(\alpha_{NI}\). A reproducibly chosen unit direction
+        \(v_{NI}\) shifts the NI amplitude mean by
+        \(\Delta m_{NI}=0.1\|m_{NI}\|v_{NI}\) for one standard deviation.
+        S, B, and their coherent SBI process are fixed with respect to this
+        nuisance. The exact NI shift vector and all model settings are saved in
+        the run configuration. The inclusive NI yield stays fixed; its selected
+        yield may change because the selection efficiency changes.
 
-        This gives ten samples: S, B, SBI, NI, B±, SBI±, and NI±. Production mode
-        therefore generates 50 million three-dimensional events. Before any
+        This gives six samples: S, B, SBI, NI, NI_up, and NI_down. Production mode
+        therefore generates 30 million three-dimensional events. Before any
         learning or selection, each sample is divided into seven independent
         roles:
 
@@ -412,7 +416,7 @@ def build():
 
         For the fixed selected phase space, set \(q=p_S^{\rm sel}\), and learn
         \(r_j=p_j^{\rm sel}/q\) for the other processes. Shape ratios and physical
-        yields are distinct. At nominal nuisance parameters,
+        yields are distinct. At the nominal nuisance value \(\alpha_{NI}=0\),
         \[
         \frac{D(x;\mu)}{q(x)}
         =(\mu-\sqrt\mu)\lambda_S
@@ -422,12 +426,22 @@ def build():
         \]
         where every \(\lambda\) is now a **selected** yield.
 
-        We also train up/down variation-to-nominal ratios. For B variations,
-        SBI varies coherently; NI has its own nuisance. The nuisance interpolation
-        is the toolkit's exponential–polynomial interpolation, with Gaussian
-        auxiliary constraints. An interpolated nuisance model is a chosen
-        statistical model; it need not equal a continuously shifted Gaussian
-        amplitude away from its nominal and ±1 anchors.
+        We also train the NI up/down variation-to-nominal ratios. There are five
+        ratio tasks: SBI/S, B/S, NI/S, NI_up/NI, and NI_down/NI. The production
+        three-member ensembles therefore contain fifteen ratio networks, plus
+        the separate preselection network. Only NI is morphed; S, B, and SBI
+        retain their nominal templates. The workspace parameters are
+        \((\mu,\alpha_{NI})\).
+
+        The nuisance interpolation is the toolkit's exponential–polynomial
+        interpolation. A standard-normal auxiliary measurement supplies
+        \[
+        L_{\rm aux}(\alpha_{NI})\propto\exp(-\alpha_{NI}^2/2),
+        \]
+        so its contribution to \(-2\log L\) is \(+\alpha_{NI}^2\).
+        This constraint is included in every profiled likelihood. The
+        interpolated nuisance model need not equal a continuously shifted
+        Gaussian amplitude away from its nominal and ±1 anchors.
         """),
         code("from poodemo.pipeline import train_ratios\n\nratio_diagnostics = train_ratios(run)\ndisplay(ratio_diagnostics)"),
         md(r"""
@@ -457,15 +471,15 @@ def build():
         We approximate expectations with a held-out weighted integration sample.
         These are Asimov likelihood curves, not a coverage study with random
         Poisson pseudo-experiments. The extended likelihood retains the total
-        expected yield and includes the nuisance auxiliary measurements.
+        expected yield and includes the Gaussian NI auxiliary measurement.
 
-        At the generating point \((\mu_*,\boldsymbol\alpha_*)=(1,\boldsymbol0)\),
+        At the generating point \((\mu_*,\alpha_{NI,*})=(1,0)\),
         an exact intensity model gives
         \[
-        t_A(\mu,\boldsymbol\alpha)=2\int\!dx\,
-        \left[D(x;\mu,\boldsymbol\alpha)-D_*(x)
-        -D_*(x)\log\frac{D(x;\mu,\boldsymbol\alpha)}{D_*(x)}\right]
-        +\|\boldsymbol\alpha\|^2,
+        t_A(\mu,\alpha_{NI})=2\int\!dx\,
+        \left[D(x;\mu,\alpha_{NI})-D_*(x)
+        -D_*(x)\log\frac{D(x;\mu,\alpha_{NI})}{D_*(x)}\right]
+        +\alpha_{NI}^2,
         \]
         followed by profiling. Finite quadrature and learned-ratio errors are
         separate effects. The pipeline saves both analytical and learned
@@ -496,7 +510,7 @@ def build():
         ax.plot(integration_check["mu"], integration_check["q_half_even"], "--", label="Even half")
         ax.plot(integration_check["mu"], integration_check["q_half_odd"], ":", label="Odd half")
         ax.set(xlabel=r"Signal strength $\mu$", ylabel="Asimov likelihood objective",
-               title="Integration stability: fixed nominal nuisances")
+               title="Integration stability: fixed nominal NI nuisance")
         ax.legend(fontsize=8)
         fig.tight_layout()
         fig.savefig(ROOT / "plots" / "03_quadrature_stability.pdf", bbox_inches="tight")
@@ -538,7 +552,7 @@ def build():
         ### The score, including the yield factors
 
         In the selected phase space define normalized process densities \(p_j\)
-        and their selected yields \(\lambda_j\). At nominal nuisances,
+        and their selected yields \(\lambda_j\). At \(\alpha_{NI}=0\),
         \[
         D_\mu(x)=(\mu-\sqrt\mu)\lambda_Sp_S(x)
         +\sqrt\mu\lambda_{SBI}p_{SBI}(x)
@@ -569,7 +583,7 @@ def build():
         ### Freeze the observable inside each likelihood fit
 
         For the test of \(\mu_0\), construct \(z_{\eta=\mu_0}\) at nominal
-        nuisances, then keep its bin edges, event assignments, and Asimov data
+        \(\alpha_{NI}=0\), then keep its bin edges, event assignments, and Asimov data
         fixed while fitting all physical alternatives \(\mu\). Thus,
         \[
         t(\mu_0)=-2\log\frac{L(\mu_0;\eta=\mu_0)}
@@ -577,7 +591,7 @@ def build():
         \]
         The Asimov data must also be re-histogrammed when \(\eta\) changes.
         The binned likelihood is an independent Poisson likelihood for disjoint
-        bins of a Poisson point process. This notebook first fixes nuisances,
+        bins of a Poisson point process. This notebook fixes \(\alpha_{NI}=0\),
         where the scalar score has its clean local guarantee.
         """),
         code("from poodemo.pipeline import run_binning_study\n\nbinning = run_binning_study(run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
@@ -651,10 +665,12 @@ def build():
         md(r"""
         ### Vary the templates, then interpolate the nuisance
 
-        Build nominal and ±1 templates for each process affected by a nuisance,
-        including the requested NI variations. Fit their dependence on \(\eta\).
+        Build nominal and ±1 templates for NI and nominal templates for S, B,
+        and SBI. Fit their dependence on \(\eta\).
         At any construction point, evaluate the splines first; then use the
-        same exponential–polynomial rule to interpolate in each nuisance.
+        same exponential–polynomial rule to interpolate in \(\alpha_{NI}\).
+        Every profiled fit retains the Gaussian auxiliary constraint
+        \(\exp(-\alpha_{NI}^2/2)\), or \(+\alpha_{NI}^2\) in \(-2\log L\).
 
         The Asimov data histogram also depends on \(\eta\) and is refilled from
         the integration events at each tested point, rather than interpolated.
@@ -664,8 +680,8 @@ def build():
         Integration and nonlinear nuisance interpolation generally do not
         commute:
         \[
-        \int_{B_b(\eta)}\!\mathrm{Interp}_\alpha[D(x)]\,dx
-        \ne \mathrm{Interp}_\alpha\!\left[\int_{B_b(\eta)}D(x)\,dx\right].
+        \int_{B_b(\eta)}\!\mathrm{Interp}_{\alpha_{NI}}[D(x)]\,dx
+        \ne \mathrm{Interp}_{\alpha_{NI}}\!\left[\int_{B_b(\eta)}D(x)\,dx\right].
         \]
         This difference is recorded separately from spline interpolation error.
         Agreement at nominal and ±1 templates alone does not establish equality
@@ -691,14 +707,13 @@ def build():
         spline = splines["spline"]
         eta_dense = np.linspace(spline.etas[0], spline.etas[-1], 200)
         dense_yields = spline(eta_dense)
-        variation_order = ["nominal", "B_down", "B_up", "NI_down", "NI_up"]
+        variation_order = ["nominal", "NI_down", "NI_up"]
         processes = list(yields["sample"].unique())
         fig, axes = plt.subplots(len(processes), 1, figsize=(8, 3 * len(processes)), squeeze=False)
         for process, ax in zip(processes, axes[:, 0]):
             subset = yields[yields["sample"] == process]
             shown_bins = subset.groupby("bin")["yield_value"].sum().nlargest(3).index
-            variations = ["nominal"] + (["B_down", "B_up"] if process in ["B", "SBI"]
-                                         else ["NI_down", "NI_up"] if process == "NI" else [])
+            variations = ["nominal"] + (["NI_down", "NI_up"] if process == "NI" else [])
             subset = subset[subset["bin"].isin(shown_bins) & subset["variation"].isin(variations)]
             for (variation, bin_number), values in subset.groupby(["variation", "bin"], sort=False):
                 values = values.sort_values("eta")
@@ -742,9 +757,9 @@ def build():
           tests the distinction between two morphing prescriptions.
         - **Learned vs analytical unbinned:** tests ratio estimation.
         - **Score histograms vs the full unbinned model:** includes the effects
-          of scalar compression, particularly when nuisances are profiled.
+          of scalar compression, particularly when \(\alpha_{NI}\) is profiled.
 
-        A scalar \(\mu\)-score at \(\boldsymbol\alpha=0\) does not automatically
+        A scalar \(\mu\)-score at \(\alpha_{NI}=0\) does not automatically
         preserve all profiled information. A joint score vector, or a suitable
         efficient score, is a natural extension. This example measures the
         agreement obtained by the requested scalar construction.

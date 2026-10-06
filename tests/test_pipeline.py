@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from poodemo.data import Run, SPLITS, materialize_selection
+from poodemo.data import Run, SPLITS, create_run, generate_samples, materialize_selection
 from poodemo.physics import PhysicsModel
-from poodemo.pipeline import _score
+from poodemo.pipeline import RATIO_TASKS, _score
 
 
 def test_disjoint_stage_partitions_and_cached_selected_score(tmp_path):
@@ -40,3 +40,24 @@ def test_changed_selector_cannot_reuse_cached_events(tmp_path):
     run = Run(tmp_path, {"generation_chunk": 10}, PhysicsModel())
     with pytest.raises(ValueError, match="Preselection changed"):
         materialize_selection(run, None, .4)
+
+
+def test_ni_only_generation_and_training_inventory(tmp_path):
+    run = create_run(tmp_path, "smoke", {"n_per_sample": 64, "generation_chunk": 32})
+    records = generate_samples(run)
+    samples = {"S", "SBI", "B", "NI", "NI_up", "NI_down"}
+    assert {r["sample"] for r in records} == samples
+    assert {p.stem for p in run.path("raw").glob("*.npy")} == samples
+    assert set(RATIO_TASKS) == {("SBI", "S"), ("B", "S"), ("NI", "S"),
+                               ("NI_up", "NI"), ("NI_down", "NI")}
+    for sample in samples:
+        x = np.load(run.path("raw", sample + ".npy"))
+        assert x.shape == (64, 3) and np.all(np.isfinite(x))
+
+    # An old cached nuisance layout must not silently supply extra parameters.
+    manifest_path = run.path("run.json")
+    manifest = json.loads(manifest_path.read_text())
+    manifest["config"]["schema_version"] = 2
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="Choose a new RUN_NAME"):
+        create_run(tmp_path, "smoke", {"n_per_sample": 64, "generation_chunk": 32})

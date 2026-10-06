@@ -20,8 +20,8 @@ Drive; the source lives in this repository.
    does not open, download the `.ipynb` and upload it to Colab.
 2. Choose a GPU runtime for notebooks 2–3. The other notebooks can use a CPU.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
-   `RUN_NAME = "demo-v1"` and `MODE = "production"`. For an initial short check,
-   choose `MODE = "smoke"` and a distinct run name such as `smoke-v1`.
+   `RUN_NAME = "demo-ni-v1"` and `MODE = "production"`. For an initial short check,
+   choose `MODE = "smoke"` and a distinct run name such as `smoke-ni-v1`.
    Computational budgets can be changed through `CONFIG_OVERRIDES`, for example
    `{"quadrature_per_process": 500_000, "epochs": 150}`. Use identical overrides
    in every notebook and a new run name when changing the configuration.
@@ -43,10 +43,15 @@ stale reuse after its model or threshold changes.
 Use a new run name when changing the configuration: incompatible saved settings
 are rejected rather than silently mixed.
 
-Production generates **5 million events in each of ten samples**: S, SBI, B,
-NI, B±, SBI±, and NI±. The raw three-coordinate float32 arrays occupy about
-600 MB; selected arrays, network ensembles, cached quadrature, and workspaces
-need additional space. Data are generated and evaluated in chunks. Training
+For this NI-only revision, use a new run directory such as `demo-ni-v1`.
+If an earlier version was already run in Colab, start a fresh runtime, or
+refresh `/content/poodemo` and restart the runtime, so that the new source is
+loaded. Earlier run manifests are incompatible and are not reused.
+
+Production generates **5 million events in each of six samples**: S, SBI, B,
+NI, NI_up, and NI_down, for 30 million events total. The raw three-coordinate
+float32 arrays occupy about 360 MB; selected arrays, network ensembles, cached
+quadrature, and workspaces need additional space. Data are generated and evaluated in chunks. Training
 has configurable sample caps, early stopping, and saved checkpoints. Production
 training is substantial and is not run automatically when opening a notebook.
 Smoke mode uses 12,000 events per sample, 20 preselection epochs, and five
@@ -84,13 +89,22 @@ $\mu\ge0$. SBI is sampled with rejection sampling using an exact envelope.
 The number of generated Monte Carlo events is independent of the expected
 number of events in the statistical experiment.
 
-A B shape nuisance shifts its mean by
-$\pm0.1\|m_B\|v_B$, where $v_B$ is a fixed, seeded random unit vector.
-SBI is regenerated coherently with that shifted B amplitude, including the
-changed SBI yield. A second, independent mean-shift nuisance is added for NI
-to support the varied NI histogram study in notebook 5. The nominal and ±1
-anchors define an exponential–polynomial interpolation; that interpolation
-is not assumed to be the exact continuously shifted amplitude between anchors.
+The only nuisance is $\alpha_{NI}$. It shifts the NI amplitude mean by
+$\pm0.1\|m_{NI}\|v_{NI}$, where $v_{NI}$ is a fixed, seeded random unit vector.
+S, B, and their coherent SBI process retain their nominal shapes and yields.
+The inclusive NI yield stays fixed, while its selected yield can vary through
+the selection efficiency. The nominal and ±1 NI anchors define an
+exponential–polynomial interpolation; that interpolation is not assumed to be
+the exact continuously shifted amplitude between anchors.
+
+All profiled fits include a standard-normal auxiliary constraint,
+
+$$
+L_{\rm aux}(\alpha_{NI})\propto\exp(-\alpha_{NI}^2/2),
+$$
+
+which contributes $+\alpha_{NI}^2$ to $-2\log L$. The workspace parameters are
+$(\mu,\alpha_{NI})$; statistical-only fits fix $\alpha_{NI}=0$.
 
 ## Statistical construction
 
@@ -118,6 +132,9 @@ networks. This is neural **density-ratio estimation**, without an additional
 normalizing-flow density model. The underlying analytical densities provide
 an independent benchmark. The integration proposal is a positive mixture of
 held-out S, B, and NI events; it is distinct from the S density-ratio reference.
+There are five ratio tasks: SBI/S, B/S, NI/S, NI_up/NI, and NI_down/NI.
+Production uses three networks per task, for fifteen ratio networks plus the
+separate multiclass preselection network.
 
 To isolate shape-estimation errors, learned and analytical likelihoods use the
 same accepted component yields calculated on the analytical quadrature.
@@ -193,7 +210,7 @@ claiming a physics-level closure precision.
 ```bash
 python -m pip install -r requirements-colab.txt
 python -m pip install -e '.[dev]'
-export POODEMO_ROOT=/absolute/path/to/poodemo-runs/smoke-v1
+export POODEMO_ROOT=/absolute/path/to/poodemo-runs/smoke-ni-v1
 export POODEMO_MODE=smoke
 ```
 
@@ -214,7 +231,7 @@ Notebook sources are maintained in `scripts/build_notebooks.py`:
 ```bash
 python scripts/build_notebooks.py
 python -m pytest
-python scripts/smoke.py --root /tmp/poodemo-smoke
+python scripts/smoke.py --root /tmp/poodemo-smoke-ni
 ```
 
 Notebooks are committed without execution output or credentials. Toolkit
@@ -223,13 +240,11 @@ source is pinned to commit `fc09848fc6540fd32310faebbe9db6eea7ecd17b`;
 not declare. Compatible PyTorch ranges allow Colab's GPU-enabled build to be
 reused. The experiment manifest records the toolkit commit and configuration.
 
-Validation: all five notebooks (33 code cells) were executed with the small
-smoke configuration, including real toolkit training, workspaces, fits, and
-all plot cells. The 30 automated tests cover the amplitude algebra, sampling,
-score derivatives, interpolation, normalization, optimizer behavior, toolkit
-agreement, checkpoint reload, and cache safeguards. See [VALIDATION.md](VALIDATION.md)
-for the scope and numerical results. The full 5-million-event production
-training has not been run as part of this validation.
+See [VALIDATION.md](VALIDATION.md) for the current validation scope, runtime,
+and numerical results. The automated checks cover amplitude algebra, sampling,
+score derivatives, interpolation, normalization, the NI Gaussian constraint,
+optimizer behavior, toolkit agreement, checkpoint reload, and cache safeguards.
+The full 5-million-event production training is separate from the smoke checks.
 
 ## References
 

@@ -7,18 +7,25 @@ SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:
 
 ## Executed checks
 
-- **30 automated tests passed.** These include coherent amplitude positivity,
+- **33 automated tests passed.** These include coherent amplitude positivity,
   Gaussian overlap normalization, exact SBI sampling moments, analytic score
   finite differences, selected-rate normalization, degree-six interpolation
   and its derivatives, stable Poisson likelihoods near their minimum,
   multi-minimum scalar fits, fraction spline positivity/zero preservation,
   actual toolkit JAX/NumPy likelihood agreement, actual toolkit training and
-  checkpoint reload, and stale-selection protection.
+  checkpoint reload, and stale-selection protection. The NI-only generation
+  inventory and rejection of older run manifests are also covered.
+- The NI Gaussian constraint is checked explicitly with nuisance-neutral
+  templates: its contribution is exactly **alpha_NI² to -2 log L** in the
+  actual toolkit JAX objective, the NumPy unbinned likelihood, both direct
+  histogram morph orders, and held-out spline templates. The JAX nuisance
+  derivative is also checked against 2 alpha_NI.
 - **All 33 code cells in all five notebooks executed successfully** with the
   smoke configuration. This included generating every nominal/varied sample,
-  training the selector and all nine ratio tasks, constructing workspaces,
+  training the selector and all five ratio tasks, constructing workspaces,
   fitting the Asimov scans, filling and fitting histograms, fitting splines,
-  and producing all eight PDF figures. Notebook files remain free of outputs.
+  and producing all eight PDF figures. This was a fresh NI-only run with six
+  samples and one nuisance parameter. Notebook files remain free of outputs.
 - Notebook format and Python syntax were validated. Models and generated
   samples are runtime products and are not committed to the repository.
 
@@ -42,18 +49,18 @@ than establish precise density-ratio calibration.
   and 92.0%** of the extended Fisher information in this small quadrature.
 - With 31 spline-grid points plus the truth anchor, the largest tested
   spline/direct-histogram difference is **0.279** in the stat-only test
-  statistic and **0.278** after profiling. Six of the ten tested mu values
+  statistic and **0.281** after profiling NI. Six of the ten tested mu values
   lie between spline anchors. These are measured residual errors, not zero
   by construction.
 
 The deliberately undertrained smoke density ratios **do not achieve physics
-closure**: their fitted mu is approximately 0.274 without nuisances and 0.147
-with profiling, whereas the generating value is 1. The notebooks expose these
+closure**: their fitted mu is approximately 0.274 without nuisances and 0.260
+with NI profiling, whereas the generating value is 1. The notebooks expose these
 discrepancies using analytical truth; they never substitute a learned-model
 Asimov sample to conceal them. An optimizer's valid minimum alone does not
 demonstrate a calibrated model.
 
-Production defaults are 5 million events in each of ten samples, longer
+Production defaults are 5 million events in each of six samples, longer
 training, three-member ratio ensembles, finer histograms, and 61 spline-grid
 points. **That full production training has not been executed here.** Its
 calibration, positive intensities over the fitted domain, integration precision,
@@ -65,7 +72,7 @@ and between-anchor spline errors must be judged from the generated diagnostics.
 python -m pip install -r requirements-colab.txt
 python -m pip install -e '.[dev]'
 python -m pytest -q
-python scripts/smoke.py --root /tmp/poodemo-smoke
+python scripts/smoke.py --root /tmp/poodemo-smoke-ni
 ```
 
 Use a new directory for a changed configuration. The tutorial does not claim

@@ -11,12 +11,12 @@ import numpy as np
 TOOLKIT_COMMIT = "fc09848fc6540fd32310faebbe9db6eea7ecd17b"
 PROCESSES = ("S", "SBI", "B", "NI")
 SAMPLES = {
-    "S": ("S", 0., 0.), "SBI": ("SBI", 0., 0.),
-    "B": ("B", 0., 0.), "NI": ("NI", 0., 0.),
-    "B_up": ("B", 1., 0.), "B_down": ("B", -1., 0.),
-    "SBI_up": ("SBI", 1., 0.), "SBI_down": ("SBI", -1., 0.),
-    "NI_up": ("NI", 0., 1.), "NI_down": ("NI", 0., -1.),
+    "S": ("S", 0.), "SBI": ("SBI", 0.),
+    "B": ("B", 0.), "NI": ("NI", 0.),
+    "NI_up": ("NI", 1.), "NI_down": ("NI", -1.),
 }
+# Stable streams preserve the retained samples when nuisance layouts change.
+SAMPLE_STREAMS = {"S": 0, "SBI": 1, "B": 2, "NI": 3, "NI_up": 8, "NI_down": 9}
 SPLITS = {"preselection_train": (0., .20), "preselection_validation": (.20, .25),
           "selection_calibration": (.25, .30), "train": (.30, .70),
           "validation": (.70, .80), "calibration": (.80, .85), "integration": (.85, 1.)}
@@ -54,7 +54,7 @@ def default_config(mode="production"):
     if mode not in ("production", "smoke"):
         raise ValueError("mode must be production or smoke")
     small = mode == "smoke"
-    return dict(schema_version=2, mode=mode, seed=20261006,
+    return dict(schema_version=3, mode=mode, seed=20261006,
                 toolkit_commit=TOOLKIT_COMMIT,
                 n_per_sample=12_000 if small else 5_000_000,
                 generation_chunk=10_000 if small else 250_000,
@@ -127,7 +127,7 @@ def generate_samples(run):
     """Generate exact iid samples in bounded memory; resume complete files only."""
     records = []
     n = run.config["n_per_sample"]
-    for index, (name, (component, alpha_b, alpha_ni)) in enumerate(SAMPLES.items()):
+    for name, (component, alpha_ni) in SAMPLES.items():
         path = run.path("raw", name + ".npy")
         if path.exists():
             x = np.load(path, mmap_mode="r", allow_pickle=False)
@@ -135,18 +135,18 @@ def generate_samples(run):
                 raise ValueError(f"Invalid cached sample {path}")
             del x
         else:
-            rng = np.random.default_rng(np.random.SeedSequence([run.config["seed"], index]))
+            rng = np.random.default_rng(np.random.SeedSequence([run.config["seed"], SAMPLE_STREAMS[name]]))
             tmp = path.with_suffix(".partial.npy")
             out = np.lib.format.open_memmap(tmp, mode="w+", dtype="float32", shape=(n, 3))
             for start in range(0, n, run.config["generation_chunk"]):
                 stop = min(n, start + run.config["generation_chunk"])
                 out[start:stop] = run.model.sample_component(component, stop-start, rng,
-                                                          alpha_b=alpha_b, alpha_ni=alpha_ni)
+                                                          alpha_ni=alpha_ni)
             out.flush()
             del out
             os.replace(tmp, path)
         records.append(dict(sample=name, events=n,
-                            expected_yield=run.model.component_yield(component, alpha_b=alpha_b, alpha_ni=alpha_ni),
+                            expected_yield=run.model.component_yield(component, alpha_ni=alpha_ni),
                             megabytes=path.stat().st_size/1e6))
         print(f"{name}: {n:,} events ready", flush=True)
     save_json(run.path("raw", "manifest.json"), {"samples": records, "splits": SPLITS})
@@ -177,7 +177,7 @@ def materialize_selection(run, predictor, threshold):
         raise ValueError("Selected arrays lack a model fingerprint. Choose a new run directory.")
     else:
         save_json(state_path, {"selection_fingerprint": fingerprint, "threshold": float(threshold)})
-    for name, (component, ab, an) in SAMPLES.items():
+    for name, (component, an) in SAMPLES.items():
         for split in ANALYSIS_SPLITS:
             path = run.path("selected", f"{name}_{split}.npy")
             x = raw_split(run, name, split)
@@ -207,7 +207,7 @@ def materialize_selection(run, predictor, threshold):
             accepted = len(np.load(path, mmap_mode="r"))
             records.append(dict(sample=name, split=split, generated=len(x), accepted=accepted,
                                 efficiency=accepted/len(x),
-                                expected_yield=run.model.component_yield(component, alpha_b=ab, alpha_ni=an)*accepted/len(x)))
+                                expected_yield=run.model.component_yield(component, alpha_ni=an)*accepted/len(x)))
     save_json(run.path("selected", "manifest.json"), {"threshold": float(threshold),
               "selection_fingerprint": fingerprint, "records": records})
     return records
