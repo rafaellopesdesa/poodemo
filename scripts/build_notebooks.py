@@ -299,6 +299,97 @@ def plot_scans(frame, title, filename, group_columns=None):
 '''
 
 
+SCORE_DISTRIBUTIONS_INTRO = r'''
+### How the observable changes with eta
+
+These panels show expected event yields after preselection, with both the
+observable constructed at \(\eta\) and the physical prediction evaluated at
+\(\mu=\eta\), at nominal \(\alpha_{NI}=0\). For each bin, the coherent layer is
+\[
+\nu_{\mathrm{SBI},i}^{(\eta)}
+=(\eta-\sqrt\eta)\nu_{S,i}(\eta)
++\sqrt\eta\,\nu_{SBI,i}(\eta)
++(1-\sqrt\eta)\nu_{B,i}(\eta).
+\]
+It is stacked above \(\nu_{NI,i}(\eta)\). Combine the three coherent terms
+**before stacking**: their individual coefficients can be negative, while
+their physical sum is nonnegative. The curves are not normalized to unit area.
+NI's total yield stays fixed even though its distribution in \(z_\eta\) changes.
+
+Edit `ETA_VALUES` and `HIST_BINS` below to explore other choices. All panels
+use the same bins and axes; `LOG_Y = True` exposes the tails (set it to `False`
+for linear axes). After running setup, this cell can run independently
+of the likelihood scans: it reuses the cached analytical quadrature without
+retraining or refitting. The figure uses ATLAS-style formatting for this toy
+model and is saved as PDF and PNG in the run's `plots` directory on Drive.
+'''
+
+SCORE_DISTRIBUTIONS = r'''
+import mplhep as hep
+from scipy.special import expit
+from poodemo.pipeline import prepare_quadrature, _score
+from poodemo.inference import histogram_components
+
+ETA_VALUES = [0.1, 0.5, 1.0, 3.0]
+HIST_BINS = 128
+LOG_Y = True
+edges = np.linspace(0., 1., HIST_BINS + 1)
+quad = prepare_quadrature(run)
+distributions = []
+for eta in ETA_VALUES:
+    z_eta = expit(_score(run, quad, eta) / run.config["score_scale"])
+    # The cached fields already include the process yields (lambda factors).
+    nu_s, nu_sbi, nu_b, nu_ni = histogram_components(
+        z_eta, quad["nominal"], quad["weights"], edges)
+    root_eta = np.sqrt(eta)
+    coherent = (eta - root_eta)*nu_s + root_eta*nu_sbi + (1. - root_eta)*nu_b
+    tolerance = 1e-12 * max(1., np.max(np.abs(coherent)))
+    if np.any(coherent < -tolerance):
+        raise ValueError(f"Negative coherent prediction at eta={eta}: {coherent.min()}")
+    # Remove only floating-point roundoff after checking positivity.
+    distributions.append((eta, np.maximum(coherent, 0.), nu_ni))
+
+with plt.style.context(hep.style.ATLAS), plt.rc_context({"font.size": 16}):
+    ncols = min(2, len(distributions))
+    nrows = (len(distributions) + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7*ncols, 4.8*nrows),
+                             sharex=True, sharey=True, squeeze=False)
+    ymax = max(np.max(coherent + ni) for _, coherent, ni in distributions)
+    for ax, (eta, coherent, ni) in zip(axes.flat, distributions):
+        hep.histplot([ni, coherent], bins=edges, stack=True, histtype="fill",
+                     color=["#B8B8B8", "#56B4E9"], edgecolor="black", linewidth=0.7,
+                     label=["Non-interfering background", r"Coherent SBI ($\mu=\eta$)"],
+                     yerr=False, ax=ax)
+        ax.text(0.04, 0.94, fr"$\eta={eta:g},\quad\alpha_{{NI}}=0$",
+                transform=ax.transAxes, va="top", fontsize=16)
+        ax.set(xlim=(0, 1),
+               xlabel=r"Score observable $z_\eta$", ylabel="Expected events / bin")
+        if LOG_Y:
+            ax.set_yscale("log")
+            ax.set_ylim(ymax*1e-5, ymax*30)
+        else:
+            ax.set_ylim(0, 1.45*ymax)
+        ax.tick_params(labelbottom=True, labelleft=True)
+        ax.grid(False)
+        ax.legend(loc="upper right", fontsize=12, frameon=False)
+    for ax in axes.flat[len(distributions):]:
+        ax.set_visible(False)
+    fig.suptitle("Gaussian-amplitude toy · after preselection", fontsize=19)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    (ROOT / "plots").mkdir(exist_ok=True)
+    for extension in ("pdf", "png"):
+        fig.savefig(ROOT / "plots" / f"04_score_distributions.{extension}",
+                    bbox_inches="tight", dpi=160)
+    plt.show()
+
+display(pd.DataFrame([
+    {"eta": eta, "coherent_SBI_yield": coherent.sum(), "NI_yield": ni.sum(),
+     "total_yield": (coherent + ni).sum()}
+    for eta, coherent, ni in distributions
+]))
+'''
+
+
 def start(title, introduction):
     return [md(f"# {title}\n\n{introduction}"), md(SETUP_INTRO), code(BOOTSTRAP), code(COMMON_IMPORTS)]
 
@@ -671,6 +762,8 @@ def build():
         rate information. The bounded observable is
         \(z_\eta=1/[1+\exp(-o_\eta/a)]\), with **\(a=1\)**.
         """),
+        md(SCORE_DISTRIBUTIONS_INTRO),
+        code(SCORE_DISTRIBUTIONS),
         md(r"""
         ### Freeze the observable inside each likelihood fit
 
