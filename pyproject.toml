@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poodemo"
+version = "0.1.0"
+description = "Parameterized optimal observables: an interference toy for NSBI and binned likelihoods"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<3",
+  "scipy>=1.13,<2",
+  "pandas>=2.2,<3",
+  "matplotlib>=3.8,<4",
+  "scikit-learn>=1.5,<2",
+  "PyYAML>=6,<7",
+  "nbformat>=5.10,<6",
+]
+
+[project.optional-dependencies]
+training = [
+  "torch>=2.5,<3",
+  "pytorch-lightning>=2.5,<2.6",
+  "onnx>=1.17,<2",
+  "onnxruntime>=1.20,<2",
+  "joblib>=1.4,<2",
+  "mplhep>=0.4,<1",
+  "uproot>=5.5,<6",
+  "awkward>=2.7,<3",
+]
+inference = ["jax>=0.5.2,<0.6", "iminuit>=2.30,<3"]
+dev = ["pytest>=8,<9", "nbclient>=0.10,<1"]
+
+[tool.setuptools.packages.find]
+include = ["poodemo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

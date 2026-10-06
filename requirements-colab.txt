@@ -1,0 +1,21 @@
+# Toolkit source is fixed so upstream changes cannot alter a saved experiment.
+nsbi-common-utils @ git+https://github.com/iris-hep/nsbi-lhc-toolkit.git@fc09848fc6540fd32310faebbe9db6eea7ecd17b
+# Keep the Colab CUDA-enabled torch build when it satisfies this range.
+torch>=2.5,<3
+pytorch-lightning==2.5.5
+numpy>=1.26,<3
+scipy>=1.13,<2
+pandas>=2.2,<3
+matplotlib>=3.8,<4
+scikit-learn>=1.5,<2
+onnx>=1.17,<2
+onnxruntime>=1.20,<2
+joblib>=1.4,<2
+mplhep>=0.4,<1
+uproot>=5.5,<6
+awkward>=2.7,<3
+jax==0.5.3
+iminuit>=2.30,<3
+PyYAML>=6,<7
+nbformat>=5.10,<6
+ipykernel>=6,<7

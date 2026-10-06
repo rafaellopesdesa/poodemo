@@ -1,0 +1,42 @@
+"""Cross-module checks for score normalization and stale selection protection."""
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from poodemo.data import Run, SPLITS, materialize_selection
+from poodemo.physics import PhysicsModel
+from poodemo.pipeline import _score
+
+
+def test_disjoint_stage_partitions_and_cached_selected_score(tmp_path):
+    intervals = sorted(SPLITS.values())
+    assert intervals[0][0] == 0 and intervals[-1][1] == 1
+    assert all(a[1] == b[0] for a, b in zip(intervals[:-1], intervals[1:]))
+    model = PhysicsModel()
+    rng = np.random.default_rng(42)
+    x = np.concatenate([model.sample_component(p, 500, rng) for p in ("S", "B", "NI")])
+    proposal = sum(model.component_pdf(x, p) for p in ("S", "B", "NI"))/3
+    selected = x[:, 0] + x[:, 1] > 0.5
+    weights = (1/(len(x)*proposal))[selected]
+    x = x[selected]
+    nominal = model.component_densities(x).T
+    yields = dict(zip(("S", "SBI", "B", "NI"), nominal @ weights))
+    quad = {"x": x, "nominal": nominal, "weights": weights}
+    run = Run(tmp_path, {}, model)
+    for eta in (.1, 1., 3.):
+        np.testing.assert_allclose(_score(run, quad, eta),
+                                   model.score(x, eta, selected_yields=yields), atol=1e-13)
+        np.testing.assert_allclose(np.sum(weights*model.intensity(x, eta)*_score(run, quad, eta)),
+                                   0., atol=1e-11)
+
+
+def test_changed_selector_cannot_reuse_cached_events(tmp_path):
+    (tmp_path / "selected").mkdir()
+    (tmp_path / "models" / "preselection").mkdir(parents=True)
+    (tmp_path / "models" / "preselection" / "model.pt").write_bytes(b"new weights")
+    (tmp_path / "selected" / "selection_state.json").write_text(json.dumps({"selection_fingerprint": "old"}))
+    run = Run(tmp_path, {"generation_chunk": 10}, PhysicsModel())
+    with pytest.raises(ValueError, match="Preselection changed"):
+        materialize_selection(run, None, .4)
