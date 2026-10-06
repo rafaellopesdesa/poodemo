@@ -56,16 +56,16 @@ checks the workflow and does **not** establish final physics precision.
 ## The model
 
 For normalized three-dimensional Gaussian densities
-\(\phi_j=\mathcal N_3(m_j,\Sigma_j)\), use
+$\phi_j=\mathcal N_3(m_j,\Sigma_j)$, use
 
-\[
+$$
 A_S=\sqrt{\lambda_S\phi_S},\qquad
 A_B=e^{i\varphi}\sqrt{\lambda_B\phi_B},\qquad
 \cos\varphi=-0.65.
-\]
+$$
 
 These are Gaussian wavefunctions. The expected inclusive yields are
-\(\lambda_S=100\), \(\lambda_B=1000\), and \(\lambda_{NI}=10000\).
+$\lambda_S=100$, $\lambda_B=1000$, and $\lambda_{NI}=10000$.
 Means and correlated covariance matrices differ between processes and are
 recorded in `run.json`. The SBI template is a positive process with intensity
 \(D_{SBI}=|A_S+A_B|^2\). Its integral is calculated analytically, including
@@ -73,11 +73,11 @@ interference; the default is approximately 820.26 events. NI is incoherent.
 
 The physical intensity is
 
-\[
+$$
 D(x;\mu)=|\sqrt\mu A_S+A_B|^2+D_{NI}
 =(\mu-\sqrt\mu)D_S+\sqrt\mu D_{SBI}
  +(1-\sqrt\mu)D_B+D_{NI}.
-\]
+$$
 
 The Gaussian-amplitude construction makes this intensity positive for
 \(\mu\ge0\). SBI is sampled with rejection sampling using an exact envelope.
@@ -130,15 +130,15 @@ component and ±1-anchor densities followed by the same exponential–polynomial
 nuisance model, rather than the continuously shifted Gaussian at every nuisance
 value.
 
-For \(D_\mu=\sum_j c_j(\mu)\lambda_jp_j\) and
-\(\Lambda_\mu=\sum_j c_j(\mu)\lambda_j\), notebook 4 uses
+For $D_\mu=\sum_j c_j(\mu)\lambda_jp_j$ and
+$\Lambda_\mu=\sum_j c_j(\mu)\lambda_j$, notebook 4 uses
 
-\[
+$$
 o_\eta(x)=\left.\partial_\mu\log p(x;\mu)\right|_\eta
 =\frac{D'_\eta(x)}{D_\eta(x)}
  -\frac{\Lambda'_\eta}{\Lambda_\eta},\qquad
 z_\eta=\frac1{1+e^{-o_\eta}}.
-\]
+$$
 
 Every component includes its yield. The total-rate denominator contains only
 yields, not a residual \(p_{NI}(x)\) factor. Total-count information is retained
