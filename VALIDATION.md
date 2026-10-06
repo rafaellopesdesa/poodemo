@@ -5,7 +5,25 @@ PyTorch Lightning 2.5.5, PyTorch 2.14.1 (CPU execution), NumPy 2.3.5,
 SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:
 `fc09848fc6540fd32310faebbe9db6eea7ecd17b`.
 
-## Executed checks
+## Colab import regression
+
+The output committed in notebook 1 reproduced `ModuleNotFoundError: No module
+named 'poodemo.pipeline'` after installation. The shared setup now explicitly
+adds the checkout to the running kernel's import path and clears an incorrectly
+cached `poodemo` package when necessary.
+
+**Three targeted checks passed:** initial import in the Colab directory layout,
+recovery after a failed import cached the outer checkout as a namespace package,
+and consistency of the setup cell across all five notebooks. Both import checks
+also rerun setup after success and confirm that the correctly loaded package is
+retained. These run in isolated Python processes with Drive mounting stubbed and
+installation skipped; they do not claim a live authenticated Colab session.
+All regenerated notebooks also pass format and Python syntax validation.
+
+## NI-only scientific workflow checks
+
+The following results are from the NI-only revision before the setup-only import
+fix; the scientific code and configuration are unchanged by that fix.
 
 - **33 automated tests passed.** These include coherent amplitude positivity,
   Gaussian overlap normalization, exact SBI sampling moments, analytic score

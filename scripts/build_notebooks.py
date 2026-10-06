@@ -143,6 +143,23 @@ if IN_COLAB:
     if os.environ.get("POODEMO_SKIP_INSTALL") != "1":
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", str(REPO_DIR / "requirements-colab.txt")])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-e", str(REPO_DIR)])
+
+    # A new editable install is not activated in an already-running kernel.
+    # Expose the inner package directly, including after a failed import cached
+    # the outer /content/poodemo checkout as a namespace package.
+    import importlib
+    source_root = str(REPO_DIR.resolve())
+    if source_root in sys.path:
+        sys.path.remove(source_root)
+    sys.path.insert(0, source_root)
+    importlib.invalidate_caches()
+    cached_package = sys.modules.get("poodemo")
+    cached_file = getattr(cached_package, "__file__", None)
+    expected_init = REPO_DIR / "poodemo" / "__init__.py"
+    if cached_package is not None and (cached_file is None or Path(cached_file).resolve() != expected_init.resolve()):
+        for module_name in list(sys.modules):
+            if module_name == "poodemo" or module_name.startswith("poodemo."):
+                del sys.modules[module_name]
 else:
     # Locally: pip install -r requirements-colab.txt && pip install -e .
     ROOT = Path(os.environ.get("POODEMO_ROOT", str(Path.home() / "poodemo-runs" / RUN_NAME)))
