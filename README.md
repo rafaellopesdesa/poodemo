@@ -1,6 +1,6 @@
 # Parameterized optimal observables: an interference toy
 
-Seven Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
+Nine Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
 neural simulation-based inference, and a parameterized binned approximation
 built from either the likelihood score or a bounded density ratio. Data and trained models persist in your Google
 Drive; the source lives in this repository.
@@ -18,6 +18,8 @@ to lie near $\mu\simeq0.5$.
 | [05_spline_templates.ipynb](notebooks/05_spline_templates.ipynb) | Interpolate moving bin fractions, validate splines, and compare profiled scans | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/05_spline_templates.ipynb) |
 | [06_ratio_histograms.ipynb](notebooks/06_ratio_histograms.ipynb) | Repeat notebook 4 using the bounded analytical ratio to the S reference | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/06_ratio_histograms.ipynb) |
 | [07_ratio_spline_templates.ipynb](notebooks/07_ratio_spline_templates.ipynb) | Repeat notebook 5 with ratio-observable templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/07_ratio_spline_templates.ipynb) |
+| [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Repeat notebook 6 with the bounded physical ratio p(x;eta)/p(x;1) | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
+| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Repeat notebook 7 with physical-reference ratio templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 
 ## Run in Colab
 
@@ -491,3 +493,24 @@ The full 5-million-event production training is separate from the smoke checks.
   information*](https://arxiv.org/abs/1107.3797).
 - [Alsing and Wandelt, *Nuisance hardened data compression for fast
   likelihood-free inference*](https://arxiv.org/abs/1903.01473).
+
+
+## Physical-reference ratio comparison (08–09)
+
+Run 08 then 09 in fresh runtimes using the same completed `RUN_NAME`. No new
+samples or training are required. Notebook 08 mirrors 06's current binning and
+plot controls; 09 uses 20 bins. Results have the `reference_ratio_` prefix and
+figures use `08_`/`09_`, leaving score and S-reference studies intact.
+
+The analytical observable is `R/(1+R)`, where
+`R = r(x;eta)/r(x;1) = p_selected(x;eta,0)/p_selected(x;1,0)`.
+It preserves the continuous pairwise comparison with truth 1 at fixed NI.
+Finite uniform binning and NI profiling have no corresponding optimality
+guarantee. At eta=1 it is exactly 1/2: the frozen experiment retains only rate
+information. Notebook 08 explicitly diagnoses the collapse. Notebook 09 keeps
+the original PCHIP study and highlights its inability to reproduce discontinuous
+bin yields across that anchor; inspect off-anchor interpolation errors.
+
+Rebuild only these new notebooks with `python scripts/build_reference_notebooks.py`.
+The builder reads the current 06/07 cell sources and clears outputs in 08/09;
+it does not rewrite 01–07.

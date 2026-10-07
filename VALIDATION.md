@@ -1,5 +1,35 @@
 # Validation
 
+## Physical-reference ratio notebooks (7 October 2026)
+
+Notebooks 08/09 mirror the current 06/07 sources with the analytical observable
+R/(1+R), R=p_selected(x;eta,0)/p_selected(x;1,0). All seven earlier notebooks
+are unchanged. No new training or production rerun was performed.
+
+- **72 tests passed, 10 skipped** in this environment. Skips concern optional
+  training/toolkit dependencies; this run does not establish GPU compatibility.
+- Tests verify cancellation of the S reference, selected-density normalization,
+  exact z=1/2 at eta=1, zero shape Fisher information at that anchor, and
+  preservation of pairwise likelihood differences in resolved categorical bins.
+  Real SciPy binning/spline/estimator workflows verify finite fits, exact Asimov
+  t(1)=0 and separate artifact names.
+- Scientific and plotting cells ran on 4,500 independent Gaussian mixture
+  quadrature nodes without preselection, using the physical model, 17 uniform
+  scan points plus truth, all 15 coarsenings from 4 to 60, 32 estimator bins,
+  and 20 spline bins with the smoke anchor grid. Setup and checkpoint loading
+  were bypassed; analytical unbinned references were fitted with SciPy, and the
+  learned-model refresh was replaced by these references. All figures rendered.
+  This checks notebook execution, not neural closure or selected production data.
+- The midpoint checks explicitly expose the collapse: the largest bin-fraction
+  error was about 0.47 near eta=1. The coarse scan happened to coincide with
+  spline anchors, so its tiny likelihood differences are not evidence of
+  off-anchor interpolation accuracy. Notebook 09 surfaces the worst midpoint
+  errors and warns that continuous PCHIP cannot represent the bin discontinuity.
+
+Uniform bins, the singular observable, and the original spline method are kept
+intentionally for a controlled comparison. No adaptive rescaling, jitter or
+silent direct-template fallback masks this behavior.
+
 ## Parallel ratio-observable notebooks (7 October 2026)
 
 Notebooks 6–7 repeat the score workflow with the analytical selected-density

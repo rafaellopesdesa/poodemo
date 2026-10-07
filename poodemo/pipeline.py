@@ -283,10 +283,10 @@ def _score(run, quad, eta):
 
 
 def observable_metadata(observable="score"):
-    """Names and isolated result-file prefixes for the two compression studies."""
-    if not isinstance(observable, str) or observable not in ("score", "ratio"):
-        raise ValueError("observable must be 'score' or 'ratio'")
-    return dict(observable=observable, prefix="" if observable == "score" else "ratio_",
+    """Names and isolated result-file prefixes for the compression studies."""
+    if not isinstance(observable, str) or observable not in ("score", "ratio", "reference_ratio"):
+        raise ValueError("observable must be 'score', 'ratio', or 'reference_ratio'")
+    return dict(observable=observable, prefix="" if observable == "score" else observable + "_",
                 direct_label=f"direct {observable} histogram",
                 fixed_label=f"fixed {observable} histogram",
                 spline_label=f"spline {observable} histogram")
@@ -300,6 +300,8 @@ def observable_values(run, quad, eta, observable="score"):
     Both densities in that ratio are normalized on the same final quadrature;
     its value is independent of exposure and of the score's logistic scale.
     Positive eta is required by the common Fisher-information study.
+    ``reference_ratio`` uses R = r_eta/r_1 = p_selected(x; eta, 0) /
+    p_selected(x; 1, 0). Its denominator stays fixed when fitting mu or NI.
     """
     observable_metadata(observable)
     eta = float(eta)
@@ -311,15 +313,20 @@ def observable_values(run, quad, eta, observable="score"):
     from .inference import component_coefficients
     nominal, weights = quad["nominal"], quad["weights"]
     density = component_coefficients(eta) @ nominal
-    signal = nominal[0]
+    signal = (component_coefficients(1.) @ nominal
+              if observable == "reference_ratio" else nominal[0])
     total_rate, signal_rate = float(density @ weights), float(signal @ weights)
     if (not np.isfinite(total_rate) or total_rate <= 0
             or not np.isfinite(signal_rate) or signal_rate <= 0):
-        raise ValueError("The ratio observable needs positive finite selected total and S yields")
+        raise ValueError("The ratio observable needs positive finite selected total and reference yields")
     if np.any(~np.isfinite(signal)) or np.any(signal <= 0):
-        raise ValueError("The ratio observable needs a positive finite S reference density")
+        raise ValueError("The ratio observable needs a positive finite reference density")
     if np.any(~np.isfinite(density)) or np.any(density < 0):
         raise ValueError("The ratio observable needs a finite nonnegative physical intensity")
+    if observable == "reference_ratio" and eta == 1.:
+        # Exact cancellation is essential: roundoff on a bin edge at 1/2
+        # would otherwise split a mathematically constant observable.
+        return np.full_like(density, .5, dtype=float)
     # A zero physical density maps to z=0. Work in logs to avoid overflowing
     # large ratios in the S tails; expit also handles the limiting z=1 value.
     with np.errstate(divide="ignore"):
@@ -462,7 +469,7 @@ def run_spline_study(run, n_bins=None, *, observable="score"):
     """
     from .inference import YieldFractionSpline, component_coefficients
     options = observable_metadata(observable)
-    previous_notebook = 4 if observable == "score" else 6
+    previous_notebook = {"score": 4, "ratio": 6, "reference_ratio": 8}[observable]
     c = run.config
     if n_bins is not None and (
             isinstance(n_bins, (bool, np.bool_))
@@ -487,6 +494,8 @@ def run_spline_study(run, n_bins=None, *, observable="score"):
     quad = prepare_quadrature(run)
     edges = np.linspace(0, 1, nbins+1)
     etas = spline_eta_grid(run, quad)
+    if observable == "reference_ratio" and etas[0] <= 1. <= etas[-1]:
+        etas = np.unique(np.r_[etas, 1.])
     anchor_values = np.stack([_histogram_anchors(quad, observable_values(run, quad, eta, observable), edges) for eta in etas])
     spline = YieldFractionSpline(etas, anchor_values)
     np.savez_compressed(run.path("results", options["prefix"] + "spline_templates.npz"), etas=etas,
