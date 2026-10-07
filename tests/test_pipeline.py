@@ -7,7 +7,7 @@ import pytest
 
 from poodemo.data import Run, SPLITS, create_run, generate_samples, materialize_selection
 from poodemo.physics import PhysicsModel
-from poodemo.pipeline import RATIO_TASKS, _score, mu_fit_starts
+from poodemo.pipeline import RATIO_TASKS, _score, mu_fit_starts, mu_grid, spline_eta_grid
 
 
 def test_disjoint_stage_partitions_and_cached_selected_score(tmp_path):
@@ -28,8 +28,9 @@ def test_disjoint_stage_partitions_and_cached_selected_score(tmp_path):
     for eta in (.1, 1., 3.):
         np.testing.assert_allclose(_score(run, quad, eta),
                                    model.score(x, eta, selected_yields=yields), atol=1e-13)
-        np.testing.assert_allclose(np.sum(weights*model.intensity(x, eta)*_score(run, quad, eta)),
-                                   0., atol=1e-11)
+        probabilities = weights * model.intensity(x, eta)
+        probabilities /= probabilities.sum()
+        np.testing.assert_allclose(np.sum(probabilities * _score(run, quad, eta)), 0., atol=1e-14)
 
 
 def test_changed_selector_cannot_reuse_cached_events(tmp_path):
@@ -76,4 +77,22 @@ def test_physics_overrides_are_recorded_and_cannot_reuse_another_model(tmp_path)
     assert run.config["asimov_mu"] in starts
     assert min(starts) == run.config["mu_fit_bounds"][0]
     assert max(starts) == run.config["mu_fit_bounds"][1]
-    assert any(6 < value < 10 for value in starts)
+    assert any(.3 < value < .7 for value in starts)
+
+
+def test_production_spline_comparison_uses_genuine_held_out_etas(tmp_path):
+    run = create_run(tmp_path)
+    rates = np.array([run.model.component_yield(p) for p in ("S", "SBI", "B", "NI")])
+    quad = {"nominal": rates[:, None], "weights": np.ones(1)}
+    anchors = spline_eta_grid(run, quad)
+    scan = mu_grid(run)
+    at_anchor = np.any(np.isclose(scan[:, None], anchors[None, :], rtol=0., atol=1e-12), axis=1)
+    # Aligned grids made a previous interpolation check agree by construction.
+    assert np.mean(~at_anchor) > .9
+    assert np.all(np.diff(anchors) > 0)
+    assert anchors[0] == run.config["mu_min"]
+    assert anchors[-1] == run.config["mu_max"]
+    assert run.config["asimov_mu"] in anchors
+    turnover = ((rates[0] + rates[2] - rates[1]) / (2 * rates[0]))**2
+    nearby = anchors[np.abs(anchors - turnover) < .05]
+    assert np.max(np.diff(nearby)) < .0002

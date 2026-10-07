@@ -17,11 +17,12 @@ class PhysicsTests(unittest.TestCase):
         identity = ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))
         model = PhysicsModel(mean_s=(1., 1., 1.), mean_b=(1., 1., 1.), cov_s=identity, cov_b=identity)
         self.assertAlmostEqual(model.gaussian_overlap(), 1., places=14)
-        expected = 1100 + 2 * model.phase_cos * np.sqrt(100 * 1000)
-        self.assertAlmostEqual(model.component_yield("SBI"), expected, places=11)
+        signal, background = model.component_yield("S"), model.component_yield("B")
+        expected = signal + background + 2 * model.phase_cos * np.sqrt(signal * background)
+        self.assertAlmostEqual(model.component_yield("SBI") / expected, 1., places=13)
 
     def test_coherent_amplitudes_and_positive_intensity(self):
-        self.assertEqual(self.model.phase_cos, -.65)
+        self.assertLess(self.model.phase_cos, 0.)
         nominal_sbi = self.model.component_density(self.x, "SBI")
         interference = nominal_sbi - self.model.component_density(self.x, "S") - self.model.component_density(self.x, "B")
         self.assertTrue(np.all(interference < 0))
@@ -62,9 +63,10 @@ class PhysicsTests(unittest.TestCase):
             step = 1e-5
             arguments = {"alpha_ni": -.7}
             fd_intensity = (self.model.intensity(self.x, mu + step, **arguments) - self.model.intensity(self.x, mu - step, **arguments)) / (2 * step)
-            np.testing.assert_allclose(self.model.mu_derivative(self.x, mu, **arguments), fd_intensity, rtol=2e-8, atol=2e-8)
+            np.testing.assert_allclose(self.model.mu_derivative(self.x, mu, **arguments), fd_intensity,
+                                       rtol=2e-8, atol=2e-8 * self.model.exposure)
             fd_rate = (self.model.total_yield(mu + step, **arguments) - self.model.total_yield(mu - step, **arguments)) / (2 * step)
-            self.assertAlmostEqual(self.model.yield_mu_derivative(mu, **arguments), fd_rate, delta=2e-7)
+            np.testing.assert_allclose(self.model.yield_mu_derivative(mu, **arguments), fd_rate, rtol=2e-8)
             fd_score = (np.log(self.model.pdf(self.x, mu + step, **arguments)) - np.log(self.model.pdf(self.x, mu - step, **arguments))) / (2 * step)
             np.testing.assert_allclose(self.model.score(self.x, mu, **arguments), fd_score, rtol=2e-7, atol=2e-9)
 
@@ -85,7 +87,8 @@ class PhysicsTests(unittest.TestCase):
         points = np.empty((n, 3))
         points[choose_s] = self.model.sample_component("S", int(choose_s.sum()), rng)
         points[~choose_s] = self.model.sample_component("B", int((~choose_s).sum()), rng)
-        proposal = (self.model.component_density(points, "S") + self.model.component_density(points, "B")) / 1100
+        total = self.model.component_yield("S") + self.model.component_yield("B")
+        proposal = (self.model.component_density(points, "S") + self.model.component_density(points, "B")) / total
         weights = self.model.component_pdf(points, "SBI") / proposal
         self.assertLess(abs(weights.mean() - 1.), 5 * weights.std(ddof=1) / np.sqrt(n))
 
@@ -95,8 +98,9 @@ class PhysicsTests(unittest.TestCase):
         pb = np.linalg.inv(np.asarray(self.model.cov_b))
         mean_s, mean_b = self.model.mean("S"), self.model.mean("B")
         mean_overlap = np.linalg.solve(ps + pb, ps @ mean_s + pb @ mean_b)
-        lam_i = self.model.component_yield("SBI") - 1100.
-        expected_mean = (100 * mean_s + 1000 * mean_b + lam_i * mean_overlap) / self.model.component_yield("SBI")
+        lam_s, lam_b = self.model.component_yield("S"), self.model.component_yield("B")
+        lam_i = self.model.component_yield("SBI") - lam_s - lam_b
+        expected_mean = (lam_s * mean_s + lam_b * mean_b + lam_i * mean_overlap) / self.model.component_yield("SBI")
         standard_error = sample.std(axis=0, ddof=1) / np.sqrt(len(sample))
         self.assertTrue(np.all(np.abs(sample.mean(axis=0) - expected_mean) < 5 * standard_error))
 
@@ -116,8 +120,8 @@ class PhysicsTests(unittest.TestCase):
         self.assertNotIn("direction_b", self.model.to_dict())
         self.assertNotIn("shift_fraction_b", self.model.to_dict())
         np.testing.assert_allclose(restored.component_densities(self.x, alpha_ni=.5), self.model.component_densities(self.x, alpha_ni=.5), rtol=2e-15)
-        twice = PhysicsModel(exposure=2.)
-        np.testing.assert_allclose(twice.intensity(self.x, 1.2), 2 * self.model.intensity(self.x, 1.2), rtol=2e-15)
+        twice = PhysicsModel(exposure=2 * self.model.exposure)
+        np.testing.assert_allclose(twice.intensity(self.x, 1.2), 2 * self.model.intensity(self.x, 1.2), rtol=4e-15)
         np.testing.assert_allclose(twice.score(self.x, 1.2), self.model.score(self.x, 1.2), atol=3e-16)
         self.assertEqual(self.model.component_densities(self.x[0]).shape, (len(COMPONENTS),))
         self.assertEqual(self.model.sample_component("SBI", 0, 1).shape, (0, 3))

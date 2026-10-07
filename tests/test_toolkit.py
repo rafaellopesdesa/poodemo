@@ -92,6 +92,27 @@ def test_matches_numpy_template_likelihood(tmp_path):
         )
 
 
+@pytest.mark.parametrize("exposure", [2_000., 1_000_000.])
+def test_high_exposure_near_truth_matches_stable_numpy_and_has_finite_gradients(tmp_path, exposure):
+    """Resolve tiny local displacements without subtracting large total rates."""
+    from poodemo.inference import TemplateLikelihood
+    from poodemo.toolkit import build_workspace, load_model
+    nominal, down, up, weights, truth = arrays()
+    fields = [exposure * values for values in (nominal, down, up)]
+    m = load_model(build_workspace(tmp_path, *fields, weights, exposure * truth))
+    reference = TemplateLikelihood(*fields, weights, exposure * truth)
+
+    assert float(m.model([1., 0.])) < 1e-18
+    np.testing.assert_allclose(m.model_grad([1., 0.]), [0., 0.],
+                               atol=5e-8 * max(1., exposure / 2000.), rtol=0.)
+    for mu, alpha in [(1. + 1e-7, -2e-7), (1. - 1e-6, 3e-6), (.7, .2)]:
+        expected = reference.nll(mu, [alpha])
+        actual = float(m.model([mu, alpha]))
+        assert actual > 0
+        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=1e-18)
+        assert np.all(np.isfinite(m.model_grad([mu, alpha])))
+
+
 def test_standard_normal_ni_auxiliary_is_exactly_quadratic(tmp_path):
     """Remove all template effects to isolate the Gaussian constraint term.
 

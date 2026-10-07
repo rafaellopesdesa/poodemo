@@ -338,6 +338,27 @@ def _histogram_model(anchors, counts):
     return TemplateLikelihood(nominal, down, up, np.ones(len(counts)), counts)
 
 
+def spline_eta_grid(run, quad):
+    """Resolve rapid score changes near the nominal selected-rate turnover.
+
+    The extra knots use only the expected nominal process yields. Neither the
+    Asimov observations nor evaluated scan points select interpolation knots.
+    """
+    c = run.config
+    low, high = c["mu_min"], c["mu_max"]
+    etas = np.linspace(low, high, c["spline_anchors"])
+    signal, sbi, background, _ = quad["nominal"] @ quad["weights"]
+    kappa = (signal + background - sbi) / signal if signal > 0 else -1.
+    count = c["spline_focus_anchors"]
+    if kappa > 0 and count:
+        center = (kappa / 2)**2
+        left = max(low, center - c["spline_focus_halfwidth"])
+        right = min(high, center + c["spline_focus_halfwidth"])
+        if left < right:
+            etas = np.r_[etas, np.linspace(left, right, count)]
+    return np.unique(np.r_[etas, c["asimov_mu"]])
+
+
 def run_spline_study(run):
     """Fit eta-dependent EXPECTED templates; always refill observed Asimov bins."""
     from .inference import YieldFractionSpline, component_coefficients
@@ -354,7 +375,7 @@ def run_spline_study(run):
     qualified = worst[worst >= .99]
     nbins = int(qualified.index.min() if len(qualified) else worst.index.max())
     edges = np.linspace(0, 1, nbins+1)
-    etas = np.unique(np.r_[np.linspace(c["mu_min"], c["mu_max"], c["spline_anchors"]), c["asimov_mu"]])
+    etas = spline_eta_grid(run, quad)
     anchor_values = np.stack([_histogram_anchors(quad, expit(_score(run, quad, eta)/c["score_scale"]), edges) for eta in etas])
     spline = YieldFractionSpline(etas, anchor_values)
     np.savez_compressed(run.path("results", "spline_templates.npz"), etas=etas,
@@ -364,12 +385,19 @@ def run_spline_study(run):
                    passed_99_percent=bool(len(qualified)), n_anchors=len(etas),
                    note="PCHIP acts on nonnegative bin fractions, renormalized to sum one; totals are eta-independent."))
     variations = ("nominal", "NI_down", "NI_up")
-    records_yields, validation = [], []
-    for ai, eta in enumerate(etas):
-        for vi, variation in enumerate(variations):
-            for pi, process in enumerate(PROCESSES):
-                for bi, value in enumerate(anchor_values[ai, vi, pi]):
-                    records_yields.append(dict(eta=eta, sample=process, variation=variation, bin=bi, yield_value=value))
+    # Dense grids need millions of output rows. Construct compact columns,
+    # avoiding one Python dictionary (and repeated strings) per anchor/bin.
+    shape = anchor_values.shape
+    yields = pd.DataFrame({
+        "eta": np.repeat(etas, np.prod(shape[1:])),
+        "sample": pd.Categorical.from_codes(
+            np.tile(np.repeat(np.arange(len(PROCESSES)), nbins), shape[0] * shape[1]), PROCESSES),
+        "variation": pd.Categorical.from_codes(
+            np.tile(np.repeat(np.arange(len(variations)), shape[2] * nbins), shape[0]), variations),
+        "bin": np.tile(np.arange(nbins, dtype=np.int32), np.prod(shape[:-1])),
+        "yield_value": anchor_values.reshape(-1),
+    })
+    validation = []
     for eta in (etas[:-1]+etas[1:])/2:
         exact = _histogram_anchors(quad, expit(_score(run, quad, eta)/c["score_scale"]), edges)
         predicted = spline(eta)
@@ -415,7 +443,7 @@ def run_spline_study(run):
     comparison = direct.merge(interpolated, on=["mu", "systematics"], suffixes=("_direct", "_spline"))
     comparison["delta_q"] = comparison.q_spline-comparison.q_direct
     comparison["is_spline_anchor"] = [bool(np.any(np.isclose(mu, etas, atol=1e-12, rtol=0))) for mu in comparison.mu]
-    yields, validation = pd.DataFrame(records_yields), pd.DataFrame(validation)
+    validation = pd.DataFrame(validation)
     morph = pd.DataFrame(morph_comparison)
     for filename, frame in (("spline_scans", scans), ("spline_yields", yields),
                             ("spline_validation", validation), ("physical_bin_yields", physical),

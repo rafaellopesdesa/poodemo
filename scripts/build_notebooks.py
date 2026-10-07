@@ -44,8 +44,8 @@ written into files, Git remotes, shell arguments, or notebook output. Alternativ
 upload a repository ZIP to `/content/poodemo_source.zip`; no token is then needed.
 An existing `/content/poodemo` checkout is reused. Delete that checkout to fetch
 new source after updating the repository; your Drive run is separate.
-For the stronger-interference benchmark, use the new default
-`RUN_NAME = "paper-interference-v1"` and rerun notebooks 1–5.
+For the nearby-minimum benchmark, use the new default
+`RUN_NAME = "paper-nearby-v2"` and rerun notebooks 1–5.
 If you ran an earlier version, start a fresh Colab runtime (or refresh the
 temporary source checkout and restart the runtime) before proceeding. Existing
 run manifests from the earlier physics model are incompatible and are not
@@ -57,7 +57,7 @@ import os
 import sys
 from pathlib import Path
 
-RUN_NAME = "paper-interference-v1"
+RUN_NAME = "paper-nearby-v2"
 MODE = os.environ.get("POODEMO_MODE", "production")  # production or smoke
 CONFIG_OVERRIDES = {}  # e.g. {"quadrature_per_process": 500_000, "epochs": 150}
 JAX_BACKEND = os.environ.get("POODEMO_JAX_BACKEND", "auto")  # auto, gpu, or cpu
@@ -438,7 +438,8 @@ def build():
     expected event yields of the statistical experiment are separate quantities.
     This benchmark is designed to make interference and nuisance effects visible;
     it illustrates the method and is not a numerical reproduction of an ATLAS
-    measurement.
+    measurement. The nearby branch is designed to lie around \(\mu\simeq0.5\)
+    while the generating signal strength is \(\mu_*=1\).
     """)
     cells += [
         md(r"""
@@ -456,6 +457,11 @@ def build():
         The means, positive-definite covariance matrices, phase, and inclusive
         yields are displayed below and saved with this run. Similar S and B
         shapes make two different signal strengths harder to distinguish.
+        Compared with the earlier distant-branch benchmark, the interference
+        phase has smaller magnitude and S/B shapes are even closer. The
+        expected exposure is increased to keep the barrier between the nearby
+        branches visible; all process-yield ratios and generated sample counts
+        retain their separate roles.
 
         The coherent process at \(\mu=1\) is
         \[
@@ -523,6 +529,7 @@ def build():
         print("NI mean at alpha=0:", ni_nominal_mean)
         print("NI +1 sigma mean displacement:", ni_shift)
         print("Displacement magnitude:", np.linalg.norm(ni_shift))
+        print("Expected-yield exposure multiplier:", run.model.exposure)
         '''),
         code("from poodemo.pipeline import generate_data\n\nsample_summary = generate_data(run)\ndisplay(sample_summary)"),
         code(r'''
@@ -709,6 +716,14 @@ def build():
         integrals are saved. This uses the toy's known density for validation
         and rate control; an analysis without an oracle would estimate those
         quantities from its simulation and auxiliary measurements.
+
+        Bringing the two branches close while increasing exposure makes this a
+        more stringent test of learned ratios. Small shape-estimation errors
+        can now have a substantial likelihood effect. Agreement of the
+        analytical benchmark with the target landscape does not establish
+        neural-network closure. Inspect the held-out ratio diagnostics and
+        learned-versus-analytical curves; the short smoke training is only a
+        workflow check, and production closure must be demonstrated separately.
         """),
         code("from poodemo.pipeline import prepare_quadrature\n\nquadrature = prepare_quadrature(run)\nprint('Quadrature products:', list(quadrature))"),
         md(r"""
@@ -760,13 +775,28 @@ def build():
         shape information can lift it. Profiling NI can change its depth and
         location, with the Gaussian constraint penalizing the required shift.
 
+        For a nearby partner at \(\mu\simeq0.5\) with \(\mu_*=1\), the target
+        rate relation is
+        \[
+        -\lambda_I/\lambda_S\simeq1+\sqrt{0.5},\qquad
+        \mu_{\rm turnover}=\left(-\frac{\lambda_I}{2\lambda_S}\right)^2
+        \simeq0.729.
+        \]
+        These rate landmarks explain the design. The precise full-likelihood
+        minima are measured from the nominal and profiled curves below, and can
+        shift when shape information and the NI constraint are included.
+
         The following analytical-only panels separate fixed-NI and profiled-NI
         curves. Dots mark interior minima on the evaluated grid, rather than
-        claiming a more precise optimizer location.
+        claiming a more precise optimizer location. `LANDSCAPE_Q_MAX` focuses
+        the vertical range on the nearby minima and intervening barrier; set
+        it to `None` for automatic scaling. The preceding overview figure and
+        saved scan table retain the full test-statistic range.
         """),
         code(r'''
         from poodemo.pipeline import prepare_quadrature
 
+        LANDSCAPE_Q_MAX = 10.0  # Set None for the full vertical range.
         landscape_quad = prepare_quadrature(run)
         selected_s, selected_sbi, selected_b, selected_ni = landscape_quad["nominal"] @ landscape_quad["weights"]
         selected_interference = selected_sbi - selected_s - selected_b
@@ -794,7 +824,7 @@ def build():
             if np.isfinite(equal_rate_mu) and run.config["mu_min"] <= equal_rate_mu <= run.config["mu_max"]:
                 ax.axvline(equal_rate_mu, color="0.6", ls="--", label="Other nominal equal-rate value")
             ax.axhline(1., color="0.7", ls=":")
-            ax.set(xlabel=r"Tested signal strength $\mu_0$", ylabel=r"$t_A(\mu_0)$", ylim=(0, None),
+            ax.set(xlabel=r"Tested signal strength $\mu_0$", ylabel=r"$t_A(\mu_0)$", ylim=(0, LANDSCAPE_Q_MAX),
                    title="Analytical: NI profiled" if systematic else "Analytical: NI fixed at zero")
             ax.legend(fontsize=8)
         fig.tight_layout()
@@ -1097,6 +1127,27 @@ def build():
         floating-point roundoff reuse its stored bin fractions, so nominal
         and varied templates keep their exact empty-bin support. No
         extrapolation beyond the anchor range is permitted.
+
+        The score can change rapidly as \(\eta\) crosses the interference
+        turnover, moving expected yields between fixed bins. The spline grid
+        therefore combines uniform anchors over the scan range with a focused
+        grid around the turnover calculated from **expected nominal yields**.
+        Production uses 2,401 uniform anchors and 1,201 focused anchors within
+        \(\pm0.1\) of that point; smoke mode uses 241 and 121. The generating
+        value is included, duplicates are removed, and the focused interval is
+        clipped to the scan range. These settings are configurable through
+        `spline_anchors`, `spline_focus_anchors`, and `spline_focus_halfwidth`.
+
+        The extra anchors use no observed fluctuations or fitted scan values.
+        Their density addresses rapid observable changes, but cannot eliminate
+        finite integration noise or guarantee a small likelihood error. The
+        template-validation table compares predictions with direct histograms
+        at intermediate points not used as spline anchors.
+        The default 82-point production scan also differs from the uniform
+        spline grid, so most scan points directly test likelihood interpolation.
+        The comparison table's `is_spline_anchor` flag identifies coincident
+        points and the included generating value; the shorter smoke scan is
+        primarily a workflow check.
         """),
         code(r'''
         from poodemo.data import PROCESSES
@@ -1146,12 +1197,26 @@ def build():
         plt.show()
         '''),
         code(PLOT_HELPER),
-        code("display(splines['scans'])\nplot_scans(splines['scans'], 'Profiled fits: spline, direct histogram, and unbinned', '05_profiled_scans.pdf');\ndisplay(splines['comparison'])\nprint('Largest spline/direct test-statistic difference:', splines['comparison']['delta_q'].abs().max())"),
+        code(r'''
+        display(splines["scans"])
+        plot_scans(splines["scans"], "Profiled fits: spline, direct histogram, and unbinned", "05_profiled_scans.pdf")
+        comparison = splines["comparison"]
+        display(comparison)
+        print("Actual unique spline anchors:", len(splines["spline"].etas))
+        print("Largest spline/direct test-statistic difference on the scan:", comparison["delta_q"].abs().max())
+        off_grid = comparison.loc[~comparison["is_spline_anchor"]]
+        if len(off_grid):
+            print("Largest difference at evaluated non-anchor points:", off_grid["delta_q"].abs().max())
+        else:
+            print("All evaluated scan points are spline anchors; their agreement does not test interpolation between anchors.")
+            print("Inspect the midpoint template-validation table and additional off-grid likelihood checks.")
+        '''),
         md(r"""
         ### Read the comparisons separately
 
         - **Spline vs direct histogram:** tests amortization of the moving
-          observable, using construction points withheld from the spline fit.
+          observable. The midpoint template comparison evaluates interpolation;
+          scan points flagged as spline anchors check agreement at stored knots.
         - **Coarse vs fine direct histograms:** tests finite binning.
         - **Binned nuisance interpolation vs integrated unbinned interpolation:**
           tests the distinction between two morphing prescriptions.

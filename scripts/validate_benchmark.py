@@ -2,9 +2,10 @@
 """Validate the analytic interference benchmark before expensive training.
 
 This uses the ideal balanced S/B/NI classifier, not a trained network. The
-default cut was calibrated separately on 32,768 Sobol S/NI draws using
-scramble seeds 100/102. Use --seed 1011 --power 16 for independent integration
-with that cut frozen. All nuisance profiles use the notebooks' normalized
+default cut was calibrated separately with 16,384 Sobol nodes per S/B/NI
+process using scramble seeds 900/901/902 and rounded to 0.3354. Use
+--seed 1011 --power 16 for independent integration with that cut frozen.
+All nuisance profiles use the notebooks' normalized
 rate/shape exp-poly TemplateLikelihood, including the unit Gaussian penalty.
 
 Example, from the repository root after installing poodemo:
@@ -25,6 +26,7 @@ from scipy.stats import qmc
 
 from poodemo.inference import TemplateLikelihood
 from poodemo.physics import PhysicsModel
+from poodemo.data import default_config
 
 
 def quadrature(physics, power, seed, threshold):
@@ -83,7 +85,9 @@ def score_resolution(model, mus, scale):
     weights = model.quadrature_weights
     retained = {count: [] for count in (64, 128, 256, 512)}
     summary = []
-    inspect_etas = (.1, 1., 3.5, 7.2, 10., 12.)
+    rates = model.rates
+    turnover = (-(rates[1] - rates[0] - rates[2]) / (2 * rates[0]))**2
+    inspect_etas = tuple(sorted({float(mus[0]), .5, float(turnover), 1., float(mus[-1])}))
     for eta in np.unique(np.r_[mus, inspect_etas]):
         density = eta * signal + np.sqrt(eta) * interference + background + ni
         derivative = signal + interference / (2 * np.sqrt(eta))
@@ -111,21 +115,23 @@ def score_resolution(model, mus, scale):
 
 def main():
     parser = ArgumentParser(description=__doc__)
+    config = default_config()
     parser.add_argument("--power", type=int, default=15, help="Sobol draws per process are 2**power.")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--threshold", type=float, default=.30816816816816817)
-    parser.add_argument("--mu-max", type=float, default=12.)
-    parser.add_argument("--scan-points", type=int, default=81)
-    parser.add_argument("--score-scale", type=float, default=.075)
+    parser.add_argument("--threshold", type=float, default=.3354)
+    parser.add_argument("--mu-min", type=float, default=config["mu_min"])
+    parser.add_argument("--mu-max", type=float, default=config["mu_max"])
+    parser.add_argument("--scan-points", type=int, default=config["mu_points"])
+    parser.add_argument("--score-scale", type=float, default=config["score_scale"])
     parser.add_argument("--output", type=Path, default=Path("benchmark_validation.json"))
     args = parser.parse_args()
-    if not 4 <= args.power <= 20 or args.scan_points < 9 or args.mu_max <= 8:
-        parser.error("Use power in [4,20], at least 9 scan points, and mu-max above 8.")
+    if not 4 <= args.power <= 20 or args.scan_points < 9 or not 0 < args.mu_min < .5 < 1 < args.mu_max:
+        parser.error("Use power in [4,20], at least 9 scan points, and a positive scan range enclosing .5 and 1.")
     if not 0 < args.threshold < 1 or args.score_scale <= 0:
         parser.error("threshold must be between 0 and 1; score-scale must be positive.")
     physics = PhysicsModel()
     model = quadrature(physics, args.power, args.seed, args.threshold)
-    mus = np.unique(np.r_[np.linspace(.1, args.mu_max, args.scan_points), 1.])
+    mus = np.unique(np.r_[np.linspace(args.mu_min, args.mu_max, args.scan_points), .5, 1.])
     cache = {}
 
     def profile(mu):

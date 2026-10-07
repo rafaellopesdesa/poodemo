@@ -139,13 +139,32 @@ def _toolkit_classes():
                          & jnp.all(jnp.isfinite(intensity_ratio))
                          & jnp.all(param_vec >= data["bounds"][:, 0])
                          & jnp.all(param_vec <= data["bounds"][:, 1]))
-                safe_ratio = jnp.where(intensity_ratio > 0, intensity_ratio, 1.0)
-                observed_rate = jnp.sum(data["weights"])
-                # Stable Asimov-relative form: no large parameter-independent
-                # Poisson/log-reference constants need to be subtracted later.
-                value = (2.0 * (rate - observed_rate
-                         - jnp.sum(data["weights"] * jnp.log(
-                             safe_ratio / data["truth_ratio"])))
+                safe_ratio = jnp.where(
+                    (intensity_ratio > 0) & jnp.isfinite(intensity_ratio),
+                    intensity_ratio, 1.0,
+                )
+                truth_ratio = data["truth_ratio"]
+                delta = (safe_ratio - truth_ratio) / truth_ratio
+                close = jnp.abs(delta) < 1.e-3
+                medium = (~close) & (jnp.abs(delta) < .5)
+                # Integrate the Poisson KL per node. Separately subtracting
+                # model and observed rates loses precision at high exposure,
+                # even after parameter-independent constants are removed.
+                # The common normalized quadrature makes these forms identical.
+                d_close = jnp.where(close, delta, 0.0)
+                series = d_close**2 * (
+                    .5 + d_close * (-1/3 + d_close * (.25 + d_close * (
+                        -.2 + d_close * (1/6 + d_close * (-1/7 + d_close/8)))))
+                )
+                # Sanitize unused branches too: JAX differentiates both sides
+                # of where, and an unused log1p(-1) could poison the gradient.
+                d_medium = jnp.where(medium, delta, 0.0)
+                middle = d_medium - jnp.log1p(d_medium)
+                far_ratio = jnp.where(close | medium, truth_ratio, safe_ratio)
+                far = ((far_ratio - truth_ratio) / truth_ratio
+                       - (jnp.log(far_ratio) - jnp.log(truth_ratio)))
+                relative_kl = jnp.where(close, series, jnp.where(medium, middle, far))
+                value = (2.0 * jnp.sum(data["weights"] * relative_kl)
                          # Standard-normal auxiliary measurement at zero:
                          # -2 log[G(alpha_NI;0,1)/G(0;0,1)] = alpha_NI**2.
                          + jnp.sum(param_vec[1:] ** 2))

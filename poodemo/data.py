@@ -54,7 +54,7 @@ def default_config(mode="production"):
     if mode not in ("production", "smoke"):
         raise ValueError("mode must be production or smoke")
     small = mode == "smoke"
-    return dict(schema_version=4, mode=mode, seed=20261006,
+    return dict(schema_version=5, mode=mode, seed=20261006,
                 physics_overrides={},
                 toolkit_commit=TOOLKIT_COMMIT,
                 n_per_sample=12_000 if small else 5_000_000,
@@ -68,11 +68,15 @@ def default_config(mode="production"):
                 ensemble_size=1 if small else 3,
                 quadrature_per_process=1500 if small else 250_000,
                 asimov_mu=1., target_s_over_ni=.1,
-                score_scale=.075, mu_min=.10, mu_max=12.,
-                mu_points=17 if small else 81,
+                score_scale=.005, mu_min=.20, mu_max=1.40,
+                # The production scan is deliberately not aligned with the
+                # uniform spline grid, so it tests interpolation between knots.
+                mu_points=17 if small else 82,
                 bin_counts=[8, 16, 32] if small else [8, 16, 32, 64, 128, 256, 512],
-                spline_anchors=61 if small else 601,
-                nuisance_bounds=[-3., 3.], mu_fit_bounds=[.001, 14.])
+                spline_anchors=241 if small else 2401,
+                spline_focus_anchors=121 if small else 1201,
+                spline_focus_halfwidth=.1,
+                nuisance_bounds=[-3., 3.], mu_fit_bounds=[.001, 2.])
 
 
 def create_run(root, mode="production", overrides=None):
@@ -93,6 +97,11 @@ def create_run(root, mode="production", overrides=None):
             raise ValueError(f"{name} must be a positive integer")
     if config["spline_anchors"] < 2 or config["mu_points"] < 2:
         raise ValueError("At least two spline anchors and scan points are required")
+    focused = config["spline_focus_anchors"]
+    if not isinstance(focused, int) or focused < 0 or focused == 1:
+        raise ValueError("spline_focus_anchors must be zero or an integer >= 2")
+    if not np.isfinite(config["spline_focus_halfwidth"]) or config["spline_focus_halfwidth"] <= 0:
+        raise ValueError("spline_focus_halfwidth must be finite and positive")
     if config["score_scale"] <= 0 or not 0 < config["mu_min"] < config["mu_max"]:
         raise ValueError("Use a positive score scale and positive ordered eta scan bounds")
     if not config["mu_min"] <= config["asimov_mu"] <= config["mu_max"]:

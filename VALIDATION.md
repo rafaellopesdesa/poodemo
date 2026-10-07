@@ -1,5 +1,91 @@
 # Validation
 
+## Nearby-minimum benchmark (schema 5, 7 October 2026)
+
+Use `RUN_NAME = "paper-nearby-v2"` and rerun notebooks 1–5. The new model
+keeps truth mu=1, sets cos(phase)=-0.273, reduces the S/B mean separation
+to 0.03 along the existing direction, and uses covariance_B=1.0045*covariance_S.
+Exposure is 2000; the inclusive S/B and B/NI ratios and generated Monte Carlo
+sample counts are unchanged. Only NI is varied, with its existing 30% mean
+shift and unit-Gaussian auxiliary constraint.
+
+The phase targets a second branch near mu=0.5. Nearby equal-rate roots alone
+would leave a shallow barrier, so the increased exposure makes it visible.
+The distinct S/B shapes lift the second minimum above the generating minimum.
+The physical scan is 0.2–1.4, with fits over 0.001–2.0 and score scale 0.005.
+The analytical landscape figure focuses on test-statistic values up to 10;
+the overview and saved tables retain the full range.
+
+An ideal balanced-classifier selector, with a frozen cut calibrated on separate
+Sobol draws, gives these **full-shape** analytical results. Profiling uses the
+same normalized exp-poly model and Gaussian constraint as the notebooks.
+
+| Analytical oracle diagnostic | NI fixed | NI profiled |
+|---|---:|---:|
+| Secondary minimum mu | 0.50956 | 0.49616 |
+| Secondary minimum statistic | 0.44452 | 0.22539 |
+| Intervening barrier statistic | 5.9924 | 4.8388 |
+| Local sigma_mu at truth | 0.05919 | 0.06773 |
+
+The table uses 65,536 Sobol nodes per proposal component and independent
+scrambles 1011–1013. A separate 32,768-node/component calculation agrees to
+about 0.001 in the reported statistics. These are design checks with an
+analytical selector, not a guarantee of the precise minima after a learned
+selection. Reproduce the independent calculation with:
+
+```bash
+python scripts/validate_benchmark.py --power 16 --seed 1011 --output /tmp/poodemo-nearby.json
+```
+
+Actual toolkit/JAX/Minuit fits were also run on an independent 15,727-node
+selected quadrature. Both global fits recovered (mu,alpha_NI)=(1,0), while
+starts in the other basin found minima at 0.50956 and 0.49618. Checked toolkit
+and NumPy likelihood values agreed within 1e-9. The toolkit objective now
+integrates a stable per-node Poisson KL expression, avoiding cancellation
+between large rates near the minimum. Regression checks cover exposure factors
+2000 and 1,000,000, including JAX gradients.
+
+The spline grid uses 2401 uniform knots plus 1201 knots within 0.1 of the
+nominal selected-rate turnover, and the truth anchor. Knots depend on expected
+nominal yields, not on the observed histogram. The 82-point regular scan is
+intentionally mostly off these knots; saved `is_spline_anchor` flags distinguish
+interpolation checks from exact-anchor agreement. Compact column construction
+avoids millions of Python dictionaries in the denser template-yield table.
+
+An independent spline audit with 503,109 selected Sobol nodes, 128 bins,
+and 15 deliberately off-grid queries found no support or fit failures. Largest
+absolute spline/direct statistic differences were 0.216 (NI fixed) and 0.309
+(profiled); the latter occurred in a tail with statistic about 68.7. Near the
+turnover the largest profiled difference was 0.142. Near the secondary basin,
+a checked profiled value changed from 0.113 to 0.356: the approximation is
+useful but is not exact, and these differences can matter for precision work.
+The former 601-knot grid produced large distortions and is no longer the default.
+Finite integration noise remains separate from interpolation resolution; denser
+knots alone do not guarantee monotonic improvement. Notebook 5 reports its own
+midpoint template errors and off-grid likelihood comparisons.
+
+Validation scope for this revision:
+
+- **59 automated tests passed; one optional neural-training roundtrip was
+  skipped** because PyTorch was not installed in this execution environment.
+- All five regenerated notebooks validate as notebooks, and all 38 code cells
+  compile. The analytical landscape and stacked-histogram cells were executed
+  with the new model and visually inspected.
+- The actual binning, estimator, and spline pipeline stages completed with an
+  independent analytical-oracle integration sample and smoke budgets. All fit
+  and width diagnostics were valid; the largest Asimov MLE displacement was
+  below 2e-7. Smoke grids can coincide with spline anchors, so their agreement
+  is an execution check, not interpolation-accuracy evidence.
+- Full production neural retraining and a live Colab GPU session were not run
+  for this revision. Higher exposure makes ratio-shape errors more consequential;
+  the learned-versus-analytical closure plots must establish production accuracy.
+  No confidence-set coverage claim is made from the Asimov checks.
+
+## Earlier validation history
+
+The sections below describe earlier revisions and their then-current defaults;
+those numerical results do not describe the schema-5 model above.
+
 Validated on 6 October 2026 with Python 3.12, JAX/JAXlib 0.5.3,
 PyTorch Lightning 2.5.5, PyTorch 2.14.1 (CPU execution), NumPy 2.3.5,
 SciPy 1.17.0, and iminuit 2.33.0. Toolkit source:

@@ -6,6 +6,7 @@ selection. Production still calibrates its trained selector on held-out data.
 
 import numpy as np
 import pytest
+from scipy.optimize import minimize_scalar
 
 from poodemo.inference import TemplateLikelihood, component_coefficients
 from poodemo.physics import PhysicsModel
@@ -42,14 +43,15 @@ def oracle_selected_benchmark():
 def test_unbinned_interference_retains_a_lifted_secondary_minimum(oracle_selected_benchmark):
     model = oracle_selected_benchmark
     assert model.nll(1, [0]) == pytest.approx(0, abs=1e-12)
-    candidates = np.linspace(5.5, 10, 31)
+    candidates = np.linspace(.35, .65, 31)
     values = np.array([model.nll(mu, [0]) for mu in candidates])
     index = np.argmin(values)
     assert 0 < index < len(candidates) - 1
-    assert 6 < candidates[index] < 9
-    assert .2 < values[index] < 5
-    assert model.nll(3.5, [0]) > values[index] + 2
-    assert model.nll(10, [0]) > values[index] + 2
+    assert .45 < candidates[index] < .55
+    assert .05 < values[index] < 2
+    assert model.nll(.73, [0]) > values[index] + 2
+    assert model.nll(.2, [0]) > values[index] + 2
+    assert model.nll(1.3, [0]) > values[index] + 2
 
     # Equal total rates do not make the full point-process model degenerate:
     # distinct Gaussian shapes leave a strictly positive likelihood penalty.
@@ -58,19 +60,29 @@ def test_unbinned_interference_retains_a_lifted_secondary_minimum(oracle_selecte
     partner = (-interference / rates[0] - 1)**2
     np.testing.assert_allclose(component_coefficients(partner) @ rates,
                                component_coefficients(1) @ rates, rtol=2e-14)
-    assert model.nll(partner, [0]) > .2
+    assert model.nll(partner, [0]) > .05
 
 
 def test_ni_profiling_visibly_broadens_the_benchmark(oracle_selected_benchmark):
     model = oracle_selected_benchmark
     # Test the local shoulder, the interference barrier, and the second basin
     # using the same rate/normalized-shape exp-poly model as the notebooks.
-    for mu in (1.3, 3.5, 7.2):
+    for mu in (1.05, .73, .5):
         fixed = model.nll(mu, [0])
         fitted = model.fit(mu_fixed=mu)
         assert fitted.success, fitted.message
         assert 0 <= fitted.nll < .85 * fixed
         assert abs(fitted.alpha[0]) < 1
+
+    def profile(mu):
+        fitted = model.fit(mu_fixed=mu)
+        assert fitted.success, fitted.message
+        return fitted.nll
+
+    secondary = minimize_scalar(profile, bounds=(.4, .6), method="bounded")
+    assert secondary.success
+    assert .45 < secondary.x < .55
+    assert .05 < secondary.fun < 1
 
     nominal_ni = model.rates[3]
     assert model.rates_down[0, 3] < .8 * nominal_ni

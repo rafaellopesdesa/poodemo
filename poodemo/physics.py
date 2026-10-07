@@ -53,7 +53,10 @@ class PhysicsModel:
     cannot create exact zeros in ``SBI``.  ``exposure`` scales every yield.
 
     S and B have similar, distinct shapes so their destructive interference
-    leaves a second likelihood basin that shape information only partly lifts.
+    leaves a nearby second likelihood basin that shape information only partly
+    lifts. The phase puts that basin near mu=0.5 for truth mu=1; the larger
+    exposure makes the shallow intervening barrier visible without changing
+    the number of generated Monte Carlo events.
     The sole nuisance displaces the NI Gaussian mean by 30% of the norm
     of its nominal mean, toward S in the paper benchmark. S, B and
     their coherent SBI sum remain fixed under this variation.
@@ -62,16 +65,16 @@ class PhysicsModel:
     lambda_s: float = 100.0
     lambda_b: float = 1000.0
     lambda_ni: float = 10000.0
-    exposure: float = 1.0
-    phase_cos: float = -0.65
+    exposure: float = 2000.0
+    phase_cos: float = -0.273
     mean_s: tuple[float, ...] = (1.5, 1.1, 0.7)
-    mean_b: tuple[float, ...] = (1.341481215, 0.986772297, 0.654708919)
+    mean_b: tuple[float, ...] = (1.4762221822829635, 1.083015844487831, 0.6932063377951324)
     mean_ni: tuple[float, ...] = (-0.6, -0.4, 0.1)
     cov_s: tuple[tuple[float, ...], ...] = (
         (0.72, 0.18, 0.06), (0.18, 0.64, 0.10), (0.06, 0.10, 0.81)
     )
     cov_b: tuple[tuple[float, ...], ...] = (
-        (0.7416, 0.1854, 0.0618), (0.1854, 0.6592, 0.1030), (0.0618, 0.1030, 0.8343)
+        (0.72324, 0.18081, 0.06027), (0.18081, 0.64288, 0.10045), (0.06027, 0.10045, 0.813645)
     )
     cov_ni: tuple[tuple[float, ...], ...] = (
         (1.35, -0.15, 0.12), (-0.15, 1.10, 0.22), (0.12, 0.22, 1.25)

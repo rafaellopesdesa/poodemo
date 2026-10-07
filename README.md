@@ -4,9 +4,10 @@ Five Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
 neural simulation-based inference, and a parameterized binned approximation
 built from the likelihood score. Data and trained models persist in your Google
 Drive; the source lives in this repository.
-The stronger-interference benchmark makes secondary-minimum and nuisance effects
+The nearby-minimum benchmark makes secondary-minimum and nuisance effects
 visible. It is an illustrative toy, not a numerical reproduction of an ATLAS
-measurement.
+measurement. The generating value is $\mu_*=1$, with a secondary branch designed
+to lie near $\mu\simeq0.5$.
 
 | Notebook | Purpose | Open in Colab |
 |---|---|---|
@@ -26,9 +27,9 @@ measurement.
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
    The other notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
-   `RUN_NAME = "paper-interference-v1"` and `MODE = "production"`. For an initial
+   `RUN_NAME = "paper-nearby-v2"` and `MODE = "production"`. For an initial
    short check, choose `MODE = "smoke"` and a distinct run name such as
-   `paper-interference-smoke-v1`.
+   `paper-nearby-smoke-v2`.
    Computational budgets can be changed through `CONFIG_OVERRIDES`, for example
    `{"quadrature_per_process": 500_000, "epochs": 150}`. Use identical overrides
    in every notebook and a new run name when changing the configuration.
@@ -61,12 +62,12 @@ Use a new run name when changing the configuration: incompatible saved settings
 are rejected rather than silently mixed.
 
 For this changed physics benchmark, use the new run directory
-`paper-interference-v1` and rerun notebooks 1–5. Schema-4 manifests prevent reuse
+`paper-nearby-v2` and rerun notebooks 1–5. Schema-5 manifests prevent reuse
 of the earlier physics configuration.
 If an earlier version was already run in Colab, start a fresh runtime, or
 refresh `/content/poodemo` and restart the runtime, so that the new source is
 loaded. Earlier Drive runs remain intact, but their samples and trained models
-must not be reused for the changed amplitudes and NI variation.
+must not be reused for the changed amplitudes and exposure.
 
 Production generates **5 million events in each of six samples**: S, SBI, B,
 NI, NI_up, and NI_down, for 30 million events total. The raw three-coordinate
@@ -97,6 +98,13 @@ interference ambiguity visible. The SBI template is a positive process with inte
 interference, and is reported rather than assigned an independent normalization.
 NI is incoherent.
 
+Relative to the earlier distant-branch benchmark, the destructive phase has
+smaller magnitude and S/B shapes are even more similar. The expected exposure
+is increased to keep the barrier between the nearby branches visible. Exposure
+scales physical event yields, preserving the process-yield ratios; it does not
+increase the five-million-event Monte Carlo samples. Notebook 1 prints the
+exposure multiplier and the actual inclusive yields.
+
 The physical intensity is
 
 $$
@@ -126,6 +134,18 @@ Notebook 3 calculates this rate diagnostic after selection and plots the actual
 analytical likelihood, separately with NI fixed and profiled. Any secondary
 minimum must be established from those curves rather than inferred from the
 sign of interference alone.
+
+For the target partner near $0.5$ with truth $1$, the rate relation is
+$-\lambda_I/\lambda_S\simeq1+\sqrt{0.5}$. Its turnover lies near
+$(-\lambda_I/(2\lambda_S))^2\simeq0.729$, between the two branches.
+The score-distribution panels choose their anchors dynamically from the
+selected-rate turnover and partner, so they display this nearby structure.
+These are rate landmarks; the measured full-likelihood minima can move because
+of shape information and NI profiling.
+The analytical landscape figure defaults to $0\le t_A\le10$ so that the
+nearby minima and barrier remain visible; set `LANDSCAPE_Q_MAX = None` in
+notebook 3 for automatic vertical scaling. The overview plot and scan tables
+retain the full likelihood range.
 
 The only nuisance is $\alpha_{NI}$. It shifts the NI amplitude mean by
 the configured magnitude along the direction toward the signal mean. This
@@ -187,6 +207,14 @@ estimates in a real analysis. The label **analytical unbinned** refers to exact
 component and ±1-anchor densities followed by the same exponential–polynomial
 nuisance model, rather than the continuously shifted Gaussian at every nuisance
 value.
+
+The nearby branches and increased exposure make density-ratio precision more
+demanding: small neural shape errors can produce appreciable likelihood
+distortions. Analytical benchmark agreement does not establish closure of the
+trained networks. The five-epoch smoke fit is a workflow check; production
+training must be assessed using the held-out diagnostics and the learned versus
+analytical scans. More training or simulation may be needed before claiming a
+specific closure precision.
 
 For $D_\mu=\sum_j c_j(\mu)\lambda_jp_j$ and
 $\Lambda_\mu=\sum_j c_j(\mu)\lambda_j$, notebook 4 uses
@@ -279,7 +307,7 @@ claiming a physics-level closure precision.
 ```bash
 python -m pip install -r requirements-colab.txt
 python -m pip install -e '.[dev]'
-export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-interference-smoke-v1
+export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-nearby-smoke-v2
 export POODEMO_MODE=smoke
 ```
 
@@ -311,12 +339,27 @@ settings.
 
 Physics parameters can be varied with `physics_overrides`, for example
 `CONFIG_OVERRIDES = {"physics_overrides": {"shift_fraction_ni": 0.4}}`.
-Use a new run name for any such change. The paper defaults use 81 scan grid
-points and 601 spline grid points, plus the generating value; half of the
-regular scan points are withheld from the spline grid. The denser spline
-grid resolves the changing score near the interference turnover. Its accuracy
-must still be checked against direct histograms with the available integration
-statistics.
+Use a new run name for any such change. The production defaults use 82 scan
+grid points and 2,401 uniform spline anchors, plus 1,201 focused anchors within
+$\pm0.1$ of the selected nominal-rate turnover and the generating value.
+Smoke mode uses 241 uniform and 121 focused anchors. Duplicate anchors are
+removed and the focused interval is clipped to the scan range. The settings
+are `spline_anchors`, `spline_focus_anchors`, and `spline_focus_halfwidth`.
+
+The focused region is determined only from expected nominal process yields;
+it is not selected from observed fluctuations or evaluated scan values. Near
+the interference turnover, the score can change rapidly with its construction
+parameter, so uniform anchors alone can miss substantial movement of bin
+yields. A dense grid reduces this interpolation error but does not remove
+finite quadrature noise or guarantee likelihood accuracy. Template fractions
+are checked at intermediate points withheld from the spline fit. The
+likelihood-comparison table labels points with `is_spline_anchor`: agreement at
+an anchor does not test interpolation between anchors. Check additional
+off-grid likelihood points when assessing precision. The 82-point production
+scan deliberately differs from the uniform spline grid, so most of its points
+test interpolation; coincident points and the included generating value are
+still identified by `is_spline_anchor`. The shorter smoke scan primarily checks
+workflow execution.
 
 An analytical benchmark check can be run before training:
 
@@ -333,7 +376,7 @@ Notebook sources are maintained in `scripts/build_notebooks.py`:
 ```bash
 python scripts/build_notebooks.py
 python -m pytest
-python scripts/smoke.py --root /tmp/poodemo-paper-interference-smoke
+python scripts/smoke.py --root /tmp/poodemo-paper-nearby-smoke
 ```
 
 The notebook generator produces clean notebooks. This intentional physics
