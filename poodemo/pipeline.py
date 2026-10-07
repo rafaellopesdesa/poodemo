@@ -359,21 +359,36 @@ def spline_eta_grid(run, quad):
     return np.unique(np.r_[etas, c["asimov_mu"]])
 
 
-def run_spline_study(run):
-    """Fit eta-dependent EXPECTED templates; always refill observed Asimov bins."""
+def run_spline_study(run, n_bins=None):
+    """Fit eta-dependent expected templates with explicit or automatic binning.
+
+    ``n_bins`` must have been evaluated in notebook 4. If omitted, choose the
+    smallest tested binning passing the 99% Fisher criterion, or the finest
+    tested binning when none passes. Observed Asimov bins are always refilled.
+    """
     from .inference import YieldFractionSpline, component_coefficients
-    quad = prepare_quadrature(run)
     c = run.config
-    # Choose the smallest tested binning that retains >=99% extended Fisher
-    # information over the tested anchors, if it exists. Otherwise use the
-    # finest tested binning and explicitly report the residual information loss.
+    if n_bins is not None and (
+            isinstance(n_bins, (bool, np.bool_))
+            or not isinstance(n_bins, (int, np.integer)) or n_bins < 2):
+        raise ValueError("n_bins must be an integer >= 2, or None for automatic selection.")
     fisher_path = run.path("results", "binning_fisher.csv")
     if not fisher_path.exists():
         raise FileNotFoundError("Run notebook 4 before selecting the spline binning.")
     fisher = pd.read_csv(fisher_path)
     worst = fisher.groupby("n_bins").information_fraction.min()
-    qualified = worst[worst >= .99]
-    nbins = int(qualified.index.min() if len(qualified) else worst.index.max())
+    if n_bins is None:
+        qualified = worst[worst >= .99]
+        nbins = int(qualified.index.min() if len(qualified) else worst.index.max())
+        choice_mode = "automatic"
+    else:
+        nbins = int(n_bins)
+        if nbins not in worst.index:
+            raise ValueError(
+                f"Requested n_bins={nbins} was not evaluated in notebook 4. "
+                f"Rerun notebook 4 with BIN_COUNTS including {nbins} before the spline study.")
+        choice_mode = "explicit"
+    quad = prepare_quadrature(run)
     edges = np.linspace(0, 1, nbins+1)
     etas = spline_eta_grid(run, quad)
     anchor_values = np.stack([_histogram_anchors(quad, expit(_score(run, quad, eta)/c["score_scale"]), edges) for eta in etas])
@@ -381,8 +396,9 @@ def run_spline_study(run):
     np.savez_compressed(run.path("results", "spline_templates.npz"), etas=etas,
                         edges=edges, bin_yields=anchor_values, totals=spline.totals)
     save_json(run.path("results", "spline_choice.json"),
-              dict(n_bins=nbins, worst_information_fraction=float(worst.loc[nbins]),
-                   passed_99_percent=bool(len(qualified)), n_anchors=len(etas),
+              dict(n_bins=nbins, choice_mode=choice_mode,
+                   worst_information_fraction=float(worst.loc[nbins]),
+                   passed_99_percent=bool(worst.loc[nbins] >= .99), n_anchors=len(etas),
                    note="PCHIP acts on nonnegative bin fractions, renormalized to sum one; totals are eta-independent."))
     variations = ("nominal", "NI_down", "NI_up")
     # Dense grids need millions of output rows. Construct compact columns,

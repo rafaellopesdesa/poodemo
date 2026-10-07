@@ -946,9 +946,9 @@ def build():
         bins of a Poisson point process. This notebook fixes \(\alpha_{NI}=0\),
         where the scalar score has its clean local guarantee.
         """),
-        code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = np.rint(np.linspace(8, 128, 10)).astype(int).tolist()\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
+        code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = list(range(4, 21, 2))\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
         code(PLOT_HELPER),
-        code("plot_scans(binning['scans'], 'Score histograms: progressively finer binning', '04_binning_scans.pdf');"),
+        code("SCAN_BIN_COUNTS = [4, 12, 20]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].isin([\"analytic unbinned\", \"learned unbinned\"])\n].copy()\nplot_scans(shown_scans, 'Score histograms: 4, 12, and 20 bins', '04_binning_scans.pdf');"),
         md(r"""
         ### What convergence can and cannot show
 
@@ -1115,12 +1115,12 @@ def build():
         Agreement at nominal and ±1 templates alone does not establish equality
         between the continuously morphed unbinned and binned models.
         """),
-        code("from poodemo.pipeline import run_spline_study\n\nsplines = run_spline_study(run)\ndisplay(splines['validation'])\ndisplay(splines['yields'])"),
+        code("from poodemo.pipeline import run_spline_study\n\nsplines = run_spline_study(run, n_bins=20)\ndisplay(splines['validation'])\ndisplay(splines['yields'])"),
         md(r"""
-        The binning is chosen from notebook 4: use the smallest tested bin count
-        retaining at least 99% of the extended Fisher information at every
-        tested anchor. If none passes, use the finest tested binning and report
-        the residual loss. The splines are shape-preserving piecewise cubic
+        We use **20 bins** explicitly, matching the finest resolution in notebook 4.
+        The saved binning diagnostic reports the retained extended Fisher information
+        across the tested anchors, including whether this choice reaches 99% at every
+        anchor. The splines are shape-preserving piecewise cubic
         Hermite interpolants (PCHIP) of nonnegative bin fractions, followed by
         explicit normalization. This preserves zero-valued anchors without a
         logarithmic floor. Queries that differ from an anchor only by
