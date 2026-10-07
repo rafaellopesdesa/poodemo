@@ -1,8 +1,8 @@
 # Parameterized optimal observables: an interference toy
 
-Five Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
+Seven Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
 neural simulation-based inference, and a parameterized binned approximation
-built from the likelihood score. Data and trained models persist in your Google
+built from either the likelihood score or a bounded density ratio. Data and trained models persist in your Google
 Drive; the source lives in this repository.
 The nearby-minimum benchmark makes secondary-minimum and nuisance effects
 visible. It is an illustrative toy, not a numerical reproduction of an ATLAS
@@ -16,6 +16,8 @@ to lie near $\mu\simeq0.5$.
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
 | [04_score_histograms.ipynb](notebooks/04_score_histograms.ipynb) | Study score histograms, local widths, and fitted signal strength versus the observable anchor | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/04_score_histograms.ipynb) |
 | [05_spline_templates.ipynb](notebooks/05_spline_templates.ipynb) | Interpolate moving bin fractions, validate splines, and compare profiled scans | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/05_spline_templates.ipynb) |
+| [06_ratio_histograms.ipynb](notebooks/06_ratio_histograms.ipynb) | Repeat notebook 4 using the bounded analytical ratio to the S reference | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/06_ratio_histograms.ipynb) |
+| [07_ratio_spline_templates.ipynb](notebooks/07_ratio_spline_templates.ipynb) | Repeat notebook 5 with ratio-observable templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/07_ratio_spline_templates.ipynb) |
 
 ## Run in Colab
 
@@ -58,6 +60,11 @@ updated notebook, and rerun setup with the same `RUN_NAME`.
 Completed networks and samples in Drive are reused; retraining is not required.
 Selected-data and quadrature caches record the selector fingerprint and reject
 stale reuse after its model or threshold changes.
+Notebooks 6–7 reuse the same completed run and networks as notebooks 1–5.
+Start notebook 6 in a fresh runtime after updating the repository, then run
+notebook 7; no new data generation or training is required. Notebook 6 refreshes
+the shared unbinned reference fits from saved checkpoints, just as notebook 4
+does. The two histogram workflows save distinct results and plots.
 Use a new run name when changing the configuration: incompatible saved settings
 are rejected rather than silently mixed.
 
@@ -301,6 +308,46 @@ same morph-order distinction studied in notebook 5.
 The diagnostic table is saved as `results/estimator_eta.csv`; its figure is
 `plots/04_estimator_eta.pdf` (also PNG). The analytical likelihood panels are
 saved as `plots/03_analytical_landscape.pdf` (also PNG).
+
+## Bounded-ratio comparison in notebooks 6–7
+
+These notebooks parallel notebooks 4–5 with the observable
+
+$$
+r_\eta(x)=\frac{p(x;\eta,0)}{p_S(x)}
+=\frac{D_\eta(x)/\Lambda_\eta}{D_S(x)/\lambda_S},
+\qquad z_\eta(x)=\frac{r_\eta(x)}{1+r_\eta(x)}.
+$$
+
+Both densities are normalized after the same frozen preselection, on the same
+integration sample. The reference is the selected nominal S density used in
+the unbinned analysis. All physical component yields are included in
+$D_\eta$ and $\Lambda_\eta$. This is the ratio of normalized densities, not
+the ratio of unnormalized event intensities. There is no `score_scale` factor.
+The observable uses the exact analytical densities, matching notebook 4's
+analytical score; learned-ratio errors remain visible in the separate unbinned
+curves rather than being mixed into this compression comparison.
+
+Notebook 6 uses the current notebook 4 resolution grid (4–60 bins in steps of
+4), shows scans with 4, 12, 24, 36 and 60 bins, and includes the same stacked
+distributions and fixed-truth estimator/width study. The estimator study uses
+the saved run's finest bin count, as notebook 4 does. Notebook 7 uses 20 bins,
+the same spline anchors, NI rate/shape interpolation, and unit-Gaussian
+constraint as notebook 5. Every observable is frozen at its tested anchor
+throughout both likelihood fits, and the analytical Asimov data are re-binned
+at each anchor.
+
+A monotonic function of $r_\eta$ preserves the event ordering for the binary
+comparison with the S reference. It need not retain the local Fisher
+information for varying physical $\mu$, nor all information needed for NI
+profiling. The Fisher fractions and likelihood comparisons measure this loss;
+they do not assume the score's local optimality theorem applies to the ratio.
+
+Ratio-specific products use `results/ratio_*.csv`,
+`results/ratio_spline_templates.npz` and `results/ratio_spline_choice.json`;
+figures use `plots/06_*` and `plots/07_*`. They do not overwrite the score
+histograms, splines, or estimator diagnostics. The samples, quadrature and
+three unbinned reference curves are shared.
 
 ## What the comparisons establish
 

@@ -1,5 +1,39 @@
 # Validation
 
+## Parallel ratio-observable notebooks (7 October 2026)
+
+Notebooks 6–7 repeat the score workflow with the analytical selected-density
+ratio to S, transformed as r/(1+r). The selected rates, integration sample,
+physical coefficients, NI interpolation and Gaussian constraint are shared.
+Ratio products have separate filenames. Existing notebooks 1–5, including the
+user's executed outputs and plot settings, were preserved byte for byte.
+
+- **78 tests passed, 1 skipped** with the pinned toolkit/JAX/Minuit stack.
+  The skipped test requires optional PyTorch training dependencies.
+- New checks cover normalized selected densities, common-exposure invariance,
+  independence from `score_scale`, and physical-parameter changes inside frozen
+  ratio bins. A categorical interference example verifies genuine local
+  information loss under ratio compression even with arbitrarily fine bins.
+- Real small SciPy studies exercise score and ratio coarsening, splines and
+  estimator diagnostics in the same run, verifying that every score product
+  remains unchanged and every corresponding ratio product is written.
+- Every scientific code cell in both new notebooks was executed on an
+  independent 3,938-node analytical-selector quadrature. The check used six
+  scan points, all 15 coarsenings from 4 to 60 bins, 512 bins for estimator
+  diagnostics, and 20 bins with 52 anchors for the reduced spline study.
+  It exercised the actual toolkit/JAX/Minuit unbinned references with analytical
+  surrogate fields, the SciPy binned fits, and all nine saved figures.
+  All fits and local-width diagnostics were valid; the largest fixed-truth
+  estimator displacement was 6.3e-8. Sentinel score files remained unchanged.
+- All seven notebooks validate and their Python cells parse; the new notebooks
+  are committed without execution outputs.
+
+The small execution check validates the workflow, not production interpolation
+precision. Its deliberately coarse spline grid gave a maximum direct/spline
+test-statistic difference of about 1.15; the production grid is unchanged from
+the score study and its precision must be judged from the saved comparisons.
+No additional network training or full production rerun was performed here.
+
 ## Finite learned-model Asimov construction (7 October 2026)
 
 The three unbinned comparisons now distinguish analytical generating weights

@@ -1,4 +1,4 @@
-"""The five notebook stages, with all persistent products under a run directory."""
+"""The notebook stages, with all persistent products under a run directory."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -282,6 +282,51 @@ def _score(run, quad, eta):
     return derivative/density - (derivative @ quad["weights"])/(density @ quad["weights"])
 
 
+def observable_metadata(observable="score"):
+    """Names and isolated result-file prefixes for the two compression studies."""
+    if not isinstance(observable, str) or observable not in ("score", "ratio"):
+        raise ValueError("observable must be 'score' or 'ratio'")
+    return dict(observable=observable, prefix="" if observable == "score" else "ratio_",
+                direct_label=f"direct {observable} histogram",
+                fixed_label=f"fixed {observable} histogram",
+                spline_label=f"spline {observable} histogram")
+
+
+def observable_values(run, quad, eta, observable="score"):
+    """Return the bounded analytical observable on the selected quadrature.
+
+    ``score`` is the existing logistic transform of the shape score. ``ratio``
+    is r/(1+r), with r = p_selected(x; eta, alpha_NI=0) / p_selected_S(x).
+    Both densities in that ratio are normalized on the same final quadrature;
+    its value is independent of exposure and of the score's logistic scale.
+    Positive eta is required by the common Fisher-information study.
+    """
+    observable_metadata(observable)
+    eta = float(eta)
+    if not np.isfinite(eta) or eta <= 0:
+        raise ValueError("eta must be finite and strictly positive")
+    if observable == "score":
+        return expit(_score(run, quad, eta)/run.config["score_scale"])
+
+    from .inference import component_coefficients
+    nominal, weights = quad["nominal"], quad["weights"]
+    density = component_coefficients(eta) @ nominal
+    signal = nominal[0]
+    total_rate, signal_rate = float(density @ weights), float(signal @ weights)
+    if (not np.isfinite(total_rate) or total_rate <= 0
+            or not np.isfinite(signal_rate) or signal_rate <= 0):
+        raise ValueError("The ratio observable needs positive finite selected total and S yields")
+    if np.any(~np.isfinite(signal)) or np.any(signal <= 0):
+        raise ValueError("The ratio observable needs a positive finite S reference density")
+    if np.any(~np.isfinite(density)) or np.any(density < 0):
+        raise ValueError("The ratio observable needs a finite nonnegative physical intensity")
+    # A zero physical density maps to z=0. Work in logs to avoid overflowing
+    # large ratios in the S tails; expit also handles the limiting z=1 value.
+    with np.errstate(divide="ignore"):
+        log_ratio = np.log(density) - np.log(total_rate) - np.log(signal) + np.log(signal_rate)
+    return expit(log_ratio)
+
+
 def _record_scan_result(result, *, mu, model, systematics, **extra):
     """Internal schema helper used by histogram studies."""
     return {"mu": float(mu), "model": model, "systematics": systematics, **result, **extra}
@@ -311,7 +356,7 @@ def _saved_unbinned(run, systematics=None):
     path = run.path("results", "unbinned_scans.csv")
     if not path.exists():
         raise FileNotFoundError(
-            "Run run_unbinned(run) in notebook 3 or the notebook 4 unbinned refresh cell "
+            "Run run_unbinned(run) in notebook 3 or the notebook 4 or 6 unbinned refresh cell "
             "before the histogram comparisons; existing ratio models are reused without training."
         )
     scans = pd.read_csv(path)
@@ -320,16 +365,20 @@ def _saved_unbinned(run, systematics=None):
     return scans
 
 
-def run_binning_study(run):
-    """Refill and freeze each matched-eta histogram before BOTH likelihood fits."""
+def run_binning_study(run, *, observable="score"):
+    """Refill and freeze each matched-eta histogram before BOTH likelihood fits.
+
+    Ratio-observable results use a separate ``ratio_`` artifact namespace.
+    Fisher retention is measured for either observable, not assumed optimal.
+    """
     from .inference import component_coefficients, histogram_components
+    options = observable_metadata(observable)
     quad = prepare_quadrature(run)
     parent = _template_likelihood(quad, systematics=False)
     records, fidelity = [], []
     for mu in mu_grid(run):
         eta = float(mu)
-        score = _score(run, quad, eta)
-        z = expit(score/run.config["score_scale"])
+        z = observable_values(run, quad, eta, observable)
         density = component_coefficients(eta) @ quad["nominal"]
         s, sbi, b, _ = quad["nominal"]
         derivative = s+(sbi-s-b)/(2*np.sqrt(eta))
@@ -342,7 +391,7 @@ def run_binning_study(run):
             hist = parent.binned(z, edges, eta=eta)
             result = _fit_test(run, hist, mu, systematics=False)
             records.append(_record_scan_result(result, mu=mu, eta=eta, n_bins=nbins,
-                                               model="direct score histogram", systematics=False))
+                                               model=options["direct_label"], systematics=False))
             expected = component_coefficients(eta) @ hist.nominal
             # Signed derivative weights are valid; only event means must be nonnegative.
             dbin = np.histogram(z, edges, weights=quad["weights"]*derivative)[0]
@@ -351,20 +400,20 @@ def run_binning_study(run):
                                  shape_information_fraction=(info-rate_info)/(full_info-rate_info),
                                  full_information=full_info, binned_information=info,
                                  occupied_bins=int(np.count_nonzero(expected))))
-        print(f"Matched eta={eta:.3g}: all binnings fitted", flush=True)
-    # A fixed score makes the distinction from the moving observable visible.
+        print(f"Matched {observable} eta={eta:.3g}: all binnings fitted", flush=True)
+    # A fixed observable makes the distinction from moving eta visible.
     eta = run.config["asimov_mu"]
-    z = expit(_score(run, quad, eta)/run.config["score_scale"])
+    z = observable_values(run, quad, eta, observable)
     nbins = max(run.config["bin_counts"])
     hist = parent.binned(z, np.linspace(0, 1, nbins+1), eta=eta)
     for mu in mu_grid(run):
         result = _fit_test(run, hist, mu, systematics=False)
         records.append(_record_scan_result(result, mu=mu, eta=eta, n_bins=nbins,
-                                           model="fixed score histogram", systematics=False))
+                                           model=options["fixed_label"], systematics=False))
     scans = pd.concat([pd.DataFrame(records), _saved_unbinned(run, False)], ignore_index=True)
     fidelity = pd.DataFrame(fidelity)
-    scans.to_csv(run.path("results", "binning_scans.csv"), index=False)
-    fidelity.to_csv(run.path("results", "binning_fisher.csv"), index=False)
+    scans.to_csv(run.path("results", options["prefix"] + "binning_scans.csv"), index=False)
+    fidelity.to_csv(run.path("results", options["prefix"] + "binning_fisher.csv"), index=False)
     return dict(scans=scans, fidelity=fidelity)
 
 
@@ -402,22 +451,26 @@ def spline_eta_grid(run, quad):
     return np.unique(np.r_[etas, c["asimov_mu"]])
 
 
-def run_spline_study(run, n_bins=None):
+def run_spline_study(run, n_bins=None, *, observable="score"):
     """Fit eta-dependent expected templates with explicit or automatic binning.
 
-    ``n_bins`` must have been evaluated in notebook 4. If omitted, choose the
+    ``n_bins`` must have been evaluated in the matching histogram study
+    (notebook 4 for scores, notebook 6 for ratios). If omitted, choose the
     smallest tested binning passing the 99% Fisher criterion, or the finest
     tested binning when none passes. Observed Asimov bins are always refilled.
+    Ratio outputs use the ``ratio_`` prefix and do not replace score results.
     """
     from .inference import YieldFractionSpline, component_coefficients
+    options = observable_metadata(observable)
+    previous_notebook = 4 if observable == "score" else 6
     c = run.config
     if n_bins is not None and (
             isinstance(n_bins, (bool, np.bool_))
             or not isinstance(n_bins, (int, np.integer)) or n_bins < 2):
         raise ValueError("n_bins must be an integer >= 2, or None for automatic selection.")
-    fisher_path = run.path("results", "binning_fisher.csv")
+    fisher_path = run.path("results", options["prefix"] + "binning_fisher.csv")
     if not fisher_path.exists():
-        raise FileNotFoundError("Run notebook 4 before selecting the spline binning.")
+        raise FileNotFoundError(f"Run notebook {previous_notebook} before selecting the spline binning.")
     fisher = pd.read_csv(fisher_path)
     worst = fisher.groupby("n_bins").information_fraction.min()
     if n_bins is None:
@@ -428,17 +481,17 @@ def run_spline_study(run, n_bins=None):
         nbins = int(n_bins)
         if nbins not in worst.index:
             raise ValueError(
-                f"Requested n_bins={nbins} was not evaluated in notebook 4. "
-                f"Rerun notebook 4 with BIN_COUNTS including {nbins} before the spline study.")
+                f"Requested n_bins={nbins} was not evaluated in notebook {previous_notebook}. "
+                f"Rerun notebook {previous_notebook} with BIN_COUNTS including {nbins} before the spline study.")
         choice_mode = "explicit"
     quad = prepare_quadrature(run)
     edges = np.linspace(0, 1, nbins+1)
     etas = spline_eta_grid(run, quad)
-    anchor_values = np.stack([_histogram_anchors(quad, expit(_score(run, quad, eta)/c["score_scale"]), edges) for eta in etas])
+    anchor_values = np.stack([_histogram_anchors(quad, observable_values(run, quad, eta, observable), edges) for eta in etas])
     spline = YieldFractionSpline(etas, anchor_values)
-    np.savez_compressed(run.path("results", "spline_templates.npz"), etas=etas,
+    np.savez_compressed(run.path("results", options["prefix"] + "spline_templates.npz"), etas=etas,
                         edges=edges, bin_yields=anchor_values, totals=spline.totals)
-    save_json(run.path("results", "spline_choice.json"),
+    save_json(run.path("results", options["prefix"] + "spline_choice.json"),
               dict(n_bins=nbins, choice_mode=choice_mode,
                    worst_information_fraction=float(worst.loc[nbins]),
                    passed_99_percent=bool(worst.loc[nbins] >= .99), n_anchors=len(etas),
@@ -458,7 +511,7 @@ def run_spline_study(run, n_bins=None):
     })
     validation = []
     for eta in (etas[:-1]+etas[1:])/2:
-        exact = _histogram_anchors(quad, expit(_score(run, quad, eta)/c["score_scale"]), edges)
+        exact = _histogram_anchors(quad, observable_values(run, quad, eta, observable), edges)
         predicted = spline(eta)
         delta = (predicted-exact)/spline.totals[..., None]
         for vi, variation in enumerate(variations):
@@ -471,11 +524,11 @@ def run_spline_study(run, n_bins=None):
     check_mus = mu_grid(run)[[0, len(mu_grid(run))//2, -1]]
     for mu in mu_grid(run):
         eta = float(mu)
-        z = expit(_score(run, quad, eta)/c["score_scale"])
+        z = observable_values(run, quad, eta, observable)
         counts = np.histogram(z, edges, weights=quad["weights"]*quad["truth"])[0]
         exact = _histogram_anchors(quad, z, edges)
         predicted = spline(eta)
-        for label, anchors in (("direct score histogram", exact), ("spline score histogram", predicted)):
+        for label, anchors in ((options["direct_label"], exact), (options["spline_label"], predicted)):
             model = _histogram_model(anchors, counts)
             for syst in (False, True):
                 result = _fit_test(run, model, mu, systematics=syst)
@@ -490,15 +543,15 @@ def run_spline_study(run, n_bins=None):
                 morph_comparison.append(dict(eta=eta, alpha_NI=alpha[0],
                                              l1_relative_difference=float(np.sum(np.abs(a-b))/np.sum(a)),
                                              nll_difference=after.nll(mu, alpha)-before.nll(mu, alpha)))
-        print(f"Spline and direct profile fits at eta={eta:.3g} ready", flush=True)
+        print(f"Spline and direct {observable} profile fits at eta={eta:.3g} ready", flush=True)
     # Physical mu dependence is separate: fix eta and scale S/SBI/B exactly.
-    fixed = _histogram_anchors(quad, expit(_score(run, quad, c["asimov_mu"])/c["score_scale"]), edges)[0]
+    fixed = _histogram_anchors(quad, observable_values(run, quad, c["asimov_mu"], observable), edges)[0]
     physical = pd.DataFrame([dict(mu=mu, eta=c["asimov_mu"], bin=bi, yield_value=value)
                              for mu in mu_grid(run)
                              for bi, value in enumerate(component_coefficients(mu) @ fixed)])
     scans = pd.concat([pd.DataFrame(scan_records), _saved_unbinned(run)], ignore_index=True)
-    direct = scans.loc[scans.model == "direct score histogram", ["mu", "systematics", "q", "mu_hat"]]
-    interpolated = scans.loc[scans.model == "spline score histogram", ["mu", "systematics", "q", "mu_hat"]]
+    direct = scans.loc[scans.model == options["direct_label"], ["mu", "systematics", "q", "mu_hat"]]
+    interpolated = scans.loc[scans.model == options["spline_label"], ["mu", "systematics", "q", "mu_hat"]]
     comparison = direct.merge(interpolated, on=["mu", "systematics"], suffixes=("_direct", "_spline"))
     comparison["delta_q"] = comparison.q_spline-comparison.q_direct
     comparison["is_spline_anchor"] = [bool(np.any(np.isclose(mu, etas, atol=1e-12, rtol=0))) for mu in comparison.mu]
@@ -507,6 +560,6 @@ def run_spline_study(run, n_bins=None):
     for filename, frame in (("spline_scans", scans), ("spline_yields", yields),
                             ("spline_validation", validation), ("physical_bin_yields", physical),
                             ("morph_order_diagnostic", morph), ("spline_likelihood_validation", comparison)):
-        frame.to_csv(run.path("results", filename+".csv"), index=False)
+        frame.to_csv(run.path("results", options["prefix"] + filename + ".csv"), index=False)
     return dict(scans=scans, yields=yields, validation=validation, physical_yields=physical,
                 morph_comparison=morph, comparison=comparison, n_bins=nbins, spline=spline)

@@ -338,84 +338,6 @@ retraining or refitting. The figure uses ATLAS-style formatting for this toy
 model and is saved as PDF and PNG in the run's `plots` directory on Drive.
 '''
 
-SCORE_DISTRIBUTIONS = r'''
-import mplhep as hep
-from scipy.special import expit
-from poodemo.pipeline import prepare_quadrature, _score
-from poodemo.inference import histogram_components
-
-quad = prepare_quadrature(run)
-selected_s, selected_sbi, selected_b, _ = quad["nominal"] @ quad["weights"]
-rate_kappa = (selected_s + selected_b - selected_sbi) / selected_s
-rate_turnover = (rate_kappa / 2)**2 if rate_kappa > 0 else np.nan
-other_root = rate_kappa - np.sqrt(run.config["asimov_mu"])
-rate_partner = other_root**2 if other_root >= 0 else np.nan
-candidate_anchors = [run.config["mu_min"], run.config["asimov_mu"], rate_turnover, rate_partner,
-                     (run.config["mu_min"] + run.config["mu_max"]) / 2, run.config["mu_max"]]
-ETA_VALUES = []
-for anchor in candidate_anchors:
-    if (np.isfinite(anchor) and run.config["mu_min"] <= anchor <= run.config["mu_max"]
-            and not any(np.isclose(anchor, old) for old in ETA_VALUES)):
-        ETA_VALUES.append(float(anchor))
-    if len(ETA_VALUES) == 4:
-        break
-ETA_VALUES = sorted(ETA_VALUES)  # Replace with your own anchors to explore.
-HIST_BINS = 128
-LOG_Y = True
-edges = np.linspace(0., 1., HIST_BINS + 1)
-distributions = []
-for eta in ETA_VALUES:
-    z_eta = expit(_score(run, quad, eta) / run.config["score_scale"])
-    # The cached fields already include the process yields (lambda factors).
-    nu_s, nu_sbi, nu_b, nu_ni = histogram_components(
-        z_eta, quad["nominal"], quad["weights"], edges)
-    root_eta = np.sqrt(eta)
-    coherent = (eta - root_eta)*nu_s + root_eta*nu_sbi + (1. - root_eta)*nu_b
-    tolerance = 1e-12 * max(1., np.max(np.abs(coherent)))
-    if np.any(coherent < -tolerance):
-        raise ValueError(f"Negative coherent prediction at eta={eta}: {coherent.min()}")
-    # Remove only floating-point roundoff after checking positivity.
-    distributions.append((eta, np.maximum(coherent, 0.), nu_ni))
-
-with plt.style.context(hep.style.ATLAS), plt.rc_context({"font.size": 16}):
-    ncols = min(2, len(distributions))
-    nrows = (len(distributions) + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(7*ncols, 4.8*nrows),
-                             sharex=True, sharey=True, squeeze=False)
-    ymax = max(np.max(coherent + ni) for _, coherent, ni in distributions)
-    for ax, (eta, coherent, ni) in zip(axes.flat, distributions):
-        hep.histplot([ni, coherent], bins=edges, stack=True, histtype="fill",
-                     color=["#B8B8B8", "#56B4E9"], edgecolor="black", linewidth=0.7,
-                     label=["Non-interfering background", r"Coherent SBI ($\mu=\eta$)"],
-                     yerr=False, ax=ax)
-        ax.text(0.04, 0.94, fr"$\eta={eta:g},\quad\alpha_{{NI}}=0$",
-                transform=ax.transAxes, va="top", fontsize=16)
-        ax.set(xlim=(0, 1),
-               xlabel=r"Score observable $z_\eta$", ylabel="Expected events / bin")
-        if LOG_Y:
-            ax.set_yscale("log")
-            ax.set_ylim(ymax*1e-5, ymax*30)
-        else:
-            ax.set_ylim(0, 1.45*ymax)
-        ax.tick_params(labelbottom=True, labelleft=True)
-        ax.grid(False)
-        ax.legend(loc="upper right", fontsize=12, frameon=False)
-    for ax in axes.flat[len(distributions):]:
-        ax.set_visible(False)
-    fig.suptitle("Gaussian-amplitude toy · after preselection", fontsize=19)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    (ROOT / "plots").mkdir(exist_ok=True)
-    for extension in ("pdf", "png"):
-        fig.savefig(ROOT / "plots" / f"04_score_distributions.{extension}",
-                    bbox_inches="tight", dpi=160)
-    plt.show()
-
-display(pd.DataFrame([
-    {"eta": eta, "coherent_SBI_yield": coherent.sum(), "NI_yield": ni.sum(),
-     "total_yield": (coherent + ni).sum()}
-    for eta, coherent, ni in distributions
-]))
-'''
 
 
 UNBINNED_ASIMOV_REFRESH_INTRO = r'''
@@ -483,7 +405,296 @@ print("Unbinned references refreshed from the saved models; no networks were tra
 '''
 
 
+def observable_distribution_code(observable, prefix):
+    label = r'Ratio observable $z_\eta=r_\eta/(1+r_\eta)$' if observable == 'ratio' else r'Score observable $z_\eta$'
+    settings = f'OBSERVABLE = {observable!r}\nPLOT_PREFIX = {prefix!r}\nOBSERVABLE_LABEL = {label!r}\n'
+    return settings + r'''
+import mplhep as hep
+from poodemo.pipeline import prepare_quadrature, observable_values
+from poodemo.inference import histogram_components
+
+quad = prepare_quadrature(run)
+selected_s, selected_sbi, selected_b, _ = quad["nominal"] @ quad["weights"]
+rate_kappa = (selected_s + selected_b - selected_sbi) / selected_s
+rate_turnover = (rate_kappa / 2)**2 if rate_kappa > 0 else np.nan
+other_root = rate_kappa - np.sqrt(run.config["asimov_mu"])
+rate_partner = other_root**2 if other_root >= 0 else np.nan
+candidate_anchors = [run.config["mu_min"], run.config["asimov_mu"], rate_turnover, rate_partner,
+                     (run.config["mu_min"] + run.config["mu_max"]) / 2, run.config["mu_max"]]
+ETA_VALUES = []
+for anchor in candidate_anchors:
+    if (np.isfinite(anchor) and run.config["mu_min"] <= anchor <= run.config["mu_max"]
+            and not any(np.isclose(anchor, old) for old in ETA_VALUES)):
+        ETA_VALUES.append(float(anchor))
+    if len(ETA_VALUES) == 4:
+        break
+ETA_VALUES = sorted(ETA_VALUES)  # Replace with your own anchors to explore.
+HIST_BINS = 128
+LOG_Y = True
+edges = np.linspace(0., 1., HIST_BINS + 1)
+distributions = []
+for eta in ETA_VALUES:
+    z_eta = observable_values(run, quad, eta, observable=OBSERVABLE)
+    # The cached fields already include the process yields (lambda factors).
+    nu_s, nu_sbi, nu_b, nu_ni = histogram_components(
+        z_eta, quad["nominal"], quad["weights"], edges)
+    root_eta = np.sqrt(eta)
+    coherent = (eta - root_eta)*nu_s + root_eta*nu_sbi + (1. - root_eta)*nu_b
+    tolerance = 1e-12 * max(1., np.max(np.abs(coherent)))
+    if np.any(coherent < -tolerance):
+        raise ValueError(f"Negative coherent prediction at eta={eta}: {coherent.min()}")
+    # Remove only floating-point roundoff after checking positivity.
+    distributions.append((eta, np.maximum(coherent, 0.), nu_ni))
+
+with plt.style.context(hep.style.ATLAS), plt.rc_context({"font.size": 16}):
+    ncols = min(2, len(distributions))
+    nrows = (len(distributions) + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7*ncols, 4.8*nrows),
+                             sharex=True, sharey=True, squeeze=False)
+    ymax = max(np.max(coherent + ni) for _, coherent, ni in distributions)
+    for ax, (eta, coherent, ni) in zip(axes.flat, distributions):
+        hep.histplot([ni, coherent], bins=edges, stack=True, histtype="fill",
+                     color=["#B8B8B8", "#56B4E9"], edgecolor="black", linewidth=0.7,
+                     label=["Non-interfering background", r"Coherent SBI ($\mu=\eta$)"],
+                     yerr=False, ax=ax)
+        ax.text(0.04, 0.94, fr"$\eta={eta:g},\quad\alpha_{{NI}}=0$",
+                transform=ax.transAxes, va="top", fontsize=16)
+        ax.set(xlim=(0, 1),
+               xlabel=OBSERVABLE_LABEL, ylabel="Expected events / bin")
+        if LOG_Y:
+            ax.set_yscale("log")
+            ax.set_ylim(ymax*1e-5, ymax*30)
+        else:
+            ax.set_ylim(0, 1.45*ymax)
+        ax.tick_params(labelbottom=True, labelleft=True)
+        ax.grid(False)
+        ax.legend(loc="upper right", fontsize=12, frameon=False)
+    for ax in axes.flat[len(distributions):]:
+        ax.set_visible(False)
+    fig.suptitle("Gaussian-amplitude toy · after preselection", fontsize=19)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    (ROOT / "plots").mkdir(exist_ok=True)
+    for extension in ("pdf", "png"):
+        fig.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_{OBSERVABLE}_distributions.{extension}",
+                    bbox_inches="tight", dpi=160)
+    plt.show()
+
+display(pd.DataFrame([
+    {"eta": eta, "coherent_SBI_yield": coherent.sum(), "NI_yield": ni.sum(),
+     "total_yield": (coherent + ni).sum()}
+    for eta, coherent, ni in distributions
+]))
+'''
+
+def fidelity_plot_code(prefix):
+    settings = f'PLOT_PREFIX = {prefix!r}\n'
+    return settings + r'''
+fidelity = binning["fidelity"]
+display(fidelity)
+eta_near_truth = min(fidelity["eta"].unique(), key=lambda e: abs(e - run.config["asimov_mu"]))
+at_anchor = fidelity[np.isclose(fidelity["eta"], eta_near_truth)].sort_values("n_bins")
+y_columns = [c for c in fidelity if "information_fraction" in c]
+if y_columns:
+    ax = at_anchor.plot(x="n_bins", y=y_columns, marker="o", logx=True)
+    ax.set(xlabel="Number of bins", ylabel="Retained Fisher information fraction",
+           title=fr"Information retained at $\eta={eta_near_truth:.3g}$")
+    ax.figure.tight_layout()
+    (ROOT / "plots").mkdir(exist_ok=True)
+    ax.figure.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_binning_diagnostics.pdf", bbox_inches="tight")
+    plt.show()
+'''
+
+def estimator_plot_code(prefix):
+    settings = f'PLOT_PREFIX = {prefix!r}\n'
+    return settings + r'''
+fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True, squeeze=False)
+truth_mu = float(estimator_study["truth"].iloc[0])
+for row, systematic in enumerate([False, True]):
+    subset = estimator_study[estimator_study["systematics"] == systematic]
+    group_columns = [c for c in ["model", "n_bins"] if c in subset.columns]
+    for label, values in subset.groupby(group_columns, dropna=False, sort=False):
+        values = values.sort_values("eta")
+        label_values = label if isinstance(label, tuple) else (label,)
+        parts = [f"{int(value)} bins" if name == "n_bins" else str(value)
+                 for name, value in zip(group_columns, label_values)
+                 if pd.notna(value) and (name != "n_bins" or float(value) > 0)]
+        legend_label = " | ".join(parts)
+        line_style = "--" if "unbinned" in str(label_values[0]).lower() else "-"
+        sigma = values["sigma_mu"].replace([np.inf, -np.inf], np.nan).where(values["width_valid"])
+        axes[row, 0].plot(values["eta"], sigma, line_style, label=legend_label)
+        axes[row, 1].plot(values["eta"], values["mu_hat"].where(values["fit_valid"]), line_style, label=legend_label)
+    nuisance_label = "NI profiled" if systematic else "NI fixed at zero"
+    axes[row, 0].set(title=nuisance_label, ylabel=r"Local width $\sigma_\mu(\eta)$")
+    axes[row, 1].axhline(truth_mu, color="black", ls=":", label="Generating value")
+    axes[row, 1].set(title=nuisance_label + ": same Asimov experiment", ylabel=r"$\hat\mu(\eta)$")
+    finite_estimates = subset.loc[subset["fit_valid"], "mu_hat"].to_numpy()
+    finite_estimates = finite_estimates[np.isfinite(finite_estimates)]
+    lower = min(truth_mu, finite_estimates.min()) if len(finite_estimates) else truth_mu
+    upper = max(truth_mu, finite_estimates.max()) if len(finite_estimates) else truth_mu
+    margin = max(.03 * (run.config["mu_max"] - run.config["mu_min"]), .1 * (upper - lower))
+    axes[row, 1].set_ylim(lower - margin, upper + margin)
+    for ax in axes[row]:
+        ax.set_xlabel(r"Frozen observable anchor $\eta$")
+        ax.legend(fontsize=7)
+fig.tight_layout()
+for extension in ("pdf", "png"):
+    fig.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_estimator_eta.{extension}", bbox_inches="tight", dpi=160)
+plt.show()
+'''
+
+def template_yield_plot_code(prefix):
+    settings = f'PLOT_PREFIX = {prefix!r}\n'
+    return settings + r'''
+from poodemo.data import PROCESSES
+
+yields = splines["yields"]
+display(yields.head(20))
+# Points are histogram anchors; lines are interpolated expected yields.
+spline = splines["spline"]
+eta_dense = np.linspace(spline.etas[0], spline.etas[-1], 200)
+dense_yields = spline(eta_dense)
+variation_order = ["nominal", "NI_down", "NI_up"]
+processes = list(yields["sample"].unique())
+fig, axes = plt.subplots(len(processes), 1, figsize=(8, 3 * len(processes)), squeeze=False)
+for process, ax in zip(processes, axes[:, 0]):
+    subset = yields[yields["sample"] == process]
+    shown_bins = subset.groupby("bin")["yield_value"].sum().nlargest(3).index
+    variations = ["nominal"] + (["NI_down", "NI_up"] if process == "NI" else [])
+    subset = subset[subset["bin"].isin(shown_bins) & subset["variation"].isin(variations)]
+    for (variation, bin_number), values in subset.groupby(["variation", "bin"], sort=False):
+        values = values.sort_values("eta")
+        curve = dense_yields[:, variation_order.index(variation), PROCESSES.index(process), int(bin_number)]
+        line, = ax.plot(eta_dense, curve, label=f"{variation}, bin {bin_number}")
+        ax.plot(values["eta"], values["yield_value"], ".", ms=3, color=line.get_color())
+    ax.set(xlabel=r"Observable anchor $\eta$", ylabel="Expected bin yield", title=process)
+    ax.legend(fontsize=7, ncol=3)
+fig.tight_layout()
+(ROOT / "plots").mkdir(exist_ok=True)
+fig.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_template_yields.pdf", bbox_inches="tight")
+plt.show()
+'''
+
+def physical_yield_plot_code(prefix):
+    settings = f'PLOT_PREFIX = {prefix!r}\n'
+    return settings + r'''
+physical = splines["physical_yields"]
+shown_bins = physical.groupby("bin")["yield_value"].sum().nlargest(6).index
+fig, ax = plt.subplots()
+for bin_number, values in physical[physical["bin"].isin(shown_bins)].groupby("bin"):
+    ax.plot(values["mu"], values["yield_value"], label=f"bin {bin_number}")
+ax.set(xlabel=r"Physical signal strength $\mu$", ylabel="Expected total bin yield",
+       title=fr"Physical scaling with the observable fixed at $\eta={run.config['asimov_mu']:g}$")
+ax.legend(fontsize=8)
+fig.tight_layout()
+fig.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_physical_bin_yields.pdf", bbox_inches="tight")
+plt.show()
+'''
+
+def spline_scan_plot_code(prefix, xlim=None, ylim=None):
+    settings = f'PLOT_PREFIX = {prefix!r}\nDEFAULT_SCAN_XLIM = {xlim!r}\nDEFAULT_SCAN_YLIM = {ylim!r}\n'
+    return settings + r'''
+display(splines["scans"])
+SCAN_XLIM = DEFAULT_SCAN_XLIM  # Set None for the full scan range.
+SCAN_YLIM = DEFAULT_SCAN_YLIM  # Set None for the full vertical range.
+plot_scans(splines["scans"], "Profiled fits: spline, direct histogram, and unbinned", f"{PLOT_PREFIX}_profiled_scans.pdf",
+           xlim=SCAN_XLIM, ylim=SCAN_YLIM)
+comparison = splines["comparison"]
+display(comparison)
+print("Actual unique spline anchors:", len(splines["spline"].etas))
+print("Largest spline/direct test-statistic difference on the scan:", comparison["delta_q"].abs().max())
+off_grid = comparison.loc[~comparison["is_spline_anchor"]]
+if len(off_grid):
+    print("Largest difference at evaluated non-anchor points:", off_grid["delta_q"].abs().max())
+else:
+    print("All evaluated scan points are spline anchors; their agreement does not test interpolation between anchors.")
+    print("Inspect the midpoint template-validation table and additional off-grid likelihood checks.")
+'''
+
+ESTIMATOR_STUDY_INTRO = r'''
+### Estimator and local uncertainty versus the frozen observable
+
+Now hold the generating experiment fixed at \((\mu_*,\alpha_{NI})=(\mu_*,0)\)
+and vary only the observable anchor \(\eta\). Each row refills the
+**same Asimov expectation**, freezes that histogram, and fits physical
+\(\mu\), with NI either fixed or profiled. For an identified, correctly
+modeled Asimov experiment, \(\hat\mu(\eta)\) should remain at the
+generating value. This is not a study of finite-sample fluctuations.
+
+The width is evaluated from the local Fisher information at the fixed
+truth, using the extended likelihood and the NI auxiliary constraint:
+\[
+\sigma_\mu^{\rm fixed}(\eta)=1/\sqrt{I_{\mu\mu}^{(\eta)}},\qquad
+\sigma_\mu^{\rm profiled}(\eta)
+=\sqrt{[(\mathbf I^{(\eta)})^{-1}]_{\mu\mu}}.
+\]
+This is the local Asimov curvature of **each frozen-observable fit**.
+It is neither the curvature of the scan that changes \(\eta=\mu_0\)
+at every point nor a global confidence interval. A second likelihood
+minimum can produce additional accepted parameter regions that a local
+width cannot describe.
+
+The full unbinned reference does not depend on \(\eta\). For the binned
+comparison, profiled widths use nuisance morphing after binning, as in
+the spline notebook; its difference from integrating the unbinned morphing is a
+separate model effect. Inspect anomalous fitted values for optimizer
+failure or multiple equally good minima before interpreting them as
+compression bias.
+'''
+
+SPLINE_COORDINATE_INTRO = r'''
+### The spline coordinate is the construction parameter \(\eta\)
+
+A process yield \(H_{jb}(\eta)\) in a fixed \(z\)-bin changes when
+\(\eta\) changes because the observable moves events between bins.
+The physical \(\mu\)-dependence still enters through the exact amplitude
+coefficients. These two roles must stay separate:
+\[
+\nu_b(\mu;\eta)=(\mu-\sqrt\mu)H_{Sb}(\eta)
++\sqrt\mu H_{SBI,b}(\eta)+(1-\sqrt\mu)H_{Bb}(\eta)
++H_{NI,b}(\eta).
+\]
+Since the selected phase space is fixed and bins are exhaustive,
+\(\sum_bH_{jb}(\eta)=\lambda_j\) is independent of \(\eta\).
+We interpolate bin fractions with positivity and normalization enforced,
+then restore the separate total yield. SBI interference enters through
+the coherent templates, not an independently generated signed sample.
+'''
+
+SPLINE_NUISANCE_INTRO = r'''
+### Vary the templates, then interpolate the nuisance
+
+Build nominal and ±1 templates for NI and nominal templates for S, B,
+and SBI. Fit their dependence on \(\eta\).
+At any construction point, evaluate the splines first; then use the
+same exponential–polynomial rule to interpolate in \(\alpha_{NI}\).
+Every profiled fit retains the Gaussian auxiliary constraint
+\(\exp(-\alpha_{NI}^2/2)\), or \(+\alpha_{NI}^2\) in \(-2\log L\).
+
+The Asimov data histogram also depends on \(\eta\) and is refilled from
+the integration events at each tested point, rather than interpolated.
+All nuisance fits keep \(\eta=\mu_0\) fixed
+in both numerator and denominator.
+
+Integration and nonlinear nuisance interpolation generally do not
+commute:
+\[
+\int_{B_b(\eta)}\!\mathrm{Interp}_{\alpha_{NI}}[D(x)]\,dx
+\ne \mathrm{Interp}_{\alpha_{NI}}\!\left[\int_{B_b(\eta)}D(x)\,dx\right].
+\]
+This difference is recorded separately from spline interpolation error.
+Agreement at nominal and ±1 templates alone does not establish equality
+between the continuously morphed unbinned and binned models.
+'''
+
+PHYSICAL_YIELD_INTRO = r'''
+For comparison, the next plot fixes \(\eta=\mu_*\) and varies the **physical**
+\(\mu\). This dependence comes from the signal/interference coefficients,
+not from the spline. The two plots answer different questions.
+'''
+
+
 def start(title, introduction):
+    introduction = textwrap.dedent(introduction).strip()
     return [md(f"# {title}\n\n{introduction}"), md(SETUP_INTRO), code(BOOTSTRAP), code(COMMON_IMPORTS)]
 
 
@@ -1003,7 +1214,7 @@ def build():
         affects how efficiently a finite uniform binning resolves the score.
         """),
         md(SCORE_DISTRIBUTIONS_INTRO),
-        code(SCORE_DISTRIBUTIONS),
+        code(observable_distribution_code("score", "04")),
         md(r"""
         ### Freeze the observable inside each likelihood fit
 
@@ -1045,51 +1256,8 @@ def build():
         \(\eta\) differ away from the minimum. This is precisely where local
         optimality must not be mistaken for global sufficiency.
         """),
-        code(r'''
-        fidelity = binning["fidelity"]
-        display(fidelity)
-        eta_near_truth = min(fidelity["eta"].unique(), key=lambda e: abs(e - run.config["asimov_mu"]))
-        at_anchor = fidelity[np.isclose(fidelity["eta"], eta_near_truth)].sort_values("n_bins")
-        y_columns = [c for c in fidelity if "information_fraction" in c]
-        if y_columns:
-            ax = at_anchor.plot(x="n_bins", y=y_columns, marker="o", logx=True)
-            ax.set(xlabel="Number of bins", ylabel="Retained Fisher information fraction",
-                   title=fr"Information retained at $\eta={eta_near_truth:.3g}$")
-            ax.figure.tight_layout()
-            (ROOT / "plots").mkdir(exist_ok=True)
-            ax.figure.savefig(ROOT / "plots" / "04_binning_diagnostics.pdf", bbox_inches="tight")
-            plt.show()
-        '''),
-        md(r"""
-        ### Estimator and local uncertainty versus the frozen observable
-
-        Now hold the generating experiment fixed at \((\mu_*,\alpha_{NI})=(\mu_*,0)\)
-        and vary only the observable anchor \(\eta\). Each row refills the
-        **same Asimov expectation**, freezes that histogram, and fits physical
-        \(\mu\), with NI either fixed or profiled. For an identified, correctly
-        modeled Asimov experiment, \(\hat\mu(\eta)\) should remain at the
-        generating value. This is not a study of finite-sample fluctuations.
-
-        The width is evaluated from the local Fisher information at the fixed
-        truth, using the extended likelihood and the NI auxiliary constraint:
-        \[
-        \sigma_\mu^{\rm fixed}(\eta)=1/\sqrt{I_{\mu\mu}^{(\eta)}},\qquad
-        \sigma_\mu^{\rm profiled}(\eta)
-        =\sqrt{[(\mathbf I^{(\eta)})^{-1}]_{\mu\mu}}.
-        \]
-        This is the local Asimov curvature of **each frozen-observable fit**.
-        It is neither the curvature of the scan that changes \(\eta=\mu_0\)
-        at every point nor a global confidence interval. A second likelihood
-        minimum can produce additional accepted parameter regions that a local
-        width cannot describe.
-
-        The full unbinned reference does not depend on \(\eta\). For the binned
-        comparison, profiled widths use nuisance morphing after binning, as in
-        notebook 5; its difference from integrating the unbinned morphing is a
-        separate model effect. Inspect anomalous fitted values for optimizer
-        failure or multiple equally good minima before interpreting them as
-        compression bias.
-        """),
+        code(fidelity_plot_code('04')),
+        md(ESTIMATOR_STUDY_INTRO),
         code(r'''
         from poodemo.diagnostics import run_estimator_study
 
@@ -1101,41 +1269,7 @@ def build():
             display(invalid_rows)
         print("Saved estimator table:", ROOT / "results" / "estimator_eta.csv")
         '''),
-        code(r'''
-        fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True, squeeze=False)
-        truth_mu = float(estimator_study["truth"].iloc[0])
-        for row, systematic in enumerate([False, True]):
-            subset = estimator_study[estimator_study["systematics"] == systematic]
-            group_columns = [c for c in ["model", "n_bins"] if c in subset.columns]
-            for label, values in subset.groupby(group_columns, dropna=False, sort=False):
-                values = values.sort_values("eta")
-                label_values = label if isinstance(label, tuple) else (label,)
-                parts = [f"{int(value)} bins" if name == "n_bins" else str(value)
-                         for name, value in zip(group_columns, label_values)
-                         if pd.notna(value) and (name != "n_bins" or float(value) > 0)]
-                legend_label = " | ".join(parts)
-                line_style = "--" if "unbinned" in str(label_values[0]).lower() else "-"
-                sigma = values["sigma_mu"].replace([np.inf, -np.inf], np.nan).where(values["width_valid"])
-                axes[row, 0].plot(values["eta"], sigma, line_style, label=legend_label)
-                axes[row, 1].plot(values["eta"], values["mu_hat"].where(values["fit_valid"]), line_style, label=legend_label)
-            nuisance_label = "NI profiled" if systematic else "NI fixed at zero"
-            axes[row, 0].set(title=nuisance_label, ylabel=r"Local width $\sigma_\mu(\eta)$")
-            axes[row, 1].axhline(truth_mu, color="black", ls=":", label="Generating value")
-            axes[row, 1].set(title=nuisance_label + ": same Asimov experiment", ylabel=r"$\hat\mu(\eta)$")
-            finite_estimates = subset.loc[subset["fit_valid"], "mu_hat"].to_numpy()
-            finite_estimates = finite_estimates[np.isfinite(finite_estimates)]
-            lower = min(truth_mu, finite_estimates.min()) if len(finite_estimates) else truth_mu
-            upper = max(truth_mu, finite_estimates.max()) if len(finite_estimates) else truth_mu
-            margin = max(.03 * (run.config["mu_max"] - run.config["mu_min"]), .1 * (upper - lower))
-            axes[row, 1].set_ylim(lower - margin, upper + margin)
-            for ax in axes[row]:
-                ax.set_xlabel(r"Frozen observable anchor $\eta$")
-                ax.legend(fontsize=7)
-        fig.tight_layout()
-        for extension in ("pdf", "png"):
-            fig.savefig(ROOT / "plots" / f"04_estimator_eta.{extension}", bbox_inches="tight", dpi=160)
-        plt.show()
-        '''),
+        code(estimator_plot_code('04')),
         md("Next: **05_spline_templates.ipynb**."),
     ]
     write("04_score_histograms.ipynb", cells)
@@ -1147,49 +1281,8 @@ def build():
     Run notebooks 1–4 first.
     """)
     cells += [
-        md(r"""
-        ### The spline coordinate is the construction parameter \(\eta\)
-
-        A process yield \(H_{jb}(\eta)\) in a fixed \(z\)-bin changes when
-        \(\eta\) changes because the observable moves events between bins.
-        The physical \(\mu\)-dependence still enters through the exact amplitude
-        coefficients. These two roles must stay separate:
-        \[
-        \nu_b(\mu;\eta)=(\mu-\sqrt\mu)H_{Sb}(\eta)
-        +\sqrt\mu H_{SBI,b}(\eta)+(1-\sqrt\mu)H_{Bb}(\eta)
-        +H_{NI,b}(\eta).
-        \]
-        Since the selected phase space is fixed and bins are exhaustive,
-        \(\sum_bH_{jb}(\eta)=\lambda_j\) is independent of \(\eta\).
-        We interpolate bin fractions with positivity and normalization enforced,
-        then restore the separate total yield. SBI interference enters through
-        the coherent templates, not an independently generated signed sample.
-        """),
-        md(r"""
-        ### Vary the templates, then interpolate the nuisance
-
-        Build nominal and ±1 templates for NI and nominal templates for S, B,
-        and SBI. Fit their dependence on \(\eta\).
-        At any construction point, evaluate the splines first; then use the
-        same exponential–polynomial rule to interpolate in \(\alpha_{NI}\).
-        Every profiled fit retains the Gaussian auxiliary constraint
-        \(\exp(-\alpha_{NI}^2/2)\), or \(+\alpha_{NI}^2\) in \(-2\log L\).
-
-        The Asimov data histogram also depends on \(\eta\) and is refilled from
-        the integration events at each tested point, rather than interpolated.
-        All nuisance fits keep \(\eta=\mu_0\) fixed
-        in both numerator and denominator.
-
-        Integration and nonlinear nuisance interpolation generally do not
-        commute:
-        \[
-        \int_{B_b(\eta)}\!\mathrm{Interp}_{\alpha_{NI}}[D(x)]\,dx
-        \ne \mathrm{Interp}_{\alpha_{NI}}\!\left[\int_{B_b(\eta)}D(x)\,dx\right].
-        \]
-        This difference is recorded separately from spline interpolation error.
-        Agreement at nominal and ±1 templates alone does not establish equality
-        between the continuously morphed unbinned and binned models.
-        """),
+        md(SPLINE_COORDINATE_INTRO),
+        md(SPLINE_NUISANCE_INTRO),
         code("from poodemo.pipeline import run_spline_study\n\nsplines = run_spline_study(run, n_bins=20)\ndisplay(splines['validation'])\ndisplay(splines['yields'])"),
         md(r"""
         We use **20 bins** explicitly, matching the finest resolution in notebook 4.
@@ -1224,71 +1317,11 @@ def build():
         points and the included generating value; the shorter smoke scan is
         primarily a workflow check.
         """),
-        code(r'''
-        from poodemo.data import PROCESSES
-
-        yields = splines["yields"]
-        display(yields.head(20))
-        # Points are histogram anchors; lines are interpolated expected yields.
-        spline = splines["spline"]
-        eta_dense = np.linspace(spline.etas[0], spline.etas[-1], 200)
-        dense_yields = spline(eta_dense)
-        variation_order = ["nominal", "NI_down", "NI_up"]
-        processes = list(yields["sample"].unique())
-        fig, axes = plt.subplots(len(processes), 1, figsize=(8, 3 * len(processes)), squeeze=False)
-        for process, ax in zip(processes, axes[:, 0]):
-            subset = yields[yields["sample"] == process]
-            shown_bins = subset.groupby("bin")["yield_value"].sum().nlargest(3).index
-            variations = ["nominal"] + (["NI_down", "NI_up"] if process == "NI" else [])
-            subset = subset[subset["bin"].isin(shown_bins) & subset["variation"].isin(variations)]
-            for (variation, bin_number), values in subset.groupby(["variation", "bin"], sort=False):
-                values = values.sort_values("eta")
-                curve = dense_yields[:, variation_order.index(variation), PROCESSES.index(process), int(bin_number)]
-                line, = ax.plot(eta_dense, curve, label=f"{variation}, bin {bin_number}")
-                ax.plot(values["eta"], values["yield_value"], ".", ms=3, color=line.get_color())
-            ax.set(xlabel=r"Observable anchor $\eta$", ylabel="Expected bin yield", title=process)
-            ax.legend(fontsize=7, ncol=3)
-        fig.tight_layout()
-        (ROOT / "plots").mkdir(exist_ok=True)
-        fig.savefig(ROOT / "plots" / "05_template_yields.pdf", bbox_inches="tight")
-        plt.show()
-        '''),
-        md(r"""
-        For comparison, the next plot fixes \(\eta=\mu_*\) and varies the **physical**
-        \(\mu\). This dependence comes from the signal/interference coefficients,
-        not from the spline. The two plots answer different questions.
-        """),
-        code(r'''
-        physical = splines["physical_yields"]
-        shown_bins = physical.groupby("bin")["yield_value"].sum().nlargest(6).index
-        fig, ax = plt.subplots()
-        for bin_number, values in physical[physical["bin"].isin(shown_bins)].groupby("bin"):
-            ax.plot(values["mu"], values["yield_value"], label=f"bin {bin_number}")
-        ax.set(xlabel=r"Physical signal strength $\mu$", ylabel="Expected total bin yield",
-               title=fr"Physical scaling with the observable fixed at $\eta={run.config['asimov_mu']:g}$")
-        ax.legend(fontsize=8)
-        fig.tight_layout()
-        fig.savefig(ROOT / "plots" / "05_physical_bin_yields.pdf", bbox_inches="tight")
-        plt.show()
-        '''),
+        code(template_yield_plot_code('05')),
+        md(PHYSICAL_YIELD_INTRO),
+        code(physical_yield_plot_code('05')),
         code(PLOT_HELPER),
-        code(r'''
-        display(splines["scans"])
-        SCAN_XLIM = None  # e.g. (0.35, 1.15); None keeps the default x-axis range.
-        SCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.
-        plot_scans(splines["scans"], "Profiled fits: spline, direct histogram, and unbinned", "05_profiled_scans.pdf",
-                   xlim=SCAN_XLIM, ylim=SCAN_YLIM)
-        comparison = splines["comparison"]
-        display(comparison)
-        print("Actual unique spline anchors:", len(splines["spline"].etas))
-        print("Largest spline/direct test-statistic difference on the scan:", comparison["delta_q"].abs().max())
-        off_grid = comparison.loc[~comparison["is_spline_anchor"]]
-        if len(off_grid):
-            print("Largest difference at evaluated non-anchor points:", off_grid["delta_q"].abs().max())
-        else:
-            print("All evaluated scan points are spline anchors; their agreement does not test interpolation between anchors.")
-            print("Inspect the midpoint template-validation table and additional off-grid likelihood checks.")
-        '''),
+        code(spline_scan_plot_code('05')),
         md(r"""
         ### Read the comparisons separately
 
@@ -1333,5 +1366,264 @@ def build():
     write("05_spline_templates.ipynb", cells)
 
 
+def ratio_histogram_cells():
+    """Parallel of notebook 4 with explicit ratio-specific statistical claims."""
+    cells = start("6. Analytical density-ratio histograms", r"""
+    Repeat notebook 4 with the exact density-ratio observable
+    \(z_\eta=r_\eta/(1+r_\eta)\). Use the same selected events, analytical
+    Asimov data, physical model, binning study, and fit convention. Only the
+    scalar observable changes. Run notebooks 1–3 first; no network retraining
+    or new Monte Carlo generation is needed. Running notebook 4 also permits
+    a direct comparison with its saved score results.
+    """)
+    cells += [
+        md(r"""
+        ### The ratio of normalized, selected densities
+
+        Use the same selected phase space and yield factors as notebook 4:
+        \[
+        D_\eta(x)=(\eta-\sqrt\eta)\lambda_Sp_S(x)
+        +\sqrt\eta\lambda_{SBI}p_{SBI}(x)
+        +(1-\sqrt\eta)\lambda_Bp_B(x)+\lambda_{NI}p_{NI}(x),
+        \]
+        \[
+        \Lambda_\eta=(\eta-\sqrt\eta)\lambda_S
+        +\sqrt\eta\lambda_{SBI}+(1-\sqrt\eta)\lambda_B+\lambda_{NI}.
+        \]
+        Here every \(p_j\) is a normalized **selected** process density and
+        every \(\lambda_j\) is its selected yield. At nominal \(\alpha_{NI}=0\),
+        \[
+        r_\eta(x)=\frac{p(x;\eta,0)}{p_S(x)}
+        =\frac{D_\eta(x)/\Lambda_\eta}{D_S(x)/\lambda_S},
+        \qquad D_S(x)=\lambda_Sp_S(x),\qquad
+        \boxed{z_\eta(x)=\frac{r_\eta(x)}{1+r_\eta(x)}}.
+        \]
+        The analytical Gaussian components and selected rates are evaluated
+        on the same final quadrature. This is an exact analytical construction
+        within that numerical integration, **not a learned ratio**. There is
+        no score-scale factor. The monotone map places positive ratios between
+        zero and one without changing their event ordering.
+
+        For each fixed \(\eta\), this ordering is optimal for the binary
+        comparison of the selected \(p(x;\eta,0)\) with the selected S reference.
+        That binary statement does not make the scalar sufficient for the
+        physical \(\mu\)-family. In particular, its unbinned local Fisher
+        information at \(\mu=\eta\) need not equal that of the full event: the
+        score \(\partial_\mu\log p\) need not be a function of \(r_\eta\).
+        Keeping the Poisson event count retains the separate rate information.
+        """),
+        md(SCORE_DISTRIBUTIONS_INTRO),
+        code(observable_distribution_code("ratio", "06")),
+        md(r"""
+        ### Freeze the observable inside each likelihood fit
+
+        For the test of \(\mu_0\), construct \(z_{\eta=\mu_0}\) at
+        \(\alpha_{NI}=0\), then freeze its bin edges, event assignments, and
+        Asimov data while fitting all physical alternatives \(\mu\):
+        \[
+        t(\mu_0)=-2\log\frac{L(\mu_0;\eta=\mu_0)}
+                                  {\max_\mu L(\mu;\eta=\mu_0)}.
+        \]
+        Refill the same analytical Asimov expectation when \(\eta\) changes.
+        The coarsening scan below fixes NI at nominal, as in notebook 4.
+        Moving the construction point to the tested hypothesis does not create
+        the score's local information-preservation guarantee for this ratio.
+        """),
+        md(UNBINNED_ASIMOV_REFRESH_INTRO),
+        code(UNBINNED_ASIMOV_REFRESH),
+        code(r'''
+        from dataclasses import replace
+        from poodemo.pipeline import run_binning_study
+
+        BIN_COUNTS = list(range(4, 61, 4))
+        # The resolution study shares all other settings with notebook 4.
+        binning_run = replace(run, config={**run.config, "bin_counts": BIN_COUNTS})
+        binning = run_binning_study(binning_run, observable="ratio")
+        display(binning["scans"])
+        display(binning["fidelity"])
+        print("Saved ratio study:", ROOT / "results" / "ratio_binning_scans.csv")
+        '''),
+        code(PLOT_HELPER),
+        code(r'''
+        SCAN_BIN_COUNTS = [4, 12, 24, 36, 60]
+        scans = binning["scans"]
+        shown_scans = scans.loc[
+            (scans["model"].eq("direct ratio histogram") & scans["n_bins"].isin(SCAN_BIN_COUNTS))
+            | scans["model"].eq("analytic unbinned")
+            | scans["model"].str.startswith("learned unbinned", na=False)
+        ].copy()
+        SCAN_XLIM = (0.35, 1.15)  # Set None to show the full scan range.
+        SCAN_YLIM = (0, 8)  # Set None to show the full vertical range.
+        scan_title = "Ratio histograms: " + ", ".join(map(str, SCAN_BIN_COUNTS)) + " bins"
+        plot_scans(shown_scans, scan_title, "06_binning_scans.pdf",
+                   xlim=SCAN_XLIM, ylim=SCAN_YLIM);
+        '''),
+        md(r"""
+        ### Distinguish ratio compression from finite binning
+
+        Compression from \(x\) to \(r_\eta(x)\) can lose local information
+        before any bins are introduced. At a fixed truth, its per-event shape
+        Fisher-information loss is the conditional score variance
+        \[
+        I_X^{\rm shape}-I_{r_\eta}^{\rm shape}
+        =E[\operatorname{Var}(\partial_\mu\log p(X;\mu)\mid r_\eta(X))].
+        \]
+        It vanishes only when the relevant score is determined by the ratio.
+        The extended diagnostic multiplies the per-event information by the
+        expected event count and adds the Poisson rate information.
+        Finite bins can lose additional information. Refining **nested** bins
+        reduces this second loss; the chosen counts need not form a nested
+        sequence, so every successive point need not improve monotonically.
+
+        Fine bins approach the unbinned **ratio experiment**, which may differ
+        from the full unbinned event experiment even at \(\mu=\eta\). The Fisher
+        table measures that total loss without assuming it vanishes. Compare
+        with notebook 4's corresponding score table at the same anchors and
+        resolutions. Both histogram studies use analytical Asimov data, so their
+        full-dimensional reference is `analytic unbinned`; the two learned
+        references retain their separate closure/consistency interpretations.
+        """),
+        code(fidelity_plot_code("06")),
+        md(ESTIMATOR_STUDY_INTRO),
+        md(r"""
+        This estimator study uses the finest bin count in the original saved
+        run configuration, just as notebook 4 does. The local `BIN_COUNTS`
+        override above affects only the coarsening study. Using the same
+        estimator resolution makes the score/ratio comparison controlled.
+        Changing \(\eta\) changes a frozen observable, not the generating data.
+        A flat \(\hat\mu(\eta)\) does not establish information sufficiency:
+        the local width can still increase after ratio compression.
+        """),
+        code(r'''
+        from poodemo.diagnostics import run_estimator_study
+
+        print("Estimator-study bin count:", max(run.config["bin_counts"]))
+        estimator_study = run_estimator_study(run, observable="ratio")
+        display(estimator_study)
+        invalid_rows = estimator_study[~estimator_study["fit_valid"] | ~estimator_study["width_valid"]]
+        if len(invalid_rows):
+            print("Invalid fits or local widths (omitted from the corresponding curves):")
+            display(invalid_rows)
+        print("Saved estimator table:", ROOT / "results" / "ratio_estimator_eta.csv")
+        '''),
+        code(estimator_plot_code("06")),
+        md("Next: **07_ratio_spline_templates.ipynb**. Ratio results use a `ratio_` prefix; score-study results are retained."),
+    ]
+    return cells
+
+
+def ratio_spline_cells():
+    """Parallel of notebook 5 with the same ratio construction as notebook 6."""
+    cells = start("7. Density-ratio spline templates and profiled fits", r"""
+    Repeat notebook 5 with the analytical normalized-density ratio observable
+    \(z_\eta=r_\eta/(1+r_\eta)\) from notebook 6. The physical model, selected
+    samples, analytical Asimov data, spline method, NI nuisance interpolation,
+    and Gaussian auxiliary constraint are unchanged. Run notebooks 1–3 and 6
+    first. The outputs are separate from the score-template study.
+    """)
+    cells += [
+        md(SPLINE_COORDINATE_INTRO),
+        md(r"""
+        Here the frozen scalar is
+        \[
+        z_\eta(x)=\frac{r_\eta(x)}{1+r_\eta(x)},\qquad
+        r_\eta(x)=\frac{D_\eta(x)/\Lambda_\eta}{D_S(x)/\lambda_S}
+        \quad(\alpha_{NI}=0).
+        \]
+        Both densities are normalized after the same fixed preselection, using
+        the common quadrature. There is no score-scale parameter and no neural
+        estimate in this observable. Changing the histogram coordinate does not
+        change the physical amplitude coefficients or expected process rates.
+        """),
+        md(SPLINE_NUISANCE_INTRO),
+        code(r'''
+        from poodemo.pipeline import run_spline_study
+
+        splines = run_spline_study(run, n_bins=20, observable="ratio")
+        display(splines["validation"])
+        display(splines["yields"])
+        '''),
+        md(r"""
+        ### Hold the spline study settings fixed
+
+        Use **20 bins** explicitly, one of the resolutions measured in notebook
+        6 and the same choice used in notebook 5. This does not assume 20 bins
+        retain 99% of the full information: the saved selection metadata reports
+        the measured Fisher fraction and whether that target is reached.
+
+        The shape-preserving piecewise cubic Hermite interpolants (PCHIP)
+        interpolate nonnegative bin fractions and then renormalize them. The
+        total selected process yield is restored separately. Exact empty-bin
+        support is kept at stored anchors, and no extrapolation is permitted.
+        The shared anchor grid combines uniform points with extra points near
+        the turnover of the nominal selected total rate, plus the generating
+        value. This matches the score study's computational settings without
+        using observed fluctuations to choose anchors. The actual grid is
+        controlled by `spline_anchors`, `spline_focus_anchors`, and
+        `spline_focus_halfwidth` in the saved run configuration.
+
+        A dense grid alone does not guarantee a small likelihood error. Inspect
+        direct-versus-spline templates at intermediate anchors and the likelihood
+        differences at scan points flagged `is_spline_anchor=False`. Agreement
+        at stored knots does not test interpolation between knots. Compare the
+        results with notebook 5 to see how the change of observable affects both
+        information retention and template interpolation.
+        """),
+        code(template_yield_plot_code("07")),
+        md(PHYSICAL_YIELD_INTRO),
+        code(physical_yield_plot_code("07")),
+        code(PLOT_HELPER),
+        code(spline_scan_plot_code("07", xlim=(0.35, 1.15), ylim=(0, 8))),
+        md(r"""
+        ### Read the comparisons separately
+
+        - **Spline vs direct ratio histogram:** tests amortization of the
+          moving observable, with off-grid points testing interpolation.
+        - **Coarse vs fine direct ratio histograms:** tests finite binning.
+        - **Binned nuisance interpolation vs integrated unbinned interpolation:**
+          tests noncommuting morphing and integration; inspect `morph_comparison`.
+        - **Learned unbinned on analytical Asimov vs analytical unbinned:**
+          tests learned-model closure on the same generating experiment.
+        - **Learned unbinned on its own finite model Asimov:** tests internal
+          consistency, not agreement with analytical curvature or secondary minima.
+        - **Ratio histograms vs analytical unbinned:** includes scalar
+          compression loss, as well as finite binning and the nuisance-morph
+          difference. It has no automatic local Fisher-preservation guarantee.
+
+        The ratio gives the binary ordering for \(\eta\) versus the S reference.
+        A scalar preserving that ordering need not retain all information about
+        the physical \(\mu\)-family, particularly with NI profiled. Notebook
+        6's \(\sigma_\mu(\eta)\) and \(\hat\mu(\eta)\) curves describe the same
+        fixed-truth frozen-fit convention. Those local widths are not global
+        confidence intervals across separate likelihood minima.
+        """),
+        code(r'''
+        print("Ratio spline results are stored under:", ROOT / "results")
+        print("Tables use a ratio_ prefix; figures use 07_. Score results are retained.")
+        for key, value in splines.items():
+            if key not in ("scans", "yields", "validation", "spline"):
+                print(key)
+                display(value)
+        '''),
+        md(r"""
+        ### Further experiments
+
+        Compare ratio and score results at matching bin counts and anchors;
+        increase integration statistics to separate numerical fluctuations from
+        scalar-compression loss; or compare a fixed \(\eta=\mu_*\) ratio with
+        the moving ratio. A coverage study needs pseudo-experiments and
+        calibration beyond these analytical and model-Asimov comparisons.
+        """),
+    ]
+    return cells
+
+
+def build_ratio_notebooks():
+    """Write only the additional ratio notebooks; preserve existing notebooks."""
+    write("06_ratio_histograms.ipynb", ratio_histogram_cells())
+    write("07_ratio_spline_templates.ipynb", ratio_spline_cells())
+
+
 if __name__ == "__main__":
     build()
+    build_ratio_notebooks()

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit
 
 from .inference import FitResult, TemplateLikelihood
 
@@ -193,12 +192,15 @@ def _unbinned_baselines(run, parent, information):
     return results
 
 
-def run_estimator_study(run):
+def run_estimator_study(run, *, observable="score"):
     """Save/return mu_hat(eta) and local sigma_mu(eta) for one Asimov truth.
 
     Uses the finest configured ``bin_counts`` and the existing eta scan grid.
     At each eta the observable and observed Asimov histogram are frozen before
     either fit. Stat-only and NI-profiled results share those same data.
+    ``observable`` selects the local score or the density-ratio observable;
+    both use the same configured bin count, generating truth and baselines.
+    Ratio results are saved separately as ``ratio_estimator_eta.csv``.
     The exact unbinned baselines reuse notebook 3 toolkit fits, checking their
     likelihood values before repeating them over eta. If no saved fits exist,
     standalone runs fit these baselines once. Identified Asimov fits stay at truth;
@@ -209,8 +211,9 @@ def run_estimator_study(run):
     morph/integration approximation, as well as compression and binning.
     The Fisher width is not a global interval across possible secondary minima.
     """
-    from .pipeline import prepare_quadrature, _score, mu_grid
+    from .pipeline import prepare_quadrature, observable_metadata, observable_values, mu_grid
 
+    options = observable_metadata(observable)
     quad = prepare_quadrature(run)
     parent = TemplateLikelihood(quad["nominal"], quad["down"], quad["up"],
                                 quad["weights"], quad["truth"])
@@ -226,17 +229,18 @@ def run_estimator_study(run):
     baselines = _unbinned_baselines(run, parent, full_information)
     rows = []
     for eta in etas:
-        z = expit(_score(run, quad, float(eta)) / run.config["score_scale"])
+        z = observable_values(run, quad, float(eta), observable=observable)
         histogram = parent.binned(z, edges, morph_order="after", eta=float(eta))
         information = local_asimov_information(histogram, truth)
         for syst in (False, True):
-            rows.append({"eta": float(eta), "model": "direct score histogram", "n_bins": n_bins,
+            rows.append({"eta": float(eta), "model": options["direct_label"], "n_bins": n_bins,
                          "morph_order": "after", **_estimator_record(run, histogram, information, syst)})
             rows.append({"eta": float(eta), "model": "analytic unbinned", "n_bins": 0,
                          "morph_order": "unbinned", **baselines[syst]})
         print(f"Estimator and local-width study at eta={eta:.3g} ready", flush=True)
     result = pd.DataFrame(rows)
-    path = run.path("results", "estimator_eta.csv")
+    filename = f"{options['prefix']}estimator_eta.csv"
+    path = run.path("results", filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(path, index=False)
     return result
