@@ -946,7 +946,7 @@ def build():
         bins of a Poisson point process. This notebook fixes \(\alpha_{NI}=0\),
         where the scalar score has its clean local guarantee.
         """),
-        code("from poodemo.pipeline import run_binning_study\n\nbinning = run_binning_study(run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
+        code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = np.rint(np.linspace(8, 128, 10)).astype(int).tolist()\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
         code(PLOT_HELPER),
         code("plot_scans(binning['scans'], 'Score histograms: progressively finer binning', '04_binning_scans.pdf');"),
         md(r"""
