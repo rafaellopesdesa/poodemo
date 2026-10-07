@@ -265,8 +265,12 @@ display(pd.Series(run.config, name="configuration"))
 '''
 
 PLOT_HELPER = r'''
-def plot_scans(frame, title, filename, group_columns=None):
-    """Plot saved scan tables; adapt grouping to the columns present."""
+def plot_scans(frame, title, filename, group_columns=None, *, xlim=None, ylim=None):
+    """Plot saved scans with optional (min, max) axis limits.
+
+    Omit xlim/ylim to retain the default view. A None endpoint keeps that
+    bound unchanged, for example ylim=(0, None) or xlim=(None, 1.2).
+    """
     x_column = next((c for c in ["mu", "mu_test", "mu0"] if c in frame.columns), None)
     y_column = next((c for c in ["q", "t_mu", "test_statistic", "ts"] if c in frame.columns), None)
     if x_column is None or y_column is None:
@@ -292,6 +296,10 @@ def plot_scans(frame, title, filename, group_columns=None):
     ax.axhline(1.0, color="0.45", ls=":", lw=1)
     ax.set(xlabel=r"Tested signal strength $\mu_0$", ylabel=r"$t(\mu_0)$", title=title)
     ax.set_ylim(bottom=0)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
     ax.legend(fontsize=8)
     fig.tight_layout()
     output = ROOT / "plots"
@@ -748,7 +756,7 @@ def build():
         """),
         code("from poodemo.pipeline import run_unbinned\n\nunbinned = run_unbinned(run)\ndisplay(unbinned['scans'])"),
         code(PLOT_HELPER),
-        code("plot_scans(unbinned['scans'], 'Unbinned Asimov likelihood scans', '03_unbinned_scans.pdf');"),
+        code("SCAN_XLIM = None  # e.g. (0.35, 1.15); None keeps the default x-axis range.\nSCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.\nplot_scans(unbinned['scans'], 'Unbinned Asimov likelihood scans', '03_unbinned_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
         md(r"""
         ### Why a second minimum can appear
 
@@ -948,7 +956,7 @@ def build():
         """),
         code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = list(range(4, 21, 2))\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
         code(PLOT_HELPER),
-        code("SCAN_BIN_COUNTS = [4, 12, 20]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].isin([\"analytic unbinned\", \"learned unbinned\"])\n].copy()\nplot_scans(shown_scans, 'Score histograms: 4, 12, and 20 bins', '04_binning_scans.pdf');"),
+        code("SCAN_BIN_COUNTS = [4, 12, 20]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].isin([\"analytic unbinned\", \"learned unbinned\"])\n].copy()\nSCAN_XLIM = None  # e.g. (0.35, 1.15); None keeps the default x-axis range.\nSCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.\nplot_scans(shown_scans, 'Score histograms: 4, 12, and 20 bins', '04_binning_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
         md(r"""
         ### What convergence can and cannot show
 
@@ -1199,7 +1207,10 @@ def build():
         code(PLOT_HELPER),
         code(r'''
         display(splines["scans"])
-        plot_scans(splines["scans"], "Profiled fits: spline, direct histogram, and unbinned", "05_profiled_scans.pdf")
+        SCAN_XLIM = None  # e.g. (0.35, 1.15); None keeps the default x-axis range.
+        SCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.
+        plot_scans(splines["scans"], "Profiled fits: spline, direct histogram, and unbinned", "05_profiled_scans.pdf",
+                   xlim=SCAN_XLIM, ylim=SCAN_YLIM)
         comparison = splines["comparison"]
         display(comparison)
         print("Actual unique spline anchors:", len(splines["spline"].etas))
