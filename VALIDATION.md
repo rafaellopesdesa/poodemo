@@ -1,5 +1,33 @@
 # Validation
 
+## Finite learned-model Asimov construction (7 October 2026)
+
+The three unbinned comparisons now distinguish analytical generating weights
+from weights of the finite, normalized learned model. Notebook 4 refreshes these
+fits using existing checkpoints; it does not retrain networks or alter the
+analytical histogram data.
+
+- **66 tests passed, 1 skipped** with the pinned toolkit, JAX and Minuit. The
+  skipped test requires the optional PyTorch training stack.
+- Deliberately distorted learned shapes at generating mu=0.7 and 1.3 close at
+  their own generating point: the objective and both parameter gradients vanish,
+  and fixed/profiled fits recover the input value. The negative S or B coefficient
+  is retained. Morphed shapes integrate to their prescribed signed total rate at
+  intermediate and extrapolated nuisance values.
+- The same distorted model evaluated on analytical generating weights still
+  fails closure. Arbitrary constant rescalings of all five predicted ratios
+  cancel through their finite-sample normalizers.
+- An independent small pipeline execution exercised all three workspaces and
+  the saved scan/fit tables with surrogate ratio predictors and the actual
+  toolkit/JAX/Minuit fits. At mu=0.7, learned-model Asimov fits returned
+  0.700000 (fixed NI) and 0.700014 (profiled NI); the objective at truth was
+  below 1e-27. The deliberately wrong learned model retained a nonzero
+  analytical-truth objective of about 31.36.
+
+This verifies the finite construction and its integration into the workflow.
+It does not validate the user's production networks or claim that self-closure
+removes learned-shape errors in curvature or the secondary likelihood basin.
+
 ## Nearby-minimum benchmark (schema 5, 7 October 2026)
 
 Use `RUN_NAME = "paper-nearby-v2"` and rerun notebooks 1–5. The new model
@@ -293,9 +321,10 @@ than establish precise density-ratio calibration.
 The deliberately undertrained smoke density ratios **do not achieve physics
 closure**: their fitted mu is approximately 0.274 without nuisances and 0.260
 with NI profiling, whereas the generating value is 1. The notebooks expose these
-discrepancies using analytical truth; they never substitute a learned-model
-Asimov sample to conceal them. An optimizer's valid minimum alone does not
-demonstrate a calibrated model.
+discrepancies using analytical truth. A separately labelled learned-model finite
+Asimov curve now tests self-closure without replacing that analytical-truth
+comparison. An optimizer's valid minimum alone does not demonstrate a calibrated
+model.
 
 Production defaults are 5 million events in each of six samples, longer
 training, three-member ratio ensembles, finer histograms, and 61 spline-grid

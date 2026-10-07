@@ -134,3 +134,77 @@ def test_standard_normal_ni_auxiliary_is_exactly_quadratic(tmp_path):
                 rtol=1.e-12, atol=1.e-10,
             )
             assert m.model_grad([mu, alpha])[1] == pytest.approx(2*alpha, abs=1.e-10)
+
+
+def distorted_learned_arrays():
+    """Wrong learned shapes with correct finite component/anchor integrals.
+
+    Signal remains the ratio reference. The other shapes are deliberately
+    tilted, and the NI variations also have a nonlinear shape error. Thus a
+    zero self-Asimov score cannot be attributed to accurate learned ratios.
+    """
+    nominal, down, up, weights, _ = arrays()
+    nominal, down, up = [25. * values for values in (nominal, down, up)]
+    x = np.linspace(-2.5, 2.5, nominal.shape[1])
+    learned = nominal * np.exp(np.array([0., .15, -.10, .09])[:, None] * x)
+    learned *= ((nominal @ weights) / (learned @ weights))[:, None]
+    learned_down, learned_up = learned[None].copy(), learned[None].copy()
+    for sign, target, source in [(-1., learned_down, down), (1., learned_up, up)]:
+        distorted = source[0, 3] * np.exp(.09 * x + sign * .04 * x**2)
+        target[0, 3] = distorted * (source[0, 3] @ weights) / (distorted @ weights)
+    return nominal, learned, learned_down, learned_up, weights
+
+
+@pytest.mark.parametrize("mu_asimov", [.7, 1.3])
+def test_finite_learned_asimov_closure_with_signed_coefficients_and_ni_shape(tmp_path, mu_asimov):
+    """Same-model masses close exactly; analytical masses still expose bias."""
+    from poodemo.inference import component_coefficients, exp_poly_factor
+    from poodemo.toolkit import build_workspace, load_model, make_fitter
+
+    analytical, learned, down, up, weights = distorted_learned_arrays()
+    coefficients = component_coefficients(mu_asimov)
+    assert np.any(coefficients < 0)  # S is negative below one; B above one.
+    np.testing.assert_allclose(learned @ weights, analytical @ weights, rtol=2e-15)
+    self_truth = coefficients @ learned
+    analytical_truth = coefficients @ analytical
+    assert np.all(self_truth > 0)
+    assert not np.allclose(self_truth, analytical_truth, rtol=1e-3)
+    m = load_model(build_workspace(tmp_path / "self", learned, down, up,
+                                   weights, self_truth))
+
+    # Convert dx quadrature weights to the normalized, nonuniform reference
+    # masses used by the theorem, without replacing them by uniform weights.
+    yields = learned @ weights
+    reference = learned[0] / yields[0]
+    reference_mass = weights * reference
+    np.testing.assert_allclose(reference_mass.sum(), 1., rtol=2e-15)
+    assert np.ptp(reference_mass) > .01
+    for alpha in (-.65, .4, 1.2):
+        components = m.component_intensity_ratios([alpha])
+        morphed_yields = yields * exp_poly_factor(alpha, (down @ weights)[0] / yields,
+                                                 (up @ weights)[0] / yields)
+        np.testing.assert_allclose(components @ reference_mass, morphed_yields, rtol=2e-12)
+        for mu in (.4, 1.3):
+            coeff = component_coefficients(mu)
+            intensity_ratio = coeff @ components
+            assert np.all(intensity_ratio > 0)
+            np.testing.assert_allclose(intensity_ratio @ reference_mass,
+                                       coeff @ morphed_yields, rtol=2e-12)
+            # The Gaussian auxiliary term is included and maximized at zero.
+            assert float(m.model([mu, alpha])) >= -1e-12
+
+    assert float(m.model([mu_asimov, 0.])) == pytest.approx(0., abs=1e-18)
+    np.testing.assert_allclose(m.model_grad([mu_asimov, 0.]), [0., 0.], atol=1e-8, rtol=0.)
+    fitter = make_fitter(m)
+    for systematics in (False, True):
+        fit = fitter.fit(systematics=systematics, initial=[mu_asimov + .15, .1], strategy=2)
+        assert fit.valid
+        np.testing.assert_allclose(fit.parameters, [mu_asimov, 0.], atol=2e-3, rtol=0.)
+        assert fit.nll < 1e-6
+
+    # Holding the distorted learned likelihood fixed but restoring analytical
+    # data weights is external closure. Normalization must NOT hide this error.
+    external = load_model(build_workspace(tmp_path / "external", learned, down, up,
+                                          weights, analytical_truth))
+    assert float(external.model([mu_asimov, 0.])) > 1e-3
+    assert np.linalg.norm(external.model_grad([mu_asimov, 0.])) > 1e-2

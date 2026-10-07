@@ -96,3 +96,47 @@ def test_production_spline_comparison_uses_genuine_held_out_etas(tmp_path):
     turnover = ((rates[0] + rates[2] - rates[1]) / (2 * rates[0]))**2
     nearby = anchors[np.abs(anchors - turnover) < .05]
     assert np.max(np.diff(nearby)) < .0002
+
+
+def test_same_sample_ratio_normalization_cancels_arbitrary_predictor_scales(tmp_path, monkeypatch):
+    """All five ratios use the final reference masses, including NI anchors."""
+    from poodemo import training
+    from poodemo.pipeline import _learned_fields
+
+    run = create_run(tmp_path, "smoke")
+    x = np.linspace(-1., 1., 31)
+    weights = np.linspace(.02, .07, len(x))
+    nominal = np.stack([np.exp(.1*x), 4*np.exp(.2*x),
+                        3*np.exp(-.3*x), 12*np.exp(-.1*x)])
+    up, down = nominal[None].copy(), nominal[None].copy()
+    up[0, 3] *= np.exp(.2*x)
+    down[0, 3] *= np.exp(-.2*x)
+    quad = dict(x=x[:, None], weights=weights, nominal=nominal, up=up, down=down)
+    names = [f"{num}_over_{den}" for num, den in RATIO_TASKS]
+    scales = dict.fromkeys(names, 1.)
+
+    class Predictor:
+        def __init__(self, name):
+            self.name = name
+
+        def predict_ratio(self, values):
+            slope = .1*(names.index(self.name)+1)
+            return scales[self.name]*np.exp(slope*values[:, 0])
+
+    monkeypatch.setattr(training, "load_predictor", lambda path: Predictor(path.name))
+    fields = _learned_fields(run, quad)
+    for actual, exact in zip(fields, (nominal, down, up)):
+        np.testing.assert_allclose(actual @ weights, exact @ weights, rtol=1e-13)
+    scales.update(zip(names, [1e-3, 7., 1e4, .02, 85.]))
+    rescaled = _learned_fields(run, quad)
+    for actual, expected in zip(rescaled, fields):
+        np.testing.assert_allclose(actual, expected, rtol=1e-13)
+
+
+@pytest.mark.parametrize("bad", [0., -1., np.inf, np.nan])
+def test_model_asimov_rejects_invalid_total_intensities(bad):
+    from poodemo.pipeline import _model_asimov_truth
+    nominal = np.ones((4, 3))
+    nominal[1, 1], nominal[3, 1] = bad, 0.
+    with pytest.raises(ValueError, match="1 total event intensities"):
+        _model_asimov_truth(nominal, 1.)

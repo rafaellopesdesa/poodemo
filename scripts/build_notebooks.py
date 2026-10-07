@@ -418,6 +418,71 @@ display(pd.DataFrame([
 '''
 
 
+UNBINNED_ASIMOV_REFRESH_INTRO = r'''
+### Refresh the unbinned references from the saved networks
+
+This cell reloads the existing ratio checkpoints and rebuilds the workspaces
+and fits. It does **not** train any network. It refreshes three distinct curves:
+
+| Curve | Likelihood model | Asimov event weights |
+|---|---|---|
+| `analytic unbinned` | Analytical intensity | Analytical intensity |
+| `learned unbinned (analytic Asimov)` | Learned intensity | Analytical intensity: external closure check |
+| `learned unbinned (model Asimov)` | Learned intensity | The same learned intensity: finite-sample model Asimov |
+
+The construction follows the finite-sample Asimov prescription discussed in
+[arXiv:2609.14136](https://arxiv.org/abs/2609.14136). Let $a_i$ be the saved
+quadrature weights, so that $\int f(x)\,dx\approx\sum_i a_i f(x_i)$, and let
+
+$$
+\omega_i=a_i q_S(x_i),\qquad
+Z_j=\sum_i\omega_i r_j^{\mathrm{NN}}(x_i),\qquad
+\widehat p_j(x_i)=q_S(x_i)\frac{r_j^{\mathrm{NN}}(x_i)}{Z_j}.
+$$
+
+Here $q_S$ is the selected S reference density normalized on these nodes, so
+$\sum_i \omega_i=1$. The $\omega_i$ are reference-density weights, distinct
+from the integration weights $a_i$. The process ratios are already normalized using these **same
+final quadrature points**; nuisance-morphed shapes are also normalized on those
+points. Those existing normalizers are retained. The model Asimov instead
+changes which intensity supplies the event weights:
+
+$$
+w_{A,i}=a_i\, \widehat D(x_i;\mu_A,0).
+$$
+
+With valid positive predictions and the expected rate evaluated on the same
+weighted points, the learned model's finite Asimov likelihood satisfies
+
+$$
+-2\log\frac{L_A(\mu,\alpha_{NI})}{L_A(\mu_A,0)}
+=2\sum_i a_i\left[\widehat D_i-\widehat D_{A,i}
+-\widehat D_{A,i}\log\frac{\widehat D_i}{\widehat D_{A,i}}\right]
++\alpha_{NI}^2 \ge 0.
+$$
+
+Thus the generating point is a minimum even for a finite set of nodes and an
+imperfect learned ratio. This does not guarantee a unique minimum, agreement
+with the analytical curvature, or agreement in the secondary basin. The
+learned-model Asimov is an internal consistency check; the analytical-Asimov
+curve remains the external test of learned-model closure.
+
+The analytical histogram data below are unchanged. Their full-dimensional
+comparison is **`analytic unbinned`**. The two learned curves show separately
+the effect of changing the model and of constructing its own finite Asimov data.
+'''
+
+UNBINNED_ASIMOV_REFRESH = r'''
+from poodemo.pipeline import run_unbinned
+
+# Reuse existing trained checkpoints; only rebuild normalization, workspaces, and fits.
+unbinned = run_unbinned(run)
+display(unbinned["diagnostics"])
+display(unbinned["scans"])
+print("Unbinned references refreshed from the saved models; no networks were trained.")
+'''
+
+
 def start(title, introduction):
     return [md(f"# {title}\n\n{introduction}"), md(SETUP_INTRO), code(BOOTSTRAP), code(COMMON_IMPORTS)]
 
@@ -954,9 +1019,11 @@ def build():
         bins of a Poisson point process. This notebook fixes \(\alpha_{NI}=0\),
         where the scalar score has its clean local guarantee.
         """),
-        code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = list(range(4, 21, 2))\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
+        md(UNBINNED_ASIMOV_REFRESH_INTRO),
+        code(UNBINNED_ASIMOV_REFRESH),
+        code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = list(range(4, 61, 4))\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
         code(PLOT_HELPER),
-        code("SCAN_BIN_COUNTS = [4, 12, 20]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].isin([\"analytic unbinned\", \"learned unbinned\"])\n].copy()\nSCAN_XLIM = None  # e.g. (0.35, 1.15); None keeps the default x-axis range.\nSCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.\nplot_scans(shown_scans, 'Score histograms: 4, 12, and 20 bins', '04_binning_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
+        code("SCAN_BIN_COUNTS = [4, 12, 24, 36, 60]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].eq(\"analytic unbinned\")\n    | scans[\"model\"].str.startswith(\"learned unbinned\", na=False)\n].copy()\nSCAN_XLIM = (0.35, 1.15)  # Set None to keep the default x-axis range.\nSCAN_YLIM = (0, 8)  # Set None to keep the default y-axis range.\nscan_title = 'Score histograms: ' + ', '.join(map(str, SCAN_BIN_COUNTS)) + ' bins'\nplot_scans(shown_scans, scan_title, '04_binning_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
         md(r"""
         ### What convergence can and cannot show
 

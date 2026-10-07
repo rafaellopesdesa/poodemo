@@ -175,6 +175,8 @@ def _learned_fields(run, quad):
         predictor = load_predictor(_ratio_path(run, p, "S"))
         shape = q_s * predictor.predict_ratio(x)
         integral = float(shape @ w)
+        if not np.isfinite(integral) or integral <= 0:
+            raise ValueError(f"Invalid same-quadrature shape normalizer for {p}: {integral}")
         normalization.append(dict(sample=p, variation="nominal", raw_integral=integral))
         nominal[j] = rates[j]*shape/integral
     down = nominal[None, ...].copy()
@@ -184,6 +186,8 @@ def _learned_fields(run, quad):
         predictor = load_predictor(_ratio_path(run, f"NI_{label}", "NI"))
         shape = nominal[j]/rates[j]*predictor.predict_ratio(x)
         integral = float(shape @ w)
+        if not np.isfinite(integral) or integral <= 0:
+            raise ValueError(f"Invalid same-quadrature shape normalizer for NI_{label}: {integral}")
         normalization.append(dict(sample="NI", variation=label, raw_integral=integral))
         array[0, j] = (exact[0, j] @ w)*shape/integral
     pd.DataFrame(normalization).to_csv(run.path("results", "workspace_normalization.csv"), index=False)
@@ -202,26 +206,62 @@ def mu_fit_starts(run):
                            np.clip(run.config["asimov_mu"], low, high)]).tolist()
 
 
+def _model_asimov_truth(nominal, mu):
+    """Finite-quadrature model truth, retaining the signed interference terms."""
+    from .inference import component_coefficients
+    truth = component_coefficients(mu) @ nominal
+    invalid = ~np.isfinite(truth) | (truth <= 0)
+    if np.any(invalid):
+        raise ValueError(
+            f"Cannot construct model Asimov data at mu={mu}: "
+            f"{np.count_nonzero(invalid)} total event intensities are nonfinite or nonpositive. "
+            "Inspect the learned interference model; invalid intensities cannot be clipped."
+        )
+    return truth
+
+
 def run_unbinned(run):
+    """Refresh three explicit Asimov comparisons from existing ratio models.
+
+    Learned-model Asimov data and model normalizations share the final
+    quadrature. Analytic-truth validation remains a separate experiment, so
+    model-Asimov stationarity cannot be mistaken for ratio-estimation closure.
+    This function loads checkpoints; it never trains or recalibrates them.
+    """
     from .toolkit import build_workspace, load_model, make_fitter
     q = prepare_quadrature(run)
     learned = _learned_fields(run, q)
+    asimov_mu = float(run.config["asimov_mu"])
+    learned_truth = _model_asimov_truth(learned[0], asimov_mu)
+    cases = (
+        ("analytic unbinned", "analytic", "analytic",
+         (q["nominal"], q["down"], q["up"]), q["truth"]),
+        ("learned unbinned (analytic Asimov)", "learned", "analytic", learned, q["truth"]),
+        ("learned unbinned (model Asimov)", "learned_model_asimov", "learned model", learned, learned_truth),
+    )
     records, diagnostics = [], []
-    for label, fields in (("analytic unbinned", (q["nominal"], q["down"], q["up"])),
-                          ("learned unbinned", learned)):
-        workspace = build_workspace(run.path("workspaces", label.split()[0]), *fields,
-                                    q["weights"], q["truth"],
+    for label, workspace_name, asimov_source, fields, truth in cases:
+        asimov_events = float(q["weights"] @ truth)
+        if not np.isfinite(asimov_events) or asimov_events <= 0:
+            raise ValueError(f"Invalid Asimov event mass for {label}: {asimov_events}")
+        workspace = build_workspace(run.path("workspaces", workspace_name), *fields,
+                                    q["weights"], truth,
                                     parameter_bounds=[run.config["mu_fit_bounds"],
                                                       run.config["nuisance_bounds"]])
-        fitter = make_fitter(load_model(workspace))
+        model = load_model(workspace)
+        nll_at_asimov = float(model.model(np.array([asimov_mu, 0.])))
+        fitter = make_fitter(model)
         for syst in (False, True):
             scan = fitter.scan(mu_grid(run), systematics=syst)
             for i, mu in enumerate(scan["mu"]):
                 records.append(dict(mu=mu, q=scan["t_mu"][i], model=label, systematics=syst,
+                                    asimov_source=asimov_source, asimov_mu=asimov_mu,
                                     alpha_NI=scan["parameters"][i, 1],
                                     valid=bool(scan["valid"][i]), edm=scan["edm"][i]))
             best = fitter.last_fit
             diagnostics.append(dict(model=label, systematics=syst, mu_hat=best.parameters[0],
+                                    asimov_source=asimov_source, asimov_mu=asimov_mu,
+                                    asimov_expected_events=asimov_events, nll_at_asimov=nll_at_asimov,
                                     alpha_NI_hat=best.parameters[1],
                                     nll=best.nll, valid=best.valid, edm=best.edm))
     scans, diagnostic_frame = pd.DataFrame(records), pd.DataFrame(diagnostics)
@@ -270,7 +310,10 @@ def _fit_test(run, model, mu, systematics):
 def _saved_unbinned(run, systematics=None):
     path = run.path("results", "unbinned_scans.csv")
     if not path.exists():
-        raise FileNotFoundError("Run notebook 3 (run_unbinned) before the histogram comparisons.")
+        raise FileNotFoundError(
+            "Run run_unbinned(run) in notebook 3 or the notebook 4 unbinned refresh cell "
+            "before the histogram comparisons; existing ratio models are reused without training."
+        )
     scans = pd.read_csv(path)
     if systematics is not None:
         scans = scans.loc[scans.systematics == systematics].copy()

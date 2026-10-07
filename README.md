@@ -208,6 +208,38 @@ component and ±1-anchor densities followed by the same exponential–polynomial
 nuisance model, rather than the continuously shifted Gaussian at every nuisance
 value.
 
+The unbinned comparison distinguishes three experiments:
+
+| Curve | Likelihood model | Asimov generating intensity |
+|---|---|---|
+| `analytic unbinned` | Analytical | Analytical |
+| `learned unbinned (analytic Asimov)` | Learned | Analytical; external closure check |
+| `learned unbinned (model Asimov)` | Learned | The same finite, normalized learned model |
+
+The last curve implements the [finite Asimov construction](https://arxiv.org/abs/2609.14136).
+Let $a_m$ be the existing importance-weighted integration weights and
+$q_m$ the S reference density normalized on those nodes. The finite reference
+masses are $\omega_m=a_mq_m$, with $\sum_m\omega_m=1$. Each learned process
+ratio is divided by $Z_j=\sum_m\omega_m r_j(x_m)$, giving
+$\widehat\nu(x_m;\mu,\alpha)=q_m\sum_j c_j(\mu)\lambda_j(\alpha)
+\bar r_j(x_m;\alpha)$, where $\bar r_j=r_j/Z_j$.
+The complete nuisance-morphed shape is renormalized at every fitted $\alpha$.
+The additional curve uses fixed generating weights
+$w_m^A=a_m\widehat\nu(x_m;\mu_*,0)$; these are not recomputed for each tested
+hypothesis. With positive total intensities and the Gaussian auxiliary centered
+at zero, the generating point is a global likelihood maximum on this finite
+sample, even when the learned shapes are imperfect. This ensures self-closure,
+not agreement of curvature or the secondary minimum with analytical physics.
+The separate analytical-Asimov learned fit retains that external check.
+
+Notebook 4 refreshes all three unbinned fits from the saved ratio checkpoints
+and integration sample before the histogram comparison. Existing Drive runs
+remain compatible; no regeneration or retraining is required. Use a fresh
+Colab runtime to load the updated repository code. The score histograms still
+use analytical generating weights, so `analytic unbinned` remains their
+like-for-like compression benchmark. The fit table records `asimov_source`,
+the generating value and event count, and the objective at the generating point.
+
 The nearby branches and increased exposure make density-ratio precision more
 demanding: small neural shape errors can produce appreciable likelihood
 distortions. Analytical benchmark agreement does not establish closure of the
@@ -274,7 +306,9 @@ saved as `plots/03_analytical_landscape.pdf` (also PNG).
 
 The notebooks keep several effects distinct:
 
-- Analytical versus learned unbinned curves: density-ratio estimation.
+- Analytical versus learned unbinned curves with analytical Asimov weights:
+  density-ratio estimation. The learned-model Asimov is a separate self-closure
+  construction.
 - Increasingly fine direct score histograms: finite binning.
 - Spline versus direct templates at withheld anchors: interpolation accuracy.
 - Interpolated binned anchors versus integrated unbinned morphing: nonlinear
