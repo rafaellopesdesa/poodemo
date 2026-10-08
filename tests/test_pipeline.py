@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from poodemo.data import Run, SPLITS, create_run, generate_samples, materialize_selection
+from poodemo.data import (Run, SPLITS, create_run, default_config, generate_samples,
+                          materialize_selection, raw_split, sample_size)
 from poodemo.physics import PhysicsModel
 from poodemo.pipeline import RATIO_TASKS, _score, mu_fit_starts, mu_grid, spline_eta_grid
 
@@ -53,15 +54,87 @@ def test_ni_only_generation_and_training_inventory(tmp_path):
                                ("NI_up", "NI"), ("NI_down", "NI")}
     for sample in samples:
         x = np.load(run.path("raw", sample + ".npy"))
-        assert x.shape == (64, 3) and np.all(np.isfinite(x))
+        expected_size = 640 if sample.startswith("NI") else 64
+        assert sample_size(run, sample) == expected_size
+        assert x.shape == (expected_size, 3) and np.all(np.isfinite(x))
+        # Every stage uses the actual source length, including all NI variations.
+        for split, (a, b) in SPLITS.items():
+            assert len(raw_split(run, sample, split)) == int(b*expected_size)-int(a*expected_size)
+    raw_manifest = json.loads(run.path("raw", "manifest.json").read_text())
+    for record in raw_manifest["samples"]:
+        name = record["sample"]
+        assert record["events"] == sample_size(run, name)
+        component = "NI" if name.startswith("NI") else name
+        # A larger NI simulation bank changes precision, not the expected rate.
+        assert record["expected_yield"] == run.model.component_yield(component)
+    saved = json.loads(run.path("run.json").read_text())
+    assert saved["sample_sizes"] == {name: sample_size(run, name) for name in samples}
+
+    # Resuming verifies each source against its own configured size.
+    assert generate_samples(run) == records
+    ni_path = run.path("raw", "NI.npy")
+    ni = np.load(ni_path)[:64].copy()
+    np.save(ni_path, ni)
+    with pytest.raises(ValueError, match="Invalid cached sample"):
+        generate_samples(run)
 
     # An old cached nuisance layout must not silently supply extra parameters.
     manifest_path = run.path("run.json")
     manifest = json.loads(manifest_path.read_text())
-    manifest["config"]["schema_version"] = 3
+    manifest["config"]["schema_version"] = 6
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="Choose a new RUN_NAME"):
         create_run(tmp_path, "smoke", {"n_per_sample": 64, "generation_chunk": 32})
+
+
+def test_larger_ni_selection_uses_source_statistics_without_rescaling_rates(tmp_path):
+    run = create_run(tmp_path, "smoke", {"n_per_sample": 200, "generation_chunk": 100})
+    generate_samples(run)
+    model_path = run.path("models", "preselection", "model.pt")
+    model_path.parent.mkdir()
+    model_path.write_bytes(b"constant selector for selection accounting")
+
+    class AcceptAll:
+        def predict_proba(self, x):
+            return np.ones((len(x), 1))
+
+    records = materialize_selection(run, AcceptAll(), .5)
+    by_source = {(r["sample"], r["split"]): r for r in records}
+    for record in records:
+        assert record["generated"] == record["accepted"]
+        assert record["efficiency"] == 1.
+        name = record["sample"]
+        component = "NI" if name.startswith("NI") else name
+        assert record["expected_yield"] == run.model.component_yield(component)
+        if name.startswith("NI"):
+            assert record["generated"] == 10*by_source["S", record["split"]]["generated"]
+
+
+def test_ratio_retraining_defaults_preserve_preselection_architecture():
+    production = default_config()
+    assert production["schema_version"] == 7
+    assert production["n_per_sample"] == 5_000_000
+    assert production["ni_sample_multiplier"] == 10
+    assert production["n_neurons"] == production["batch_size"] == 1024
+    assert production["preselection_n_neurons"] == 128
+    assert production["preselection_batch_size"] == 8192
+    assert production["ratio_learning_rate"] == 1e-3
+    assert production["ratio_min_learning_rate"] == 1e-9
+    assert production["ratio_lr_decay_fraction"] == .9
+    smoke = default_config("smoke")
+    assert smoke["ni_sample_multiplier"] == 10
+    assert smoke["preselection_n_neurons"] == smoke["n_neurons"] == 32
+
+
+@pytest.mark.parametrize("override", [
+    {"ni_sample_multiplier": 0}, {"ni_sample_multiplier": 1.5},
+    {"ratio_learning_rate": 0.}, {"ratio_min_learning_rate": np.nan},
+    {"ratio_min_learning_rate": 1.}, {"ratio_lr_decay_fraction": 0.},
+    {"ratio_lr_decay_fraction": 1.1}, {"preselection_n_neurons": 0},
+])
+def test_retraining_configuration_rejects_invalid_values(tmp_path, override):
+    with pytest.raises(ValueError):
+        create_run(tmp_path, "smoke", override)
 
 
 def test_physics_overrides_are_recorded_and_cannot_reuse_another_model(tmp_path):

@@ -31,7 +31,8 @@ networks are reused. A changed physics model requires a new run, as below.
 The source checkout lives in the temporary runtime; **datasets, checkpoints,
 workspace files, and results live in Google Drive**. Use the same `RUN_NAME`
 and `MODE` in every notebook. Set `MODE = "smoke"` for a short workflow check;
-the production default generates five million events **per sample**.
+production generates five million events each for S, SBI and B, and fifty
+million each for NI, NI_up and NI_down.
 Use `CONFIG_OVERRIDES` to change a computational budget without editing source,
 for example `{"quadrature_per_process": 500_000, "epochs": 150}`. Use the same
 overrides in all notebooks, and choose a new `RUN_NAME` when changing them.
@@ -44,12 +45,12 @@ written into files, Git remotes, shell arguments, or notebook output. Alternativ
 upload a repository ZIP to `/content/poodemo_source.zip`; no token is then needed.
 An existing `/content/poodemo` checkout is reused. Delete that checkout to fetch
 new source after updating the repository; your Drive run is separate.
-For the distinct-signal benchmark, use the new default
-`RUN_NAME = "paper-distinct-s-v3"` and rerun notebooks 1–9.
-If you ran an earlier version, start a fresh Colab runtime (or refresh the
-temporary source checkout and restart the runtime) before proceeding. Existing
-run manifests from the earlier physics model are incompatible and are not
-reused. The new run keeps those earlier Drive files intact.
+For the enlarged NI bank and wider ratio classifiers, use the new default
+`RUN_NAME = "paper-distinct-s-v4"`. Rerun notebooks 01–03; then rerun 04–09
+to refresh their downstream results. The physics amplitudes are unchanged, but
+the sample/training configuration is new (schema 7). Start a fresh Colab runtime
+or refresh the temporary source checkout and restart it before proceeding.
+Use the same new run name in every notebook; previous Drive runs remain intact.
 """
 
 BOOTSTRAP = r'''
@@ -57,7 +58,7 @@ import os
 import sys
 from pathlib import Path
 
-RUN_NAME = "paper-distinct-s-v3"
+RUN_NAME = "paper-distinct-s-v4"
 MODE = os.environ.get("POODEMO_MODE", "production")  # production or smoke
 CONFIG_OVERRIDES = {}  # e.g. {"quadrature_per_process": 500_000, "epochs": 150}
 JAX_BACKEND = os.environ.get("POODEMO_JAX_BACKEND", "auto")  # auto, gpu, or cpu
@@ -697,25 +698,33 @@ not from the spline. The two plots answer different questions.
 NN_METADATA_INTRO = r"""
 ### Classifier architecture and training metadata
 
-Each ratio classifier is an ordinary fully connected binary classifier. In
-production it has **3 inputs → 128 → 128 → 128 → 1 logit**, with a bias in
-each linear layer and **SiLU/Swish**, $a\mapsto a\,\sigma(a)$, after each
-hidden layer. The final layer is linear. The loss is the standard mean
-**binary cross entropy with logits** with labels 0=denominator and
-1=numerator and equal class minibatches. Thus $s=\sigma(\ell)$ and the raw
-ratio is $r=s/(1-s)=\exp(\ell)$. There is **no dropout, batch normalization,
-weight decay, L1/L2 penalty, or label smoothing**.
+Each production ratio classifier has **3 inputs → 1024 → 1024 → 1024 →
+1 logit → Sigmoid**, with a bias in each linear layer and **SiLU/Swish**,
+$a\mapsto a\,\sigma(a)$, after each hidden layer. The public network output is
+$s=\sigma(\ell)\in[0,1]$. Standard mean **binary cross entropy** is computed
+using its numerically stable BCE-with-logits form on the pre-sigmoid logit.
+This is mathematically the same sigmoid+BCE objective. It avoids saturation
+when evaluating the loss and $r=s/(1-s)=\exp(\ell)$ in the tails; sigmoid
+itself is not an additional calibration correction.
 
-The table below is read from the actual loaded networks, including the layer
-sizes, activations and parameter counts; smoke/custom runs can differ from the
-production dimensions. Metadata also records NAdam settings, the learning-rate
-schedule, training-only feature standardization, validation-based early stopping
-and best-checkpoint selection. The three production members are combined by
-averaging ratios, not logits. Mean normalization on separate calibration events
-is a later operation, not a term in the BCE loss or a guarantee of shape closure.
+Production uses batch size **1024**, labels 0=denominator and 1=numerator,
+and equal class minibatches. There is **no dropout, batch normalization,
+weight decay, L1/L2 penalty, or label smoothing**. NAdam starts at $10^{-3}$;
+the learning rate decreases geometrically to **$10^{-9}$ at epoch 91**
+(1-based) and stays there through epoch 100. Ratio early stopping is disabled
+so the final low-rate epochs really run; the best-validation checkpoint is
+still retained. The used rate in every epoch is recorded in `history.json`.
+Preselection retains its separate original network settings.
 
-Existing checkpoints are reused. Their `training.json` files are enriched, and
-the complete per-task/per-member report is saved as `results/03_architecture.json`.
+The table below reads the actual loaded layers, activations and parameter
+counts; smoke/custom runs can differ from these production dimensions.
+The three production members are combined by averaging ratios, not logits.
+Mean normalization on separate calibration events is a later operation, not
+a loss penalty or a guarantee of shape closure.
+
+This configuration requires the new v4 run. Matching completed v4 checkpoints
+can be reused. Per-task/per-member metadata is saved in each `training.json`
+and in `results/03_architecture.json`.
 """
 
 NN_METADATA_CODE = r'''
@@ -742,7 +751,11 @@ for numerator, denominator in RATIO_TASKS:
             "output": architecture["output_activation"],
             "parameters": architecture["trainable_parameters"],
             "loss": member["loss"]["name"], "optimizer": optimizer["type"],
+            "batch_size": member.get("config", {}).get("batch_size"),
             "initial_lr": optimizer["defaults"]["lr"],
+            "lowest_lr_used": member.get("lowest_learning_rate_used"),
+            "final_lr_used": member.get("final_learning_rate_used"),
+            "epochs_completed": member.get("epochs_completed"),
             "dropout": member["regularization"]["dropout"],
             "weight_decay": optimizer["parameter_group_weight_decay"],
         })
@@ -764,8 +777,8 @@ RATIO_VALIDATION_INTRO = r"""
 ### Independent density validation bank
 
 These diagnostics generate **new events**, apply the frozen selector from
-notebook 02, and reuse the trained ratio checkpoints. The bank is separate from
-training, early-stopping validation, calibration and workspace normalization.
+notebook 02, and are prepared **before ratio training**. The bank is separate
+from training, checkpoint-selection validation, calibration and workspace normalization.
 The production default is two million **generated** events per source
 (S, SBI, B, NI and NI up/down); selected counts are printed below. Generation
 is cached with the physics/selection identity and random seed. Re-running with
@@ -781,8 +794,11 @@ reported as successful closure.
 
 Calibration figures compare the mean predicted score $s=r/(1+r)$ to the
 observed numerator fraction using an equal class prior, with residual
-$f_{\rm numerator}-\langle s\rangle$ underneath. Both **raw** predictions and
-the existing **calibration-mean-normalized** predictions are shown. Calibration
+$f_{\rm numerator}-\langle s\rangle$ underneath. Immediately after **each
+member** finishes, its raw reweighting and calibration plots are displayed,
+before training the next member. After each task, the final ratio is shown in
+both raw and calibration-mean-normalized forms. Member checks do not alter
+the ensemble weights or fit any calibration map. Calibration
 here is a diagnostic: these cells do not fit a new calibration map. Error bars
 describe the independent finite validation samples conditional on the trained
 network; they do not include training or calibration uncertainty.
@@ -790,7 +806,6 @@ network; they do not include training or calibration uncertainty.
 
 RATIO_VALIDATION_CODE = r'''
 from poodemo.closure_validation import prepare_validation_bank
-from poodemo.ratio_validation import plot_ratio_validation
 
 DIAGNOSTIC_N_PER_SAMPLE = 20_000 if MODE == "smoke" else 2_000_000
 DIAGNOSTIC_EDGES = np.linspace(-5., 6., 56)
@@ -803,22 +818,28 @@ display(pd.DataFrame([
      "selected": len(sample)}
     for name, sample in validation_bank["samples"].items()
 ]))
-validation_predictors = {
-    f"{num}_over_{den}": load_predictor(run.path("models", "ratios", f"{num}_over_{den}"))
-    for num, den in RATIO_TASKS
-}
-density_validation = plot_ratio_validation(
-    validation_bank["samples"], validation_predictors,
-    run.path("plots", "03_validation"), results=run.path("results", "03_validation"),
-    edges=DIAGNOSTIC_EDGES, score_bins=CALIBRATION_BINS, log=VALIDATION_LOG_SCALE,
+'''
+
+TRAIN_RATIOS_WITH_VALIDATION_CODE = r'''
+from poodemo.pipeline import train_ratios
+
+def show_ratio_validation(report):
+    print(f"{report['ratio']} — {report['stage']}", flush=True)
+    for figure in report["figures"].values():
+        display(figure)
+    # Canvases are saved and closed by the pipeline after this callback returns.
+    if report["stage"] == "ensemble":
+        display(report["reweighting"].groupby("stage", sort=False)[
+            ["denominator_mean_ratio", "numerator_events", "denominator_events"]].first())
+
+ratio_diagnostics = train_ratios(
+    run, validation_samples=validation_bank["samples"],
+    on_validation=show_ratio_validation,
+    validation_options={"edges": DIAGNOSTIC_EDGES, "score_bins": CALIBRATION_BINS,
+                        "log": VALIDATION_LOG_SCALE},
 )
-for figure in density_validation["figures"].values():
-    display(figure)
-    plt.close(figure)
-del validation_predictors
-print("Reweighting and calibration tables:")
-display(density_validation["reweighting"].head())
-display(density_validation["calibration"].head())
+display(ratio_diagnostics)
+print("Saved per-member and ensemble plots:", run.path("plots", "03_validation"))
 '''
 
 CLOSURE_VALIDATION_INTRO = r"""
@@ -907,7 +928,8 @@ def build():
     This provides an analytical benchmark for learned density ratios, unbinned
     likelihoods, and parameterized score histograms. Run this notebook first.
 
-    Five million generated events per sample provide Monte Carlo precision; the
+    Five million events per S/SBI/B sample and fifty million per NI/NI-up/NI-down
+    sample provide Monte Carlo precision; the
     expected event yields of the statistical experiment are separate quantities.
     This benchmark is designed to make interference and nuisance effects visible;
     it illustrates the method and is not a numerical reproduction of an ATLAS
@@ -979,7 +1001,10 @@ def build():
         yield may change because the selection efficiency changes.
 
         This gives six samples: S, B, SBI, NI, NI_up, and NI_down. Production mode
-        therefore generates 30 million three-dimensional events. Before any
+        generates 5 million events each for S, B and SBI, and 50 million each for
+        NI, NI_up and NI_down: 165 million three-dimensional events in total.
+        The NI multiplier compensates for its lower selection acceptance without
+        changing any physical yield. Before any
         learning or selection, each sample is divided into seven independent
         roles:
 
@@ -1260,8 +1285,10 @@ def build():
         interpolated nuisance model need not equal a continuously shifted
         Gaussian amplitude away from its nominal and ±1 anchors.
         """),
-        code("from poodemo.pipeline import train_ratios\n\nratio_diagnostics = train_ratios(run)\ndisplay(ratio_diagnostics)"),
         md(NN_METADATA_INTRO),
+        md(RATIO_VALIDATION_INTRO),
+        code(RATIO_VALIDATION_CODE),
+        code(TRAIN_RATIOS_WITH_VALIDATION_CODE),
         code(NN_METADATA_CODE),
         md(r"""
         ### Validate ratios before interpreting the inference
@@ -1292,8 +1319,6 @@ def build():
         workflow check, and production closure must be demonstrated separately.
         """),
         code("from poodemo.pipeline import prepare_quadrature\n\nquadrature = prepare_quadrature(run)\nprint('Quadrature products:', list(quadrature))"),
-        md(RATIO_VALIDATION_INTRO),
-        code(RATIO_VALIDATION_CODE),
         md(CLOSURE_VALIDATION_INTRO),
         code(CLOSURE_VALIDATION_CODE),
         md(r"""

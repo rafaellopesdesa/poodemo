@@ -54,17 +54,22 @@ def default_config(mode="production"):
     if mode not in ("production", "smoke"):
         raise ValueError("mode must be production or smoke")
     small = mode == "smoke"
-    return dict(schema_version=6, mode=mode, seed=20261006,
+    return dict(schema_version=7, mode=mode, seed=20261006,
                 physics_overrides={},
                 toolkit_commit=TOOLKIT_COMMIT,
                 n_per_sample=12_000 if small else 5_000_000,
+                ni_sample_multiplier=10,
                 generation_chunk=10_000 if small else 250_000,
                 preselection_train_cap=5_000 if small else 1_000_000,
                 ratio_train_cap=6_000 if small else 2_000_000,
                 epochs=5 if small else 100, patience=5 if small else 20,
                 preselection_epochs=20 if small else 100,
-                batch_size=512 if small else 8192,
-                n_hidden=2 if small else 3, n_neurons=32 if small else 128,
+                batch_size=512 if small else 1024,
+                n_hidden=2 if small else 3, n_neurons=32 if small else 1024,
+                preselection_batch_size=512 if small else 8192,
+                preselection_n_neurons=32 if small else 128,
+                ratio_learning_rate=1e-3, ratio_min_learning_rate=1e-9,
+                ratio_lr_decay_fraction=.9,
                 ensemble_size=1 if small else 3,
                 quadrature_per_process=1500 if small else 250_000,
                 asimov_mu=1., target_s_over_ni=.1,
@@ -90,11 +95,19 @@ def create_run(root, mode="production", overrides=None):
     if unknown or protected:
         raise ValueError(f"Unsupported configuration overrides: {sorted(unknown | protected)}")
     config.update(overrides)
-    for name in ("n_per_sample", "generation_chunk", "preselection_train_cap", "ratio_train_cap",
+    for name in ("n_per_sample", "ni_sample_multiplier", "generation_chunk", "preselection_train_cap", "ratio_train_cap",
                  "epochs", "preselection_epochs", "patience", "batch_size", "n_hidden", "n_neurons",
+                 "preselection_batch_size", "preselection_n_neurons",
                  "ensemble_size", "quadrature_per_process", "mu_points", "spline_anchors"):
-        if not isinstance(config[name], int) or config[name] <= 0:
+        if isinstance(config[name], bool) or not isinstance(config[name], int) or config[name] <= 0:
             raise ValueError(f"{name} must be a positive integer")
+    for name in ("ratio_learning_rate", "ratio_min_learning_rate"):
+        if not np.isfinite(config[name]) or config[name] <= 0:
+            raise ValueError(f"{name} must be finite and positive")
+    if config["ratio_min_learning_rate"] > config["ratio_learning_rate"]:
+        raise ValueError("ratio_min_learning_rate must not exceed ratio_learning_rate")
+    if not np.isfinite(config["ratio_lr_decay_fraction"]) or not 0 < config["ratio_lr_decay_fraction"] <= 1:
+        raise ValueError("ratio_lr_decay_fraction must lie in (0, 1]")
     if config["spline_anchors"] < 2 or config["mu_points"] < 2:
         raise ValueError("At least two spline anchors and scan points are required")
     focused = config["spline_focus_anchors"]
@@ -111,7 +124,9 @@ def create_run(root, mode="production", overrides=None):
     if not isinstance(config["physics_overrides"], dict):
         raise ValueError("physics_overrides must be a dictionary of PhysicsModel parameters")
     model = PhysicsModel(**config["physics_overrides"])
-    manifest = {"config": config, "physics": model.to_dict(),
+    sample_sizes = {name: config["n_per_sample"] * (config["ni_sample_multiplier"] if component == "NI" else 1)
+                    for name, (component, _) in SAMPLES.items()}
+    manifest = {"config": config, "physics": model.to_dict(), "sample_sizes": sample_sizes,
                 "splits": {k: list(v) for k, v in SPLITS.items()}}
     path = root / "run.json"
     if path.exists():
@@ -137,11 +152,18 @@ def create_run(root, mode="production", overrides=None):
     return Run(root, config, model)
 
 
+def sample_size(run, name):
+    """Generated event count for one source; simulated statistics do not set its yield."""
+    component, _ = SAMPLES[name]
+    multiplier = run.config["ni_sample_multiplier"] if component == "NI" else 1
+    return run.config["n_per_sample"] * multiplier
+
+
 def generate_samples(run):
     """Generate exact iid samples in bounded memory; resume complete files only."""
     records = []
-    n = run.config["n_per_sample"]
     for name, (component, alpha_ni) in SAMPLES.items():
+        n = sample_size(run, name)
         path = run.path("raw", name + ".npy")
         if path.exists():
             x = np.load(path, mmap_mode="r", allow_pickle=False)

@@ -1,5 +1,47 @@
 # Validation
 
+## Larger NI bank and ratio retraining v4 (8 October 2026)
+
+New run: `paper-distinct-s-v4`, schema 7. Physics amplitudes and physical yields
+are unchanged. Rerun 01–03, then 04–09 for updated inference results. Existing
+v3 runs remain separate. Committed notebook outputs are cleared to avoid mixing
+old fitted results with the new configuration; scientific plotting/binning
+choices are retained.
+
+- Production generates 5 million S/SBI/B events each and 50 million events each
+  for NI, NI_up and NI_down. Source-specific manifests, splitting, selected
+  efficiency accounting and stale-cache checks use the actual sample lengths.
+  NI physical yields do not change when the Monte Carlo count increases.
+- Production ratios have three 1024-unit SiLU hidden layers, a linear logit and
+  an explicit final Sigmoid, with batch size 1024. The public output is in [0,1].
+  BCE uses logits for numerical stability and raw ratios use exp(logit); the
+  loss has no dropout, weight decay, smoothing or additional penalty.
+- The LR decreases from 1e-3 to exactly 1e-9 by zero-based epoch 90, then trains
+  at that floor for ten epochs. Ratio early stopping is disabled. The selected
+  checkpoint remains the best validation epoch, which can precede the final
+  training epoch. Histories and metadata report the LR actually used.
+- **126 tests passed; 11 optional JAX checks skipped.** Actual CPU Lightning
+  tests cover the full-width architecture, explicit sigmoid, BCE values and
+  gradients, extreme-logit stability, legacy/new checkpoint loading, and the
+  real learning rates used in training. An interrupted/resumed four-epoch test
+  preserves earlier history, replaces replayed rows and uses rates
+  1e-3, 1e-5, 1e-7, 1e-9, with completed metadata reporting that floor.
+- Callback tests enforce fit → raw member plots → display before the next
+  member starts. Only the reserved calibration partition normalizes the final
+  ratio; its raw/normalized plots then appear before the next task. A failed
+  diagnostic interrupts the sequence. Member checks never modify model weights
+  or averaging conventions.
+- The revised notebook cells were exercised on a fresh smoke run with 12,000
+  S/SBI/B events and 120,000 events per NI source, a trained selector and all
+  five ratio tasks. The independent bank and immediate member/ensemble checks
+  produced 20 PDF/PNG figures and 20 diagnostic CSVs. Representative calibration
+  residual and reweighting ratio figures were visually inspected.
+- All nine notebook formats and code cells validate. Notebook 03's updated
+  cells match the generator and place bank preparation before training.
+
+The smoke run checks execution, not calibration precision. The 165-million-event
+production generation and full 1024-wide production training were not run here.
+
 ## Notebook 03 density and MLE diagnostics (8 October 2026)
 
 The physics, run configuration, tag and trained-network behavior are unchanged.

@@ -1,7 +1,9 @@
 """Memory-conscious training with the pinned NSBI toolkit's Lightning models.
 
-The toolkit owns both network architectures, losses and optimizers.  This adapter
-changes data loading (balanced, streamed minibatches rather than several pandas
+The preselection uses the pinned toolkit model unchanged. Ratio classifiers use
+its hidden MLP with an explicit sigmoid output, stable ordinary BCE on the same
+logits, and a deterministic learning-rate floor. This adapter changes data
+loading (balanced, streamed minibatches rather than several pandas
 copies), checkpoints the best validation model, fits preprocessing on training
 events only, and fits ratio calibration on the separate calibration partition.
 Workspace construction may subsequently integrate the learned model on independent
@@ -31,12 +33,15 @@ TOOLKIT_REVISION = "fc09848fc6540fd32310faebbe9db6eea7ecd17b"
 class TrainingConfig:
     epochs: int = 80
     patience: int = 15
-    batch_size: int = 8192
-    width: int = 128
+    batch_size: int = 1024
+    width: int = 1024
     depth: int = 3
     learning_rate: float = 1e-3
     lr_factor: float = 0.5
     lr_patience: int = 15
+    min_learning_rate: float = 1e-9
+    lr_decay_fraction: float = 0.9
+    ratio_early_stopping: bool = False
     max_train_per_class: int | None = 2_000_000
     max_validation_per_class: int | None = 200_000
     scaler_per_class: int = 100_000
@@ -125,6 +130,8 @@ def _network_metadata(model, kind, labels, mean, scale, config=None):
             record["function"] = "max(0, x)"
         elif isinstance(layer, torch.nn.Tanh):
             record["function"] = "tanh(x)"
+        elif isinstance(layer, torch.nn.Sigmoid):
+            record["function"] = "1 / (1 + exp(-x))"
         if isinstance(layer, torch.nn.modules.dropout._DropoutNd):
             record["probability"] = float(layer.p)
         layers.append(record)
@@ -137,6 +144,7 @@ def _network_metadata(model, kind, labels, mean, scale, config=None):
     batch_norm = any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
                      for m in model.modules())
     binary = kind == "ratio"
+    explicit_sigmoid = binary and hasattr(model, "forward_logits")
     scheduler_details = {"type": type(scheduler).__name__, "interval": "epoch",
                          "frequency": 1}
     if isinstance(scheduler, torch.optim.lr_scheduler.StepLR):
@@ -146,6 +154,14 @@ def _network_metadata(model, kind, labels, mean, scale, config=None):
         scheduler_details.update(monitor="val_loss", mode=scheduler.mode,
                                  factor=float(scheduler.factor), patience=int(scheduler.patience),
                                  min_lr=list(scheduler.min_lrs))
+    elif hasattr(scheduler, "decay_epochs"):
+        scheduler_details.update(initial_learning_rate=float(model.lr),
+                                 min_learning_rate=float(scheduler.min_lr),
+                                 decay_fraction=float(scheduler.decay_fraction),
+                                 first_floor_epoch=int(scheduler.decay_epochs),
+                                 total_epochs=int(scheduler.total_epochs),
+                                 rule="log-linear decay through first_floor_epoch, then fixed floor; "
+                                      "epoch indices are zero-based and rates are used during training")
     config = asdict(config) if isinstance(config, TrainingConfig) else (config or {})
     return {
         "architecture": {
@@ -155,8 +171,10 @@ def _network_metadata(model, kind, labels, mean, scale, config=None):
             "hidden_layers": int(model.hparams.n_hidden),
             "hidden_width": int(model.hparams.n_neurons),
             "hidden_activation": str(model.hparams.activation),
-            "output_activation": "linear (raw logit)" if binary else "linear (class logits)",
+            "output_activation": ("sigmoid (classification probability in [0, 1])" if explicit_sigmoid
+                                  else "linear (raw logit)" if binary else "linear (class logits)"),
             "probability_transform": "sigmoid(logit)" if binary else "softmax(class logits)",
+            "logit_access": "forward_logits: before final sigmoid" if explicit_sigmoid else "forward",
             "raw_ratio_transform": "exp(logit), numerator / denominator" if binary else None,
             "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
             "total_parameters": sum(p.numel() for p in model.parameters()),
@@ -169,6 +187,8 @@ def _network_metadata(model, kind, labels, mean, scale, config=None):
             "reduction": "arithmetic mean over the minibatch (all event weights are one)",
             "label_order": list(labels), "class_prior": [1 / len(labels)] * len(labels),
             "label_smoothing": 0.0,
+            "input": "pre-sigmoid logits; fused sigmoid + BCE for numerical stability" if binary
+                     else "class logits",
         },
         "optimizer": {"type": type(optimizer).__name__, "defaults": defaults,
                       "parameter_group_weight_decay": [float(g.get("weight_decay", 0))
@@ -181,7 +201,14 @@ def _network_metadata(model, kind, labels, mean, scale, config=None):
         },
         "checkpoint_selection": {"monitor": "val_loss", "mode": "min",
                                  "restore": "best validation checkpoint",
-                                 "early_stopping_patience": config.get("patience"),
+                                 "learning_rate_summary": "describes completed training; the restored "
+                                     "best-validation checkpoint may come from an earlier epoch",
+                                 "early_stopping_enabled": (bool(config.get("ratio_early_stopping", False))
+                                                            if explicit_sigmoid else True),
+                                 "early_stopping_patience": (config.get("patience")
+                                     if not explicit_sigmoid or config.get("ratio_early_stopping", False) else None),
+                                 "earliest_stopping_epoch": (int(scheduler.decay_epochs)
+                                                              if explicit_sigmoid else None),
                                  "max_epochs": config.get("epochs")},
         "preprocessing": {"type": "featurewise standardization: (x - mean) / scale",
                           "fit_partition": "training only, equal mixture of classes",
@@ -205,7 +232,7 @@ def training_metadata(predictor, *, persist=True):
     report = dict(previous)
     report.update(_network_metadata(predictor.model, predictor.kind, predictor.labels,
                                     predictor.mean, predictor.scale, previous.get("config")))
-    report["architecture_metadata_version"] = 1
+    report["architecture_metadata_version"] = 2
     if persist and path is not None and path.exists() and report != previous:
         _json_write(path, report)
     return report
@@ -240,7 +267,12 @@ class Predictor:
         with torch.inference_mode():
             for start in range(0, len(x), batch_size):
                 a = (np.asarray(x[start:start + batch_size], dtype=np.float32) - self.mean) / self.scale
-                v = self.model(torch.from_numpy(np.ascontiguousarray(a)).to(self.device))
+                tensor = torch.from_numpy(np.ascontiguousarray(a)).to(self.device)
+                # New ratio models expose probabilities from forward; ratios
+                # always use the pre-sigmoid logits, including in extreme tails.
+                v = (self.model.forward_logits(tensor)
+                     if self.kind == "ratio" and hasattr(self.model, "forward_logits")
+                     else self.model(tensor))
                 output.append(v.detach().cpu().numpy())
         shape = (0, len(self.labels)) if self.kind == "preselection" else (0, 1)
         return np.concatenate(output) if output else np.empty(shape, dtype=np.float32)
@@ -301,6 +333,8 @@ class Predictor:
         directory = Path(output_dir or self.output_dir).resolve()
         directory.mkdir(parents=True, exist_ok=True)
         payload = {"kind": self.kind, "labels": self.labels,
+                   "model_type": ("sigmoid_ratio_v1" if self.kind == "ratio"
+                                  and hasattr(self.model, "forward_logits") else "toolkit_v1"),
                    "mean": self.mean.tolist(), "scale": self.scale.tolist(),
                    "log_normalization": self.log_normalization,
                    "hparams": dict(self.model.hparams),
@@ -324,7 +358,13 @@ class Predictor:
         directory = Path(directory).resolve()
         # This checkpoint is generated by this repository; only load trusted files.
         p = torch.load(directory / "model.pt", map_location="cpu", weights_only=False)
-        model_class = MultiClassLightning if p["kind"] == "preselection" else DensityRatioLightning
+        if p.get("model_type") == "sigmoid_ratio_v1":
+            from .ratio_network import SigmoidDensityRatioLightning
+            model_class = SigmoidDensityRatioLightning
+        elif p.get("model_type", "toolkit_v1") == "toolkit_v1":
+            model_class = MultiClassLightning if p["kind"] == "preselection" else DensityRatioLightning
+        else:
+            raise ValueError(f"Unknown saved model type: {p['model_type']}")
         model = model_class(**p["hparams"])
         model.load_state_dict(p["state_dict"])
         cal = joblib.load(directory / "calibrator.joblib") if (directory / "calibrator.joblib").exists() else None
@@ -347,7 +387,9 @@ class Predictor:
                 self.register_buffer("mean", torch.tensor(predictor.mean, device=predictor.device))
                 self.register_buffer("scale", torch.tensor(predictor.scale, device=predictor.device))
             def forward(self, x):
-                return self.network((x - self.mean) / self.scale)
+                standardized = (x - self.mean) / self.scale
+                return (self.network.forward_logits(standardized)
+                        if hasattr(self.network, "forward_logits") else self.network(standardized))
         torch.onnx.export(Wrapped(self).eval(), torch.zeros(1, len(self.mean), device=self.device),
                           str(path), input_names=["features"], output_names=["logits"],
                           dynamic_axes={"features": {0: "batch"}, "logits": {0: "batch"}},
@@ -416,7 +458,8 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
     import pytorch_lightning as pl
     from torch.utils.data import DataLoader, IterableDataset
     from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
-    from nsbi_common_utils.lightning_tools import DensityRatioLightning, MultiClassLightning
+    from nsbi_common_utils.lightning_tools import MultiClassLightning
+    from .ratio_network import SigmoidDensityRatioLightning
 
     dimension = _validate_arrays([*train_arrays, *validation_arrays])
     if config.batch_size < len(train_arrays):
@@ -480,12 +523,22 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
 
     class History(Callback):
         def __init__(self):
-            self.rows = []
+            path = directory / "history.json"
+            self.rows = (json.loads(path.read_text()) if path.exists() and not force
+                         and previous.get("signature") == signature else [])
+            self.training_learning_rate = None
+        def on_train_epoch_start(self, trainer, module):
+            # A checkpoint can restart an epoch already written to history.
+            # Preserve earlier epochs and replace that epoch on completion.
+            self.rows = [row for row in self.rows if row["epoch"] < trainer.current_epoch]
+            # Lightning can step an epoch scheduler before validation. Record
+            # the rate at training start so history describes optimizer updates.
+            self.training_learning_rate = float(trainer.optimizers[0].param_groups[0]["lr"])
         def on_validation_epoch_end(self, trainer, module):
             if trainer.sanity_checking:
                 return
             record = {"epoch": int(trainer.current_epoch),
-                      "learning_rate": float(trainer.optimizers[0].param_groups[0]["lr"])}
+                      "learning_rate": self.training_learning_rate}
             for name, value in trainer.callback_metrics.items():
                 if value.numel() == 1:
                     record[name] = float(value.detach().cpu())
@@ -495,14 +548,28 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
     kwargs = dict(n_hidden=config.depth, n_neurons=config.width, input_dim=dimension,
                   learning_rate=config.learning_rate, callback_factor=config.lr_factor,
                   callback_patience=config.lr_patience, activation="swish")
-    model_class = MultiClassLightning if kind == "preselection" else DensityRatioLightning
-    model = model_class(**kwargs, **({"num_classes": nclass} if kind == "preselection" else {"use_log_loss": True}))
+    model_class = MultiClassLightning if kind == "preselection" else SigmoidDensityRatioLightning
+    model = model_class(**kwargs, **({"num_classes": nclass} if kind == "preselection" else {
+        "use_log_loss": True, "min_learning_rate": config.min_learning_rate,
+        "lr_decay_fraction": config.lr_decay_fraction, "total_epochs": config.epochs}))
     checkpoint = ModelCheckpoint(dirpath=directory / "checkpoints", filename="best",
                                  monitor="val_loss", mode="min", save_top_k=1, save_last=True)
     history = History()
+    callbacks = [checkpoint, history]
+    if kind == "preselection":
+        callbacks.append(EarlyStopping(monitor="val_loss", patience=config.patience))
+    elif config.ratio_early_stopping:
+        # An opt-in early stop cannot prevent at least one epoch at the floor.
+        class AfterFloorEarlyStopping(EarlyStopping):
+            def on_validation_end(self, trainer, pl_module):
+                floor_epoch = math.ceil(config.lr_decay_fraction * (config.epochs - 1))
+                if trainer.current_epoch >= floor_epoch:
+                    super().on_validation_end(trainer, pl_module)
+        callbacks.append(AfterFloorEarlyStopping(monitor="val_loss", patience=config.patience,
+                                                check_on_train_epoch_end=False))
     trainer = pl.Trainer(accelerator=config.accelerator, devices=1, max_epochs=config.epochs,
                          precision=config.precision, logger=False,
-                         callbacks=[checkpoint, EarlyStopping(monitor="val_loss", patience=config.patience), history],
+                         callbacks=callbacks,
                          enable_progress_bar=config.progress_bar, enable_model_summary=False,
                          default_root_dir=directory, num_sanity_val_steps=0, deterministic=True)
     _json_write(metadata_path, {"signature": signature, "complete": False,
@@ -511,7 +578,7 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
                                "training_counts": list(map(len, train_arrays)),
                                "validation_counts": list(map(len, validation_arrays)),
                                "toolkit_revision": TOOLKIT_REVISION,
-                               "architecture_metadata_version": 1,
+                               "architecture_metadata_version": 2,
                                **_network_metadata(model, kind, labels, mean, scale, config),
                                "sampling": "equal class minibatches, training draws with replacement"})
     last_checkpoint = directory / "checkpoints" / "last.ckpt"
@@ -528,7 +595,10 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
     predictor.save()
     metadata = json.loads(metadata_path.read_text())
     metadata.update(complete=True, best_validation_loss=float(checkpoint.best_model_score),
-                    best_checkpoint=str(Path(checkpoint.best_model_path).relative_to(directory)))
+                    best_checkpoint=str(Path(checkpoint.best_model_path).relative_to(directory)),
+                    epochs_completed=len(history.rows),
+                    lowest_learning_rate_used=min(row["learning_rate"] for row in history.rows),
+                    final_learning_rate_used=history.rows[-1]["learning_rate"])
     _json_write(metadata_path, metadata)
     return predictor
 
@@ -536,7 +606,7 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
 def fit_preselection(train: Mapping[str, np.ndarray], validation: Mapping[str, np.ndarray],
                      output_dir, config=None, force=False):
     """Train balanced S/B/NI multiclass cross entropy using MultiClassLightning."""
-    config = config or TrainingConfig()
+    config = config or TrainingConfig(batch_size=8192, width=128)
     labels = ["S", "B", "NI"]
     return _fit([train[k] for k in labels], [validation[k] for k in labels],
                 output_dir, replace(config, ensemble_size=1), "preselection", labels, force)
@@ -544,26 +614,34 @@ def fit_preselection(train: Mapping[str, np.ndarray], validation: Mapping[str, n
 
 def fit_density_ratio(numerator_train, denominator_train, numerator_validation,
                       denominator_validation, output_dir, config=None,
-                      numerator_label="numerator", denominator_label="denominator", force=False):
-    """Train p_numerator / p_denominator, using DensityRatioLightning BCE logits.
+                      numerator_label="numerator", denominator_label="denominator", force=False,
+                      member_callback=None):
+    """Train p_numerator / p_denominator with an explicit sigmoid and stable BCE.
 
     The denominator is label 0 and numerator is label 1, matching the toolkit.
     A three-member production ensemble can be requested via ``ensemble_size=3``.
     Calibration/normalization is an explicit separate call on separate events.
+    ``member_callback(predictor, index, total)`` runs synchronously after each member,
+    including reused models, before the next member starts training.
     """
     config = config or TrainingConfig()
     if config.ensemble_size < 1:
         raise ValueError("ensemble_size must be positive.")
     labels = [denominator_label, numerator_label]
     if config.ensemble_size == 1:
-        return _fit([denominator_train, numerator_train], [denominator_validation, numerator_validation],
-                    output_dir, config, "ratio", labels, force)
+        predictor = _fit([denominator_train, numerator_train], [denominator_validation, numerator_validation],
+                         output_dir, config, "ratio", labels, force)
+        if member_callback is not None:
+            member_callback(predictor, 0, 1)
+        return predictor
     directory = Path(output_dir).resolve()
     members = []
     for i in range(config.ensemble_size):
         member_config = replace(config, seed=config.seed + 100003 * i, ensemble_size=1)
         members.append(_fit([denominator_train, numerator_train], [denominator_validation, numerator_validation],
                             directory / f"member_{i:02d}", member_config, "ratio", labels, force))
+        if member_callback is not None:
+            member_callback(members[-1], i, config.ensemble_size)
     ensemble = RatioEnsemble(members, directory)
     # Normalize the ensemble explicitly after this call. Recomputing its scalar
     # correction on the held-out partition is inexpensive and avoids stale values.

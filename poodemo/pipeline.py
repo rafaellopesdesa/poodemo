@@ -20,7 +20,12 @@ def _training_config(run, preselection=False):
     from .training import TrainingConfig
     c = run.config
     return TrainingConfig(epochs=c["preselection_epochs" if preselection else "epochs"], patience=c["patience"],
-                          batch_size=c["batch_size"], width=c["n_neurons"], depth=c["n_hidden"],
+                          batch_size=c["preselection_batch_size" if preselection else "batch_size"],
+                          width=c["preselection_n_neurons" if preselection else "n_neurons"], depth=c["n_hidden"],
+                          learning_rate=1e-3 if preselection else c["ratio_learning_rate"],
+                          min_learning_rate=c["ratio_min_learning_rate"],
+                          lr_decay_fraction=c["ratio_lr_decay_fraction"],
+                          ratio_early_stopping=False,
                           max_train_per_class=c["preselection_train_cap" if preselection else "ratio_train_cap"],
                           ensemble_size=1 if preselection else c["ensemble_size"],
                           seed=c["seed"], progress_bar=c["mode"] != "smoke")
@@ -53,8 +58,47 @@ def _ratio_path(run, numerator, denominator):
     return run.path("models", "ratios", f"{numerator}_over_{denominator}")
 
 
-def train_ratios(run):
+def train_ratios(run, *, validation_samples=None, on_validation=None, validation_options=None):
+    """Train ratio members, emitting independent checks before the next fit.
+
+    With ``validation_samples``, each member is checked immediately using its
+    raw probability/ratio output. The final ensemble is then mean-normalized
+    on the existing calibration partition and checked in both stages. A
+    synchronous ``on_validation`` callback displays each report in notebooks.
+    Validation never changes member weights or their averaging convention.
+    """
     from .training import fit_density_ratio, normalize_ratio, ratio_diagnostics
+    if validation_samples is not None:
+        missing = {p for task in RATIO_TASKS for p in task} - set(validation_samples)
+        if missing:
+            raise ValueError(f"Missing independent validation samples: {sorted(missing)}")
+    validation_options = dict(validation_options or {})
+
+    def validate(predictor, num, den, *, member_index=None, total_members=None):
+        if validation_samples is None:
+            return
+        from .ratio_validation import plot_ratio_task
+        task = f"{num}_over_{den}"
+        is_member = member_index is not None
+        stage = f"member_{member_index + 1:02d}" if is_member else "ensemble"
+        label = f"member {member_index + 1}/{total_members}: raw classifier" if is_member else "final mean-normalized ratio"
+        print(f"Validating {num}/{den}, {label}", flush=True)
+        report = plot_ratio_task(
+            num, den, validation_samples, predictor,
+            run.path("plots", "03_validation", task, stage),
+            results=run.path("results", "03_validation", task, stage),
+            stages=("raw",) if is_member else ("raw", "normalized"),
+            label=label, **validation_options)
+        report.update(task=task, ratio=f"{num}/{den}", stage=stage,
+                      member_index=member_index, total_members=total_members)
+        if on_validation is not None:
+            on_validation(report)
+        # Saved reports remain available; do not accumulate all member canvases
+        # in memory during long production training.
+        import matplotlib.pyplot as plt
+        for figure in report["figures"].values():
+            plt.close(figure)
+
     reports = []
     manifest = json.loads(run.path("selected", "manifest.json").read_text())
     # Independent acceptance estimates for a diagnostic analytic ratio. These
@@ -68,8 +112,11 @@ def train_ratios(run):
         predictor = fit_density_ratio(
             selected_split(run, num, "train"), selected_split(run, den, "train"),
             selected_split(run, num, "validation"), selected_split(run, den, "validation"),
-            directory, cfg, numerator_label=num, denominator_label=den)
+            directory, cfg, numerator_label=num, denominator_label=den,
+            member_callback=lambda member, index, total: validate(
+                member, num, den, member_index=index, total_members=total))
         normalization = normalize_ratio(predictor, selected_split(run, den, "calibration"))
+        validate(predictor, num, den)
         def exact_log_ratio(x):
             cp, an = SAMPLES[num]
             dp, dn = SAMPLES[den]

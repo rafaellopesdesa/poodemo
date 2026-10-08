@@ -31,9 +31,9 @@ to lie between zero and one while S has a visibly distinct shape.
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
    The other notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
-   `RUN_NAME = "paper-distinct-s-v3"` and `MODE = "production"`. For an initial
+   `RUN_NAME = "paper-distinct-s-v4"` and `MODE = "production"`. For an initial
    short check, choose `MODE = "smoke"` and a distinct run name such as
-   `paper-distinct-s-smoke-v3`.
+   `paper-distinct-s-smoke-v4`.
    Computational budgets can be changed through `CONFIG_OVERRIDES`, for example
    `{"quadrature_per_process": 500_000, "epochs": 150}`. Use identical overrides
    in every notebook and a new run name when changing the configuration.
@@ -70,23 +70,22 @@ does. The two histogram workflows save distinct results and plots.
 Use a new run name when changing the configuration: incompatible saved settings
 are rejected rather than silently mixed.
 
-For this changed physics benchmark, use the new run directory
-`paper-distinct-s-v3` and rerun notebooks 1–9. Schema-6 manifests prevent reuse
-of the earlier physics configuration.
-If an earlier version was already run in Colab, start a fresh runtime, or
-refresh `/content/poodemo` and restart the runtime, so that the new source is
-loaded. Earlier Drive runs remain intact, but their samples and trained models
-must not be reused for the changed amplitudes and exposure.
+The enlarged NI bank and wider density-ratio networks require the new run
+`paper-distinct-s-v4` (schema 7). The amplitudes and physical yields are unchanged.
+Start a fresh Colab runtime, open updated notebook 01, and rerun **01–03** with
+this run name. Rerun **04–09** to refresh downstream inference results. Old Drive
+runs remain available; do not mix their selected arrays or checkpoints with v4.
+A restarted/partially completed v4 run reuses compatible data and checkpoints.
 
-Production generates **5 million events in each of six samples**: S, SBI, B,
-NI, NI_up, and NI_down, for 30 million events total. The raw three-coordinate
-float32 arrays occupy about 360 MB; selected arrays, network ensembles, cached
-quadrature, and workspaces need additional space. Data are generated and evaluated in chunks. Training
-has configurable sample caps, early stopping, and saved checkpoints. Production
-training is substantial and is not run automatically when opening a notebook.
-Smoke mode uses 12,000 events per sample, 20 preselection epochs, and five
-density-ratio epochs with single-model training; it
-checks the workflow and does **not** establish final physics precision.
+Production generates **5 million events each for S, SBI and B**, and **50 million
+each for NI, NI_up and NI_down**. The NI samples are ten times larger to compensate
+for lower selection acceptance; physical yields do not change. The 165 million
+three-coordinate float32 events occupy about 1.98 GB before selected arrays,
+network checkpoints and workspaces. Generation and selection operate in chunks.
+Preselection retains its original batch/width and early stopping. Ratio training
+runs its full learning-rate schedule and saves the best-validation checkpoint.
+Smoke mode uses 12,000 events for S/SBI/B and 120,000 for each NI source, with
+small networks and five ratio epochs; it checks execution, not physics precision.
 
 ## The model
 
@@ -126,19 +125,30 @@ Notebook 02 adds the same process overlays and coherent SBI(mu)+NI stacks after
 frozen preselection, using the common selected quadrature for physical yields.
 They retain linear/log views and save separate `02_selected_...` PDF/PNG files.
 After setup, the new plot cell can reuse completed preselection without training
-or fitting again. The physics configuration, run name and version tag are unchanged.
+or fitting again within a completed run. These plots do not change the physics
+or training configuration.
 
 Notebook 03 records the actual layer-by-layer classifier architecture in each
-model's `training.json` and in `results/03_architecture.json`. The production
-network is 3→128→128→128→1, with SiLU hidden activations, a linear output logit,
-standard BCE-with-logits and NAdam with zero weight decay. It has no dropout,
-batch normalization or explicit loss penalties; validation early stopping and
-best-checkpoint selection are recorded separately.
+model's `training.json` and in `results/03_architecture.json`. Production ratios
+use **3→1024→1024→1024→1→Sigmoid**, SiLU hidden activations and **batch size 1024**.
+The public network output is a probability in [0,1]. Ordinary BCE is evaluated
+with its numerically stable logits implementation; ratio inference uses the
+same pre-sigmoid logit to avoid loss of precision in saturated tails. Making the
+sigmoid explicit does not itself change the mathematical classification loss.
+NAdam uses zero weight decay; there is no dropout, batch normalization, label
+smoothing or explicit loss penalty. The rate falls geometrically from 1e-3 to
+**1e-9 at epoch 91** and stays there through epoch 100. Ratio early stopping is
+disabled so those epochs really run, while the best-validation checkpoint is
+retained. `history.json` records the rate actually used in each training epoch.
+The preselection classifier remains at three hidden layers of 128 and batch size 8192.
 
 Its additional diagnostics use a fresh simulation bank after the frozen
 selection: reweighting plots with ratio panels, balanced-class calibration with
 residual panels, and independent denominator-mean convergence toward one for all
-five ratio tasks. Raw and existing mean-normalized ratios are shown separately.
+five ratio tasks. The bank is prepared before training. Each ensemble member
+immediately displays raw reweighting/calibration plots before the next member
+starts; the completed task then displays raw and mean-normalized ensemble
+checks. Per-member and ensemble PDF/PNG/CSV files have separate directories.
 Independent expectation and high-statistics Poisson likelihood scans compare
 analytical and learned MLEs at generating mu=1, with NI fixed and profiled.
 The bank never normalizes the fitted model. Analytical shifts therefore also
@@ -147,14 +157,15 @@ without an ATLAS label and save PDF/PNG plus numerical CSVs.
 Notebook controls default to two million generated events per source for the
 bank and ten million expected inclusive events for the Poisson experiment;
 selected counts and exposure are reported. These diagnostic budgets can change
-without changing the run name, networks or tag. Reuse completed notebooks 01–02
-and existing ratio checkpoints; the diagnostics do not retrain or recalibrate.
+without changing a completed v4 run name or its networks. After the initial
+v4 retraining, matching checkpoints are reused and diagnostics can be rerun
+without retraining or recalibration.
 
 The physical expected-yield exposure is separate from Monte Carlo counts;
 there are still six generated samples and five ratio-training tasks. Use the
-new run name `paper-distinct-s-v3` and rerun generation and training. Earlier
+new run name `paper-distinct-s-v4` and rerun generation and training. Earlier
 runs remain available. Notebook output cells are cleared to avoid presenting
-old-physics results under the new defaults, while user binning choices
+results from the previous training configuration under the new defaults, while user binning choices
 in notebooks 02–09 are retained (the standard zoom lower bound is extended to 0.02). The scan now begins at 0.02 and the score scale
 is 0.04 to cover the lower branch and avoid saturating its broader score.
 
@@ -433,7 +444,7 @@ claiming a physics-level closure precision.
 ```bash
 python -m pip install -r requirements-colab.txt
 python -m pip install -e '.[dev]'
-export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-distinct-s-smoke-v3
+export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-distinct-s-smoke-v4
 export POODEMO_MODE=smoke
 ```
 
@@ -517,7 +528,7 @@ See [VALIDATION.md](VALIDATION.md) for the current validation scope, runtime,
 and numerical results. The automated checks cover amplitude algebra, sampling,
 score derivatives, interpolation, normalization, the NI Gaussian constraint,
 optimizer behavior, toolkit agreement, checkpoint reload, and cache safeguards.
-The full 5-million-event production training is separate from the smoke checks.
+The full 165-million-event generation and production ratio training are separate from the smoke checks.
 
 ## References
 

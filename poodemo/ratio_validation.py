@@ -167,7 +167,7 @@ def _save_figure(figure, output):
         figure.savefig(output.with_suffix(suffix), dpi=160, bbox_inches="tight")
 
 
-def plot_reweighting(table, numerator, denominator, *, output=None, log=False):
+def plot_reweighting(table, numerator, denominator, *, output=None, log=False, label=None):
     """Three marginal reweighting checks with independent-MC ratio errors."""
     import matplotlib.pyplot as plt
     import mplhep as hep
@@ -218,7 +218,8 @@ def plot_reweighting(table, numerator, denominator, *, output=None, log=False):
             ratio_ax.set_ylabel("Reweighted\n/ target", fontsize=12)
             ratio_ax.tick_params(labelsize=11)
             ratio_ax.grid(axis="y", alpha=.2)
-        fig.suptitle(f"{numerator}/{denominator}: independent selected-sample reweighting", fontsize=16)
+        heading = f"{numerator}/{denominator}" + (f" ({label})" if label else "")
+        fig.suptitle(f"{heading}: independent selected-sample reweighting", fontsize=16)
         fig.text(.5, .005, "Fixed sample sizes; no diagnostic-sample renormalization. "
                  "Ratio errors include both samples; sparse bins are omitted.", ha="center", fontsize=10)
         fig.subplots_adjust(top=.88, bottom=.13, wspace=.3)
@@ -226,7 +227,7 @@ def plot_reweighting(table, numerator, denominator, *, output=None, log=False):
     return fig
 
 
-def plot_calibration(table, numerator, denominator, *, output=None):
+def plot_calibration(table, numerator, denominator, *, output=None, label=None):
     """Balanced-class reliability and correlated residual uncertainty panels."""
     import matplotlib.pyplot as plt
     import mplhep as hep
@@ -248,7 +249,8 @@ def plot_calibration(table, numerator, denominator, *, output=None):
         residual_ax.axhline(0., color="black", linewidth=1.)
         residual_ax.set(xlabel=r"Mean predicted $r/(1+r)$", ylabel="Empirical\n− predicted")
         residual_ax.grid(axis="y", alpha=.2)
-        fig.suptitle(f"{numerator}/{denominator}: balanced-class calibration", fontsize=16)
+        heading = f"{numerator}/{denominator}" + (f" ({label})" if label else "")
+        fig.suptitle(f"{heading}: balanced-class calibration", fontsize=16)
         fig.text(.5, .018, "Independent selected samples; equal class prior.\n"
                  "Sparse bins omitted; residual errors include score–fraction covariance.",
                  ha="center", fontsize=10)
@@ -257,15 +259,18 @@ def plot_calibration(table, numerator, denominator, *, output=None):
     return fig
 
 
-def plot_ratio_validation(samples, predictors, output, *, edges=None, score_bins=20,
-                          max_events=None, min_count=5, log=False, results=None):
-    """Save all five ratio tasks' reweighting and calibration figures/tables.
+def plot_ratio_task(numerator, denominator, samples, predictor, output, *, edges=None,
+                    score_bins=20, max_events=None, min_count=5, log=False,
+                    results=None, prefix="03", label=None, stages=("raw", "normalized")):
+    """Save one completed classifier's independent validation figures/tables.
 
-    ``samples`` maps S/SBI/B/NI/NI_up/NI_down to an independent, selected
-    simulation bank. ``predictors`` uses keys such as ``SBI_over_S``. CSVs go
-    to ``results`` (or ``output`` when omitted), figures to ``output``. Return
-    combined tables and a figure mapping for notebook display.  Existing mean
-    normalization is read from predictors; no calibration is fitted here.
+    This synchronous helper can run after each ensemble member, before training
+    the next one. Use separate ``output`` / ``results`` member directories (or a
+    different ``prefix``) to retain every result; ``label`` identifies the member
+    or ensemble in figure titles. The selected diagnostic bank is never used to
+    fit a calibration or normalization. Set ``stages=("raw",)`` for individual
+    members before the ensemble normalization. Return tables and figures for immediate
+    notebook display, with the same keys as :func:`plot_ratio_validation`.
     """
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -276,38 +281,65 @@ def plot_ratio_validation(samples, predictors, output, *, edges=None, score_bins
         raise ValueError("score_bins must be at least two")
     if max_events is not None and max_events < 2:
         raise ValueError("max_events must be at least two or None")
+    key = f"{numerator}_over_{denominator}"
+    num = samples[numerator] if max_events is None else samples[numerator][:max_events]
+    den = samples[denominator] if max_events is None else samples[denominator][:max_events]
+    stages = tuple(stages)
+    if not stages or len(set(stages)) != len(stages) or any(stage not in STAGE_LABELS for stage in stages):
+        raise ValueError("stages must be a nonempty sequence of unique raw/normalized entries")
+    reweighting, calibration = [], []
+    for stage in stages:
+        method = predictor.predict_raw_log_ratio if stage == "raw" else predictor.predict_log_ratio
+        log_den = np.asarray(method(den), dtype=float)
+        log_num = np.asarray(method(num), dtype=float)
+        if (log_den.shape != (len(den),) or log_num.shape != (len(num),)
+                or np.any(~np.isfinite(log_den)) or np.any(~np.isfinite(log_num))
+                or np.any(np.abs(log_den) > 350)):
+            raise ValueError(f"Nonfinite or extreme {stage} predictions for {key}; inspect the network")
+        rw = reweighting_table(num, den, np.exp(log_den), edges, min_count=min_count)
+        cal = calibration_table(expit(log_num), expit(log_den),
+                                np.linspace(0., 1., score_bins + 1), min_count=min_count)
+        for table in (rw, cal):
+            table.insert(0, "stage", stage)
+            table.insert(0, "task", key)
+        reweighting.append(rw)
+        calibration.append(cal)
+    rw, cal = pd.concat(reweighting, ignore_index=True), pd.concat(calibration, ignore_index=True)
+    rw.to_csv(results / f"{prefix}_reweighting_{key}.csv", index=False)
+    cal.to_csv(results / f"{prefix}_calibration_{key}.csv", index=False)
+    figures = {
+        f"reweighting_{key}": plot_reweighting(
+            rw, numerator, denominator, output=output / f"{prefix}_reweighting_{key}",
+            log=log, label=label),
+        f"calibration_{key}": plot_calibration(
+            cal, numerator, denominator, output=output / f"{prefix}_calibration_{key}",
+            label=label),
+    }
+    suffix = f" ({label})" if label else ""
+    print(f"Independent reweighting and calibration plots ready: {numerator}/{denominator}{suffix}",
+          flush=True)
+    return {"reweighting": rw, "calibration": cal, "figures": figures}
+
+
+def plot_ratio_validation(samples, predictors, output, *, edges=None, score_bins=20,
+                          max_events=None, min_count=5, log=False, results=None):
+    """Save all five ratio tasks' reweighting and calibration figures/tables.
+
+    ``samples`` maps S/SBI/B/NI/NI_up/NI_down to an independent, selected
+    simulation bank. ``predictors`` uses keys such as ``SBI_over_S``. CSVs go
+    to ``results`` (or ``output`` when omitted), figures to ``output``. Return
+    combined tables and a figure mapping for notebook display. Existing mean
+    normalization is read from predictors; no calibration is fitted here.
+    """
     rw_tables, cal_tables, figures = [], [], {}
     for numerator, denominator in RATIO_TASKS:
         key = f"{numerator}_over_{denominator}"
-        num = samples[numerator] if max_events is None else samples[numerator][:max_events]
-        den = samples[denominator] if max_events is None else samples[denominator][:max_events]
-        predictor = predictors[key]
-        reweighting, calibration = [], []
-        for stage in STAGE_LABELS:
-            method = predictor.predict_raw_log_ratio if stage == "raw" else predictor.predict_log_ratio
-            log_den = np.asarray(method(den), dtype=float)
-            log_num = np.asarray(method(num), dtype=float)
-            if (log_den.shape != (len(den),) or log_num.shape != (len(num),)
-                    or np.any(~np.isfinite(log_den)) or np.any(~np.isfinite(log_num))
-                    or np.any(np.abs(log_den) > 350)):
-                raise ValueError(f"Nonfinite or extreme {stage} predictions for {key}; inspect the network")
-            rw = reweighting_table(num, den, np.exp(log_den), edges, min_count=min_count)
-            cal = calibration_table(expit(log_num), expit(log_den),
-                                    np.linspace(0., 1., score_bins + 1), min_count=min_count)
-            for table in (rw, cal):
-                table.insert(0, "stage", stage)
-                table.insert(0, "task", key)
-            reweighting.append(rw)
-            calibration.append(cal)
-        rw, cal = pd.concat(reweighting, ignore_index=True), pd.concat(calibration, ignore_index=True)
-        rw.to_csv(results / f"03_reweighting_{key}.csv", index=False)
-        cal.to_csv(results / f"03_calibration_{key}.csv", index=False)
-        figures[f"reweighting_{key}"] = plot_reweighting(
-            rw, numerator, denominator, output=output / f"03_reweighting_{key}", log=log)
-        figures[f"calibration_{key}"] = plot_calibration(
-            cal, numerator, denominator, output=output / f"03_calibration_{key}")
-        rw_tables.append(rw)
-        cal_tables.append(cal)
-        print(f"Independent reweighting and calibration plots ready: {numerator}/{denominator}", flush=True)
+        report = plot_ratio_task(
+            numerator, denominator, samples, predictors[key], output, edges=edges,
+            score_bins=score_bins, max_events=max_events, min_count=min_count,
+            log=log, results=results)
+        rw_tables.append(report["reweighting"])
+        cal_tables.append(report["calibration"])
+        figures.update(report["figures"])
     return {"reweighting": pd.concat(rw_tables, ignore_index=True),
             "calibration": pd.concat(cal_tables, ignore_index=True), "figures": figures}
