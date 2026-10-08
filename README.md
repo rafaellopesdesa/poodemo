@@ -128,6 +128,28 @@ They retain linear/log views and save separate `02_selected_...` PDF/PNG files.
 After setup, the new plot cell can reuse completed preselection without training
 or fitting again. The physics configuration, run name and version tag are unchanged.
 
+Notebook 03 records the actual layer-by-layer classifier architecture in each
+model's `training.json` and in `results/03_architecture.json`. The production
+network is 3→128→128→128→1, with SiLU hidden activations, a linear output logit,
+standard BCE-with-logits and NAdam with zero weight decay. It has no dropout,
+batch normalization or explicit loss penalties; validation early stopping and
+best-checkpoint selection are recorded separately.
+
+Its additional diagnostics use a fresh simulation bank after the frozen
+selection: reweighting plots with ratio panels, balanced-class calibration with
+residual panels, and independent denominator-mean convergence toward one for all
+five ratio tasks. Raw and existing mean-normalized ratios are shown separately.
+Independent expectation and high-statistics Poisson likelihood scans compare
+analytical and learned MLEs at generating mu=1, with NI fixed and profiled.
+The bank never normalizes the fitted model. Analytical shifts therefore also
+expose finite original-workspace integration errors. Figures use mplhep styling
+without an ATLAS label and save PDF/PNG plus numerical CSVs.
+Notebook controls default to two million generated events per source for the
+bank and ten million expected inclusive events for the Poisson experiment;
+selected counts and exposure are reported. These diagnostic budgets can change
+without changing the run name, networks or tag. Reuse completed notebooks 01–02
+and existing ratio checkpoints; the diagnostics do not retrain or recalibrate.
+
 The physical expected-yield exposure is separate from Monte Carlo counts;
 there are still six generated samples and five ratio-training tasks. Use the
 new run name `paper-distinct-s-v3` and rerun generation and training. Earlier

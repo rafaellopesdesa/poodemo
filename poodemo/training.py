@@ -103,6 +103,114 @@ def _feature_scaling(arrays, max_per_class):
     return m.astype(np.float32), s.astype(np.float32)
 
 
+def _network_metadata(model, kind, labels, mean, scale, config=None):
+    """Describe the instantiated pinned-toolkit network, not a guessed diagram.
+
+    Constructing its optimizer/scheduler does not fit or change network weights.
+    The loss descriptions follow the pinned toolkit's ``training_step``; our
+    data loader supplies unit event weights and equal class minibatches.
+    """
+    import torch
+    layers = []
+    for name, layer in model.named_modules():
+        if not name or any(layer.children()):
+            continue
+        record = {"name": name, "type": type(layer).__name__}
+        if isinstance(layer, torch.nn.Linear):
+            record.update(input_features=layer.in_features, output_features=layer.out_features,
+                          bias=layer.bias is not None)
+        elif isinstance(layer, torch.nn.SiLU):
+            record["function"] = "x * sigmoid(x) (Swish / SiLU)"
+        elif isinstance(layer, torch.nn.ReLU):
+            record["function"] = "max(0, x)"
+        elif isinstance(layer, torch.nn.Tanh):
+            record["function"] = "tanh(x)"
+        if isinstance(layer, torch.nn.modules.dropout._DropoutNd):
+            record["probability"] = float(layer.p)
+        layers.append(record)
+    optimizers = model.configure_optimizers()
+    optimizer = optimizers["optimizer"]
+    scheduler = optimizers["lr_scheduler"]["scheduler"]
+    # JSON roundtrip converts tuple-valued optimizer defaults, e.g. betas.
+    defaults = json.loads(json.dumps(optimizer.defaults, allow_nan=False))
+    dropout = [r for r in layers if "probability" in r]
+    batch_norm = any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
+                     for m in model.modules())
+    binary = kind == "ratio"
+    scheduler_details = {"type": type(scheduler).__name__, "interval": "epoch",
+                         "frequency": 1}
+    if isinstance(scheduler, torch.optim.lr_scheduler.StepLR):
+        scheduler_details.update(step_size=int(scheduler.step_size), gamma=float(scheduler.gamma),
+                                 rule="lr(epoch) = initial_lr * gamma ** floor(epoch / step_size)")
+    elif isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        scheduler_details.update(monitor="val_loss", mode=scheduler.mode,
+                                 factor=float(scheduler.factor), patience=int(scheduler.patience),
+                                 min_lr=list(scheduler.min_lrs))
+    config = asdict(config) if isinstance(config, TrainingConfig) else (config or {})
+    return {
+        "architecture": {
+            "model_class": f"{type(model).__module__}.{type(model).__name__}",
+            "type": "fully connected feed-forward multilayer perceptron",
+            "input_features": int(len(mean)), "layers": layers,
+            "hidden_layers": int(model.hparams.n_hidden),
+            "hidden_width": int(model.hparams.n_neurons),
+            "hidden_activation": str(model.hparams.activation),
+            "output_activation": "linear (raw logit)" if binary else "linear (class logits)",
+            "probability_transform": "sigmoid(logit)" if binary else "softmax(class logits)",
+            "raw_ratio_transform": "exp(logit), numerator / denominator" if binary else None,
+            "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+            "total_parameters": sum(p.numel() for p in model.parameters()),
+            "dropout_layers": dropout, "batch_normalization": batch_norm,
+        },
+        "loss": {
+            "name": "binary cross entropy" if binary else "multiclass cross entropy",
+            "implementation": ("torch.nn.functional.binary_cross_entropy_with_logits" if binary
+                               else "torch.nn.functional.cross_entropy"),
+            "reduction": "arithmetic mean over the minibatch (all event weights are one)",
+            "label_order": list(labels), "class_prior": [1 / len(labels)] * len(labels),
+            "label_smoothing": 0.0,
+        },
+        "optimizer": {"type": type(optimizer).__name__, "defaults": defaults,
+                      "parameter_group_weight_decay": [float(g.get("weight_decay", 0))
+                                                       for g in optimizer.param_groups]},
+        "scheduler": scheduler_details,
+        "regularization": {
+            "dropout": bool(dropout), "batch_normalization": batch_norm,
+            "weight_decay": [float(g.get("weight_decay", 0)) for g in optimizer.param_groups],
+            "explicit_loss_penalties": "none (no L1 or L2 penalty)",
+        },
+        "checkpoint_selection": {"monitor": "val_loss", "mode": "min",
+                                 "restore": "best validation checkpoint",
+                                 "early_stopping_patience": config.get("patience"),
+                                 "max_epochs": config.get("epochs")},
+        "preprocessing": {"type": "featurewise standardization: (x - mean) / scale",
+                          "fit_partition": "training only, equal mixture of classes",
+                          "mean": np.asarray(mean).tolist(), "scale": np.asarray(scale).tolist()},
+    }
+
+
+def training_metadata(predictor, *, persist=True):
+    """Inspect architecture/training details, including reused saved models.
+
+    ``persist=True`` enriches an existing ``training.json`` without changing its
+    signature, completion state, checkpoint, calibration, or model weights.
+    Ensemble reports include each member and the ratio-averaging convention.
+    """
+    if isinstance(predictor, RatioEnsemble):
+        return {"kind": "ratio ensemble", "ensemble_size": len(predictor.members),
+                "aggregation": "arithmetic mean of member density ratios, not logits",
+                "members": [training_metadata(m, persist=persist) for m in predictor.members]}
+    path = predictor.output_dir / "training.json" if predictor.output_dir else None
+    previous = json.loads(path.read_text()) if path is not None and path.exists() else {}
+    report = dict(previous)
+    report.update(_network_metadata(predictor.model, predictor.kind, predictor.labels,
+                                    predictor.mean, predictor.scale, previous.get("config")))
+    report["architecture_metadata_version"] = 1
+    if persist and path is not None and path.exists() and report != previous:
+        _json_write(path, report)
+    return report
+
+
 class Predictor:
     """Best-validation toolkit model, including training-only standardization.
 
@@ -142,6 +250,22 @@ class Predictor:
         if self.kind == "preselection":
             return softmax(raw, axis=1)
         return expit(raw[:, 0])
+
+    def predict_raw_log_ratio(self, x, batch_size=65536):
+        """Raw BCE logit, before isotonic calibration or scalar normalization."""
+        if self.kind != "ratio":
+            raise TypeError("This is a multiclass preselection model, not a ratio model.")
+        result = self._raw(x, batch_size)[:, 0].astype(np.float64)
+        if not np.all(np.isfinite(result)):
+            raise FloatingPointError("The network produced nonfinite raw log density ratios.")
+        return result
+
+    def predict_raw_ratio(self, x, batch_size=65536):
+        """Exponentiated raw BCE logit, before all post-training adjustments."""
+        result = self.predict_raw_log_ratio(x, batch_size)
+        if np.any(np.abs(result) > 700):
+            raise FloatingPointError("Extreme predicted raw log ratio; inspect the network.")
+        return np.exp(result)
 
     def predict_log_ratio(self, x, batch_size=65536, normalized=True):
         if self.kind != "ratio":
@@ -240,6 +364,17 @@ class RatioEnsemble:
         self.kind = "ratio"
         self.labels = self.members[0].labels
 
+    def predict_raw_log_ratio(self, x, batch_size=65536):
+        """Log arithmetic mean of raw member ratios, before all adjustments."""
+        values = np.stack([m.predict_raw_log_ratio(x, batch_size) for m in self.members])
+        return logsumexp(values, axis=0) - math.log(len(self.members))
+
+    def predict_raw_ratio(self, x, batch_size=65536):
+        result = self.predict_raw_log_ratio(x, batch_size)
+        if np.any(np.abs(result) > 700):
+            raise FloatingPointError("Extreme ensemble raw log ratio; inspect the networks.")
+        return np.exp(result)
+
     def predict_log_ratio(self, x, batch_size=65536, normalized=True):
         values = np.stack([m.predict_log_ratio(x, batch_size) for m in self.members])
         result = logsumexp(values, axis=0) - math.log(len(self.members))
@@ -297,7 +432,9 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
         if previous["signature"] != signature and not force:
             raise ValueError(f"Training inputs/config changed in {directory}. Use a new model directory or force=True.")
         if previous["signature"] == signature and previous.get("complete") and not force:
-            return Predictor.load(directory, device="cpu" if config.accelerator == "cpu" else "auto")
+            predictor = Predictor.load(directory, device="cpu" if config.accelerator == "cpu" else "auto")
+            training_metadata(predictor)
+            return predictor
     else:
         previous = {}
     if force:
@@ -374,6 +511,8 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
                                "training_counts": list(map(len, train_arrays)),
                                "validation_counts": list(map(len, validation_arrays)),
                                "toolkit_revision": TOOLKIT_REVISION,
+                               "architecture_metadata_version": 1,
+                               **_network_metadata(model, kind, labels, mean, scale, config),
                                "sampling": "equal class minibatches, training draws with replacement"})
     last_checkpoint = directory / "checkpoints" / "last.ckpt"
     resume = str(last_checkpoint) if last_checkpoint.exists() and not force and previous.get("signature") == signature else None

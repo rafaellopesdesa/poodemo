@@ -1,5 +1,43 @@
 # Validation
 
+## Notebook 03 density and MLE diagnostics (8 October 2026)
+
+The physics, run configuration, tag and trained-network behavior are unchanged.
+Existing checkpoints gain architecture metadata without changing their weights.
+
+- **102 tests passed, 11 skipped.** The skipped tests require optional JAX
+  inference dependencies not installed for this check. Real CPU PyTorch and
+  the pinned toolkit were installed for training tests: a two-epoch fit,
+  checkpoint reload, BCE value/gradient comparison and metadata enrichment
+  preserving checkpoint bytes all passed. The actual network has no dropout,
+  batch normalization, weight decay or extra loss penalty.
+- Reweighting tests retain deliberate normalization bias and probability mass
+  outside the plotting window. Calibration tests check equal class priors with
+  unequal sample counts and score/fraction covariance in the residual errors.
+  Sparse bins remain unavailable, not artificial zero-error agreement.
+- Closure tests compare the independent likelihood with the existing morphing
+  model; an oracle recovers mu=1 while an intentionally distorted density does
+  not. Observation mass is not renormalized. Tests also cover frozen workspace
+  normalizers, integration-node positivity, raw ratio mean/SE/ESS, local scan
+  refinement and rejection of a changed selector checkpoint.
+- The three added notebook code cells executed with an actual trained smoke
+  selector and all five toolkit ratio classifiers. A fresh bank generated
+  20,000 events per source; 35,000 selected S/B/NI mixture nodes supplied the
+  independent expectation and a separate Poisson sample retained 6,902 events.
+  Architecture JSON, ten reweighting/calibration figures, expectation
+  convergence and overview/zoom MLE scans were generated as PDF/PNG with CSV
+  tables. The rendered layouts were visually inspected.
+- Notebook 03 passes format and Python syntax validation; its new cells match
+  the notebook generator. Preexisting cells and all other notebooks are
+  preserved, including the user's saved outputs in notebooks 01–02.
+
+This reduced run validates execution and diagnostics, not production closure.
+Its undertrained ratios and small original quadrature produce visible biases,
+which the new plots retain. The independent validation samples never normalize
+the fitted model. The full production diagnostic budgets and the user's saved
+production networks have not been run here. The added independent likelihood
+fits use NumPy/SciPy on CPU; the existing JAX inference path is unchanged.
+
 ## Selected-distribution plots in notebook 02 (8 October 2026)
 
 Plot-only addition; no physics, training, configuration or tag changes.

@@ -693,6 +693,195 @@ not from the spline. The two plots answer different questions.
 '''
 
 
+
+NN_METADATA_INTRO = r"""
+### Classifier architecture and training metadata
+
+Each ratio classifier is an ordinary fully connected binary classifier. In
+production it has **3 inputs → 128 → 128 → 128 → 1 logit**, with a bias in
+each linear layer and **SiLU/Swish**, $a\mapsto a\,\sigma(a)$, after each
+hidden layer. The final layer is linear. The loss is the standard mean
+**binary cross entropy with logits** with labels 0=denominator and
+1=numerator and equal class minibatches. Thus $s=\sigma(\ell)$ and the raw
+ratio is $r=s/(1-s)=\exp(\ell)$. There is **no dropout, batch normalization,
+weight decay, L1/L2 penalty, or label smoothing**.
+
+The table below is read from the actual loaded networks, including the layer
+sizes, activations and parameter counts; smoke/custom runs can differ from the
+production dimensions. Metadata also records NAdam settings, the learning-rate
+schedule, training-only feature standardization, validation-based early stopping
+and best-checkpoint selection. The three production members are combined by
+averaging ratios, not logits. Mean normalization on separate calibration events
+is a later operation, not a term in the BCE loss or a guarantee of shape closure.
+
+Existing checkpoints are reused. Their `training.json` files are enriched, and
+the complete per-task/per-member report is saved as `results/03_architecture.json`.
+"""
+
+NN_METADATA_CODE = r'''
+from poodemo.pipeline import RATIO_TASKS
+from poodemo.training import load_predictor, training_metadata
+from poodemo.data import save_json
+
+architecture_reports, architecture_rows, layer_rows = {}, [], []
+for numerator, denominator in RATIO_TASKS:
+    task = f"{numerator}_over_{denominator}"
+    predictor = load_predictor(run.path("models", "ratios", task))
+    report = training_metadata(predictor)
+    architecture_reports[task] = report
+    members = report.get("members", [report])
+    for member_index, member in enumerate(members):
+        architecture = member["architecture"]
+        optimizer = member["optimizer"]
+        architecture_rows.append({
+            "ratio": f"{numerator}/{denominator}", "member": member_index,
+            "inputs": architecture["input_features"],
+            "hidden_layers": architecture["hidden_layers"],
+            "width": architecture["hidden_width"],
+            "activation": architecture["hidden_activation"],
+            "output": architecture["output_activation"],
+            "parameters": architecture["trainable_parameters"],
+            "loss": member["loss"]["name"], "optimizer": optimizer["type"],
+            "initial_lr": optimizer["defaults"]["lr"],
+            "dropout": member["regularization"]["dropout"],
+            "weight_decay": optimizer["parameter_group_weight_decay"],
+        })
+        layer_rows.extend({"ratio": f"{numerator}/{denominator}", "member": member_index,
+                           **layer} for layer in architecture["layers"])
+    del predictor
+save_json(run.path("results", "03_architecture.json"), architecture_reports)
+display(pd.DataFrame(architecture_rows))
+with pd.option_context("display.max_rows", None):
+    display(pd.DataFrame(layer_rows))
+print("Full optimizer, scheduler, preprocessing and checkpoint details:")
+example = architecture_reports[next(iter(architecture_reports))]
+example = example.get("members", [example])[0]
+print(json.dumps({key: example[key] for key in
+                 ("optimizer", "scheduler", "preprocessing", "checkpoint_selection")}, indent=2))
+'''
+
+RATIO_VALIDATION_INTRO = r"""
+### Independent density validation bank
+
+These diagnostics generate **new events**, apply the frozen selector from
+notebook 02, and reuse the trained ratio checkpoints. The bank is separate from
+training, early-stopping validation, calibration and workspace normalization.
+The production default is two million **generated** events per source
+(S, SBI, B, NI and NI up/down); selected counts are printed below. Generation
+is cached with the physics/selection identity and random seed. Re-running with
+the same settings reuses it. These controls are diagnostic budgets and do not
+change `RUN_NAME`, the model, or `CONFIG_OVERRIDES`.
+
+Each reweighting figure compares numerator events with denominator events
+weighted by the learned ratio, for all three coordinates. Lower panels show
+reweighted/target density with Monte Carlo uncertainty. The full sample
+counts define normalization; the displayed range is never renormalized to
+force agreement. Bins with too few target or reference events are flagged, not
+reported as successful closure.
+
+Calibration figures compare the mean predicted score $s=r/(1+r)$ to the
+observed numerator fraction using an equal class prior, with residual
+$f_{\rm numerator}-\langle s\rangle$ underneath. Both **raw** predictions and
+the existing **calibration-mean-normalized** predictions are shown. Calibration
+here is a diagnostic: these cells do not fit a new calibration map. Error bars
+describe the independent finite validation samples conditional on the trained
+network; they do not include training or calibration uncertainty.
+"""
+
+RATIO_VALIDATION_CODE = r'''
+from poodemo.closure_validation import prepare_validation_bank
+from poodemo.ratio_validation import plot_ratio_validation
+
+DIAGNOSTIC_N_PER_SAMPLE = 20_000 if MODE == "smoke" else 2_000_000
+DIAGNOSTIC_EDGES = np.linspace(-5., 6., 56)
+CALIBRATION_BINS = 20
+VALIDATION_LOG_SCALE = False  # Set True for logarithmic marginal-density panels.
+
+validation_bank = prepare_validation_bank(run, n_per_sample=DIAGNOSTIC_N_PER_SAMPLE)
+display(pd.DataFrame([
+    {"sample": name, "generated": validation_bank["generated_counts"][name],
+     "selected": len(sample)}
+    for name, sample in validation_bank["samples"].items()
+]))
+validation_predictors = {
+    f"{num}_over_{den}": load_predictor(run.path("models", "ratios", f"{num}_over_{den}"))
+    for num, den in RATIO_TASKS
+}
+density_validation = plot_ratio_validation(
+    validation_bank["samples"], validation_predictors,
+    run.path("plots", "03_validation"), results=run.path("results", "03_validation"),
+    edges=DIAGNOSTIC_EDGES, score_bins=CALIBRATION_BINS, log=VALIDATION_LOG_SCALE,
+)
+for figure in density_validation["figures"].values():
+    display(figure)
+    plt.close(figure)
+del validation_predictors
+print("Reweighting and calibration tables:")
+display(density_validation["reweighting"].head())
+display(density_validation["calibration"].head())
+'''
+
+CLOSURE_VALIDATION_INTRO = r"""
+### High-statistics expectation and MLE closure
+
+For a normalized target-to-reference density ratio, an independent denominator
+sample should satisfy
+\[
+\widehat{E_q[r]}_N=\frac{1}{N}\sum_{i=1}^{N}r(x_i)\longrightarrow 1.
+\]
+The convergence plot uses increasing, nested prefixes of the selected bank,
+with Monte Carlo standard errors and effective sample sizes saved in the
+table. Prefix estimates are correlated. Increasing statistics can reveal a
+persistent offset; it does not force an inaccurate learned ratio toward one.
+No mean correction is fitted to this bank.
+
+The unbinned likelihood diagnostic compares the analytical and learned models
+on an independent, simulation-weighted expectation at **$\mu_*=1$**, and on a
+separately generated high-statistics Poisson sample from SBI+NI. It shows
+NI-fixed and NI-profiled scans, a vertical line at one, and fitted $\hat\mu$
+values. A high-statistics expectation checks systematic MLE closure; an
+individual Poisson sample also fluctuates statistically. The auxiliary NI
+measurement is held at its nominal value. The learned-model self-Asimov scan
+later in the notebook is a separate consistency check.
+
+Workspace rates and shape-normalization constants remain frozen from the
+original workspace quadrature. The new data never normalize the fitted model.
+Therefore analytical closure itself has finite original-quadrature and new-bank
+uncertainty; learned-minus-analytical differences help isolate network errors.
+The Poisson-sample exposure is increased independently of the bank size and is
+reported with the selected observed count. Invalid learned intensities or fits
+are flagged; they are never clipped into a closing scan. Both interference
+branches are included in the fit search.
+
+These diagnostics can be expensive. Increase the controls below and the bank
+budget above to examine stability. All tables and PDF/PNG figures are saved;
+none of these cells retrain or recalibrate the networks.
+The independent-data fits use NumPy/SciPy on CPU; the standard toolkit/JAX
+scans below retain their configured backend. Both an overview and a zoom around
+the fitted minima are saved, with extra scan points near each minimum.
+"""
+
+CLOSURE_VALIDATION_CODE = r'''
+from poodemo.closure_validation import run_closure_validation
+
+CLOSURE_SCAN_POINTS = 17 if MODE == "smoke" else 81
+POISSON_GENERATED_EVENTS = 50_000 if MODE == "smoke" else 10_000_000
+CLOSURE_PROFILE_NI = True
+
+closure_validation = run_closure_validation(
+    run, validation_bank, scan_points=CLOSURE_SCAN_POINTS,
+    poisson_generated_events=POISSON_GENERATED_EVENTS, profile=CLOSURE_PROFILE_NI,
+)
+display(closure_validation["convergence"])
+display(closure_validation["fits"])
+display(pd.Series(closure_validation["poisson"], name="Independent Poisson sample"))
+print("Closure figures, tables and provenance:", closure_validation["directory"])
+for figure in closure_validation["figures"]:
+    display(figure)
+    plt.close(figure)
+'''
+
+
 def start(title, introduction):
     introduction = textwrap.dedent(introduction).strip()
     return [md(f"# {title}\n\n{introduction}"), md(SETUP_INTRO), code(BOOTSTRAP), code(COMMON_IMPORTS)]
@@ -1072,6 +1261,8 @@ def build():
         Gaussian amplitude away from its nominal and ±1 anchors.
         """),
         code("from poodemo.pipeline import train_ratios\n\nratio_diagnostics = train_ratios(run)\ndisplay(ratio_diagnostics)"),
+        md(NN_METADATA_INTRO),
+        code(NN_METADATA_CODE),
         md(r"""
         ### Validate ratios before interpreting the inference
 
@@ -1101,6 +1292,10 @@ def build():
         workflow check, and production closure must be demonstrated separately.
         """),
         code("from poodemo.pipeline import prepare_quadrature\n\nquadrature = prepare_quadrature(run)\nprint('Quadrature products:', list(quadrature))"),
+        md(RATIO_VALIDATION_INTRO),
+        code(RATIO_VALIDATION_CODE),
+        md(CLOSURE_VALIDATION_INTRO),
+        code(CLOSURE_VALIDATION_CODE),
         md(r"""
         ### Asimov integration and profiling
 
