@@ -553,7 +553,7 @@ The full 165-million-event generation and production ratio training are separate
 
 Run 08 then 09 in fresh runtimes using the same completed `RUN_NAME`. No new
 samples or training are required. Notebook 08 mirrors 06's current binning and
-plot controls; 09 exposes `SPLINE_BINS` (currently 60). Results have the `reference_ratio_` prefix and
+plot controls; 09 exposes `SPLINE_BINS` (currently 12). Results have the `reference_ratio_` prefix and
 figures use `08_`/`09_`, leaving score and S-reference studies intact.
 
 The analytical observable is `sigmoid(a * log(R)) = R**a/(1+R**a)`, where

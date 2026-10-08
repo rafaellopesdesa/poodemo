@@ -53,7 +53,7 @@ These are event-yield plots per bin, not densities divided by bin width.
 SPLINE_WARNING = r"""
 ### Interpolation at the collapsed anchor
 
-Use the editable **`SPLINE_BINS`** setting (default 60), with the same power
+Use the editable **`SPLINE_BINS`** setting (default 12), with the same power
 `REFERENCE_RATIO_A` as notebook 08. The saved 08 study is checked for a matching
 power and bin-edge policy; rerun 08 first if either has changed. The PCHIP
 method and anchor settings are retained. The grid additionally includes eta=1, even if a
@@ -136,7 +136,7 @@ def configure_reference_cells(cells):
                 match = re.search(r'n_bins=(\d+)', source)
                 if match and 'SPLINE_BINS =' not in source:
                     source = source.replace('splines = run_spline_study',
-                                            f'SPLINE_BINS = {match.group(1)}  # Must appear in notebook 08 BIN_COUNTS.\n'
+                                            'SPLINE_BINS = 12  # Must appear in notebook 08 BIN_COUNTS.\n'
                                             'splines = run_spline_study')
                     source = source.replace(f'n_bins={match.group(1)}', 'n_bins=SPLINE_BINS')
             cell.outputs = []
