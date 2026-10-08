@@ -211,9 +211,13 @@ def run_estimator_study(run, *, observable="score"):
     morph/integration approximation, as well as compression and binning.
     The Fisher width is not a global interval across possible secondary minima.
     """
-    from .pipeline import prepare_quadrature, observable_metadata, observable_values, mu_grid
+    from .pipeline import (prepare_quadrature, observable_metadata, observable_values,
+                           observable_configuration, observable_bin_edges, _positive_study_grid)
+    from .data import save_json
 
     options = observable_metadata(observable)
+    settings = observable_configuration(run, observable)
+    etas = _positive_study_grid(run)
     quad = prepare_quadrature(run)
     parent = TemplateLikelihood(quad["nominal"], quad["down"], quad["up"],
                                 quad["weights"], quad["truth"])
@@ -222,9 +226,8 @@ def run_estimator_study(run, *, observable="score"):
         raise ValueError("A local Asimov width requires truth inside the mu fit bounds")
     if parent.n_nuisance != 1:
         raise ValueError("This study expects the single NI nuisance")
-    etas = mu_grid(run)
     n_bins = max(run.config["bin_counts"])
-    edges = np.linspace(0., 1., n_bins + 1)
+    edges = observable_bin_edges(n_bins, observable)
     full_information = local_asimov_information(parent, truth)
     baselines = _unbinned_baselines(run, parent, full_information)
     rows = []
@@ -239,8 +242,13 @@ def run_estimator_study(run, *, observable="score"):
                          "morph_order": "unbinned", **baselines[syst]})
         print(f"Estimator and local-width study at eta={eta:.3g} ready", flush=True)
     result = pd.DataFrame(rows)
+    for key, value in settings.items():
+        result[key] = value
     filename = f"{options['prefix']}estimator_eta.csv"
     path = run.path("results", filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(path, index=False)
+    save_json(run.path("results", f"{options['prefix']}estimator_config.json"),
+              {**settings, "n_bins": int(n_bins), "bin_edges": edges.tolist(),
+               "scan_grid": etas.tolist(), "asimov_mu": truth})
     return result

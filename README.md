@@ -553,17 +553,38 @@ The full 165-million-event generation and production ratio training are separate
 
 Run 08 then 09 in fresh runtimes using the same completed `RUN_NAME`. No new
 samples or training are required. Notebook 08 mirrors 06's current binning and
-plot controls; 09 uses 20 bins. Results have the `reference_ratio_` prefix and
+plot controls; 09 exposes `SPLINE_BINS` (currently 60). Results have the `reference_ratio_` prefix and
 figures use `08_`/`09_`, leaving score and S-reference studies intact.
 
-The analytical observable is `R/(1+R)`, where
+The analytical observable is `sigmoid(a * log(R)) = R**a/(1+R**a)`, where
 `R = r(x;eta)/r(x;1) = p_selected(x;eta,0)/p_selected(x;1,0)`.
+Set `REFERENCE_RATIO_A` in the configuration cell of both notebooks (default
+100); `a=1` reproduces the original transform. A larger positive power spreads
+values away from 0.5 while retaining the range [0,1] and event ordering. The
+power is fixed across eta and likelihood fits. Notebook 08 displays distributions
+at eta = 0.0, 0.3, 0.6, 1.0 and 1.5. Eta=0 is a plotting anchor; the score/Fisher
+scan continues to use positive values.
+
 It preserves the continuous pairwise comparison with truth 1 at fixed NI.
-Finite uniform binning and NI profiling have no corresponding optimality
+Finite binning and NI profiling have no corresponding optimality
 guarantee. At eta=1 it is exactly 1/2: the frozen experiment retains only rate
-information. Notebook 08 explicitly diagnoses the collapse. Notebook 09 keeps
-the original PCHIP study and highlights its inability to reproduce discontinuous
-bin yields across that anchor; inspect off-anchor interpolation errors.
+information for every finite positive a. All reference-ratio histograms use
+`observable_bin_edges`, placing 0.5 strictly inside a bin. Odd counts retain
+uniform edges; for even counts the internal edges shift left by half a nominal
+bin width, preserving the requested count and [0,1] endpoints. Central bins
+keep equal widths with 0.5 at a bin center (for at least four bins); only the
+endpoint widths differ. Plots show expected events per bin.
+
+Notebook 08 explicitly diagnoses the collapse. Notebook 09 uses the same edges
+for its direct and PCHIP templates. A finite-bin rate-only plateau can remain
+close to eta=1, and stretching can demand more interpolation anchors outside
+that plateau; inspect off-anchor errors. Saved 08 study metadata must match
+the power and bin-edge policy in 09, otherwise it requests a fresh 08 study.
+
+For this observable update, refresh the source checkout/restart the runtime
+and rerun **08, then 09**, using the same `paper-distinct-s-v4` run. Notebooks
+01–07 and the trained networks need no rerun. Changing `REFERENCE_RATIO_A`
+also requires rerunning 08 and 09 with the same value; no new run name is needed.
 
 Rebuild only these new notebooks with `python scripts/build_reference_notebooks.py`.
 The builder reads the current 06/07 cell sources and clears outputs in 08/09;

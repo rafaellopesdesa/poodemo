@@ -1,5 +1,31 @@
 # Validation
 
+## Reference-ratio stretch and binning (8 October 2026)
+
+Notebook 08 now displays eta = 0, 0.3, 0.6, 1 and 1.5, and both 08/09 expose
+`REFERENCE_RATIO_A=100`: `z=expit(a*log(R))`. The original transform is a=1.
+The existing v4 data and trained models are reused; rerun only 08 then 09.
+
+- All histogram, estimator and spline paths share the reference bin edges.
+  Odd counts are uniform. Even counts shift internal edges left by half a
+  nominal width, keeping the count and endpoints, with 0.5 inside one bin.
+  Interior widths stay uniform; only endpoint widths differ. Tests put 0.5
+  and its two neighboring floating-point values into the same bin.
+- The full suite passed **145 tests**, with 11 optional JAX checks skipped.
+  After refining the even-bin grid, all **43 observable/diagnostic tests**
+  passed again, including width/center assertions. Tests cover power/order,
+  exact eta=1 collapse, eta=0 distributions, positive derivative scan grids,
+  and rejection of missing or incompatible notebook-08 products by notebook 09.
+- Both notebooks validate and their code cells parse. Generated controls agree
+  with the checked-in notebooks. The actual distribution and collapse cells
+  execute on an independent bank of 36,178 selected S/B/NI points; all five
+  panels and their PDF rendering were inspected. No density model was retrained.
+- Actual SciPy histogram/spline fits on that bank converged with a=100 and
+  60 bins. Coarse eta grids showed appreciable off-anchor interpolation error;
+  a dense grid comparable to production substantially reduced it. These checks
+  omit the saved JAX unbinned overlays and do not establish production-level
+  interpolation precision. Keep inspecting notebook 09's off-anchor diagnostics.
+
 ## Larger NI bank and ratio retraining v4 (8 October 2026)
 
 New run: `paper-distinct-s-v4`, schema 7. Physics amplitudes and physical yields

@@ -63,8 +63,8 @@ def test_default_score_observable_is_unchanged(selected_quadrature):
     assert pipeline.observable_metadata("ratio")["prefix"] == "ratio_"
 
 
-@pytest.mark.parametrize("eta", [0., -1., np.nan, np.inf])
-def test_ratio_rejects_noninterior_scan_hypotheses(selected_quadrature, eta):
+@pytest.mark.parametrize("eta", [-1., np.nan, np.inf])
+def test_ratio_rejects_unphysical_plot_hypotheses(selected_quadrature, eta):
     run, quad = selected_quadrature
     with pytest.raises(ValueError, match="eta"):
         pipeline.observable_values(run, quad, eta, "ratio")
