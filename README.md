@@ -122,6 +122,12 @@ SBI(mu)+NI stacks at mu=0,0.5,1,2 in both scales. Exact Gaussian marginal bin
 integrals show tails and preserve coherent positivity; optional generated MC
 markers check the sampling. Figures are saved as PDF/PNG.
 
+Notebook 02 adds the same process overlays and coherent SBI(mu)+NI stacks after
+frozen preselection, using the common selected quadrature for physical yields.
+They retain linear/log views and save separate `02_selected_...` PDF/PNG files.
+After setup, the new plot cell can reuse completed preselection without training
+or fitting again. The physics configuration, run name and version tag are unchanged.
+
 The physical expected-yield exposure is separate from Monte Carlo counts;
 there are still six generated samples and five ratio-training tasks. Use the
 new run name `paper-distinct-s-v3` and rerun generation and training. Earlier

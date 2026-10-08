@@ -1,7 +1,8 @@
 """ATLAS-style process plots with exact, positive coherent marginal templates.
 
-No experiment label is added. The Gaussian amplitude model permits exact bin
-integrals, avoiding cancellations between independently generated MC samples.
+No experiment label is added. Before selection the Gaussian amplitude model
+permits exact bin integrals. After selection a common positive quadrature
+avoids cancellations between independently generated MC samples.
 """
 from __future__ import annotations
 
@@ -57,9 +58,52 @@ def marginal_component_yields(model, coordinate, edges, alpha_ni=0.):
     return np.stack((primitive["S"], np.maximum(sbi, 0.), primitive["B"], primitive["NI"]))
 
 
-def coherent_marginal_yields(model, coordinate, edges, mu):
+def _selected_plot_fields(quadrature, coordinate, edges):
+    """Validate the selected integration sample used by the likelihood studies."""
+    edges = np.asarray(edges, dtype=float)
+    x = np.asarray(quadrature["x"])
+    weights = np.asarray(quadrature["weights"])
+    nominal = np.asarray(quadrature["nominal"])
+    if coordinate not in (0, 1, 2):
+        raise ValueError("coordinate must be 0, 1, or 2")
+    if (edges.ndim != 1 or len(edges) < 2 or np.any(np.isnan(edges))
+            or np.any(np.diff(edges) <= 0)):
+        raise ValueError("edges must be a strictly increasing one-dimensional array")
+    if (x.ndim != 2 or x.shape[1] != 3 or not len(x)
+            or weights.shape != (len(x),) or nominal.shape != (4, len(x))):
+        raise ValueError("Selected quadrature must contain x=(N,3), weights=(N,), nominal=(4,N)")
+    if (np.any(~np.isfinite(x)) or np.any(~np.isfinite(weights))
+            or np.any(~np.isfinite(nominal)) or np.any(weights < 0)
+            or np.any(nominal < 0) or np.any(nominal @ weights <= 0)):
+        raise ValueError("Selected quadrature must have positive finite process integrals and nonnegative weights")
+    return x[:, coordinate], weights, nominal, edges
+
+
+def selected_marginal_component_yields(quadrature, coordinate, edges):
+    """Selected S/SBI/B/NI bin yields from a shared integration sample.
+
+    These are finite-quadrature estimates, with acceptance and physical yield
+    factors retained. Events outside the plotted edges are not renormalized.
+    """
+    x, weights, nominal, edges = _selected_plot_fields(quadrature, coordinate, edges)
+    return np.stack([np.histogram(x, edges, weights=weights * density)[0]
+                     for density in nominal])
+
+
+def coherent_marginal_yields(model, coordinate, edges, mu, *, quadrature=None):
     """Return the positive coherent SBI(mu) and nominal NI bin counts."""
     coefficients = model.coefficients(mu)  # Also checks finite, nonnegative mu.
+    if quadrature is not None:
+        x, weights, nominal, edges = _selected_plot_fields(quadrature, coordinate, edges)
+        terms = coefficients[:3, None] * nominal[:3]
+        coherent = terms.sum(axis=0)
+        tolerance = 2048 * np.finfo(float).eps * np.abs(terms).sum(axis=0)
+        if np.any(coherent < -tolerance):
+            raise ValueError("Selected coherent physical intensity is negative")
+        # Combine on common nodes BEFORE integrating, so independent sample
+        # fluctuations cannot create negative coherent bins.
+        return (np.histogram(x, edges, weights=weights * np.maximum(coherent, 0.))[0],
+                np.histogram(x, edges, weights=weights * nominal[3])[0])
     components = marginal_component_yields(model, coordinate, edges)
     terms = coefficients[:3, None] * components[:3]
     coherent = terms.sum(axis=0)
@@ -77,10 +121,12 @@ def _save(fig, output, stem):
             fig.savefig(output / f"{stem}.{extension}", bbox_inches="tight", dpi=160)
 
 
-def plot_process_marginals(model, edges, samples=None, output=None):
+def plot_process_marginals(model, edges, samples=None, output=None, *, quadrature=None):
     """Normalized process overlays, linear above logarithmic for each variable.
 
-    Exact model bin averages are shown as steps. Optional sampled events are
+    Exact inclusive averages or selected quadrature estimates form the steps.
+    With ``quadrature``, samples must already pass the same frozen cut.
+    Optional sampled events are
     overlaid as markers with Poisson MC errors; normalization uses the complete
     plotting sample, so plotting-range losses are not normalized away.
     """
@@ -91,19 +137,24 @@ def plot_process_marginals(model, edges, samples=None, output=None):
     if not np.all(np.isfinite(edges)):
         raise ValueError("Plot edges must be finite")
     colors = ("#D55E00", "#0072B2", "#009E73", "#CC79A7")
+    rates = ([model.component_yield(name) for name in COMPONENTS] if quadrature is None
+             else np.asarray(quadrature["nominal"]) @ np.asarray(quadrature["weights"]))
     with plt.style.context(hep.style.ATLAS):
         fig, axes = plt.subplots(2, 3, figsize=(17, 9), sharex="col", sharey="row")
         max_density = 0.
         for coordinate in range(3):
-            counts = marginal_component_yields(model, coordinate, edges)
-            for name, expected, color in zip(COMPONENTS, counts, colors):
-                density = expected / model.component_yield(name) / np.diff(edges)
+            counts = (marginal_component_yields(model, coordinate, edges) if quadrature is None
+                      else selected_marginal_component_yields(quadrature, coordinate, edges))
+            for name, expected, color, rate in zip(COMPONENTS, counts, colors, rates):
+                density = expected / rate / np.diff(edges)
                 max_density = max(max_density, float(np.max(density)))
                 for ax in axes[:, coordinate]:
                     hep.histplot(density, edges, ax=ax, color=color, label=name,
                                  histtype="step", linewidth=1.8)
                 if samples is not None:
                     points = np.asarray(samples[name])
+                    if not len(points):
+                        continue
                     observed = np.histogram(points[:, coordinate], edges)[0]
                     scale = len(points) * np.diff(edges)
                     for ax in axes[:, coordinate]:
@@ -122,20 +173,23 @@ def plot_process_marginals(model, edges, samples=None, output=None):
         axes[0, 0].set_ylabel("Normalized marginal density", fontsize=15)
         axes[1, 0].set_ylabel("Normalized marginal density", fontsize=15)
         axes[0, 0].legend(fontsize=13, ncol=2)
-        description = "Full phase space, before preselection. Steps: exact model."
+        description = ("Full phase space, before preselection. Steps: exact model." if quadrature is None
+                       else "After frozen preselection. Steps: common quadrature estimate.")
         if samples is not None:
-            description += " Markers: generated MC subset."
+            description += (" Markers: generated MC subset." if quadrature is None
+                            else " Markers: selected MC subset.")
         fig.suptitle(description, fontsize=16, y=1.)
         fig.tight_layout()
-        _save(fig, output, "01_process_marginals")
+        _save(fig, output, "01_process_marginals" if quadrature is None else "02_selected_process_marginals")
     return fig, axes
 
 
-def plot_coherent_stacks(model, edges, mus=(0., .5, 1., 2.), *, log=False, output=None):
+def plot_coherent_stacks(model, edges, mus=(0., .5, 1., 2.), *, log=False, output=None, quadrature=None):
     """Stack coherent SBI(mu) plus NI with exact expected events per bin.
 
     Signed S/SBI/B basis contributions are combined before plotting. All
-    coordinates are integrated over the other two dimensions, without cuts.
+    coordinates are integrated over the other two dimensions. Passing the
+    selected ``quadrature`` includes the frozen classifier cut and acceptance.
     """
     import matplotlib.pyplot as plt
     import mplhep as hep
@@ -152,7 +206,7 @@ def plot_coherent_stacks(model, edges, mus=(0., .5, 1., 2.), *, log=False, outpu
         for coordinate in range(3):
             max_height = 0.
             for mu, ax in zip(mus, axes[coordinate]):
-                coherent, ni = coherent_marginal_yields(model, coordinate, edges, mu)
+                coherent, ni = coherent_marginal_yields(model, coordinate, edges, mu, quadrature=quadrature)
                 hep.histplot([ni, coherent], edges, ax=ax, stack=True, histtype="fill",
                              color=["#B8C7DF", "#E69F00"], edgecolor="black", linewidth=.5,
                              label=["NI", r"Coherent SBI$(\mu)$"])
@@ -170,8 +224,10 @@ def plot_coherent_stacks(model, edges, mus=(0., .5, 1., 2.), *, log=False, outpu
         handles, labels = axes[0, 0].get_legend_handles_labels()
         fig.legend(handles, labels, fontsize=13, ncol=2, loc="upper center",
                    bbox_to_anchor=(.5, .97))
-        fig.suptitle("Full phase space, before preselection; exact marginal bin integrals",
+        fig.suptitle("Full phase space, before preselection; exact marginal bin integrals" if quadrature is None
+                     else "After frozen preselection; common-quadrature expected bin yields",
                      fontsize=16, y=1.)
         fig.tight_layout(rect=(0, 0, 1, .94))
-        _save(fig, output, "01_coherent_stacks_log" if log else "01_coherent_stacks_linear")
+        prefix = "01_coherent_stacks" if quadrature is None else "02_selected_coherent_stacks"
+        _save(fig, output, prefix + ("_log" if log else "_linear"))
     return fig, axes

@@ -1,5 +1,24 @@
 # Validation
 
+## Selected-distribution plots in notebook 02 (8 October 2026)
+
+Plot-only addition; no physics, training, configuration or tag changes.
+
+- Reuses the common positive quadrature after the frozen selection. Shapes
+  divide by full selected rates; stacks keep accepted yields and combine
+  coherent intensities before histogramming. Inclusive notebook-01 behavior
+  and output names are preserved.
+- **10 plotting tests passed**, including selected yields, finite-window tail
+  losses, mu=0/B and mu=1/SBI identities, unchanged NI, positivity and an
+  independent complex-amplitude comparison near destructive cancellation.
+- The actual new notebook cell executed with a 30,000-event per component
+  Gaussian sample and a fixed analytical cut, yielding 54,148 selected
+  integration nodes. Only loading the trained selector/cache was substituted
+  by the analytical cut in this check. It produced six PDF/PNG files and the
+  selected-yield CSV; rendered process and stack layouts were inspected.
+- Notebook 02 validates and all its code cells parse. Existing notebook cells
+  and outputs are retained, and the generator includes the two added cells.
+
 ## Distinct-signal benchmark and notebook 01 (8 October 2026)
 
 Fresh run name: `paper-distinct-s-v3` (schema 6). Samples and networks from the

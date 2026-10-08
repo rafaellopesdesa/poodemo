@@ -961,6 +961,62 @@ def build():
         plt.show()
         '''),
         md(r"""
+        ### Process shapes and coherent stacks after preselection
+
+        These are the notebook-01 views after the **same frozen classifier cut**:
+        normalized S/SBI/B/NI marginals with linear/log axes, plus coherent SBI(mu)+NI
+        stacks at mu=0,0.5,1,2 in both scales. Styling uses mplhep without an ATLAS label.
+
+        Steps use the common held-out integration sample, with the selected analytical
+        process densities evaluated on its weighted nodes. Unlike the inclusive plots,
+        these selected marginal integrals are finite-quadrature estimates. Each shape
+        is divided by its complete selected yield, not by the yield within the plotting
+        window. Markers show selected integration-sample events; they can overlap the
+        quadrature sample and are not an independent closure test.
+
+        The stacks retain physical accepted yields. Coherent terms are combined on
+        common nodes before histogramming; signed S/SBI/B terms are never stacked
+        individually. At mu=0 the coherent layer is B; NI stays fixed. Changing mu does
+        not retrain or move the selection cut. The table reports selected yields over
+        all coordinates, including events outside the plotting window.
+
+        Once preselection has completed, this cell can run after setup without rerunning
+        training or fits. It saves `02_selected_...` PDF/PNG figures and a yield CSV,
+        leaving notebook-01 figures intact.
+        """),
+        code(r'''
+        from poodemo.data import selected_split
+        from poodemo.pipeline import prepare_quadrature
+        from poodemo.plotting import plot_process_marginals, plot_coherent_stacks
+
+        PLOT_MAX_EVENTS = 100_000  # Per process; only controls optional MC markers.
+        PLOT_EDGES = np.linspace(-5., 6., 89)
+        STACK_MUS = [0., 0.5, 1., 2.]
+        SHOW_MC_MARKERS = True
+
+        selected_quad = prepare_quadrature(run)  # Reuses the saved frozen selector and cache.
+        selected_plot_samples = ({
+            process: selected_split(run, process, "integration")[:PLOT_MAX_EVENTS]
+            for process in ["S", "SBI", "B", "NI"]
+        } if SHOW_MC_MARKERS else None)
+        plot_process_marginals(run.model, PLOT_EDGES, samples=selected_plot_samples,
+                               quadrature=selected_quad, output=ROOT / "plots")
+        plt.show()
+        for log_y in [False, True]:
+            plot_coherent_stacks(run.model, PLOT_EDGES, mus=STACK_MUS, log=log_y,
+                                 quadrature=selected_quad, output=ROOT / "plots")
+            plt.show()
+
+        selected_rates = selected_quad["nominal"] @ selected_quad["weights"]
+        selected_yields = pd.DataFrame([
+            {"mu": mu, "coherent_SBI": run.model.coefficients(mu)[:3] @ selected_rates[:3],
+             "NI": selected_rates[3], "total": run.model.coefficients(mu) @ selected_rates}
+            for mu in STACK_MUS
+        ])
+        display(selected_yields)
+        selected_yields.to_csv(ROOT / "results" / "02_selected_yields.csv", index=False)
+        '''),
+        md(r"""
         ### What to inspect
 
         Compare the achieved S/NI ratio with the target and inspect the retained
