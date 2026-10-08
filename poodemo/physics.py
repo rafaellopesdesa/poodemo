@@ -52,11 +52,11 @@ class PhysicsModel:
     ``arccos(phase_cos)``.  At the default phase, destructive interference
     cannot create exact zeros in ``SBI``.  ``exposure`` scales every yield.
 
-    S and B have similar, distinct shapes so their destructive interference
-    leaves a nearby second likelihood basin that shape information only partly
-    lifts. The phase puts that basin near mu=0.5 for truth mu=1; the larger
-    exposure makes the shallow intervening barrier visible without changing
-    the number of generated Monte Carlo events.
+    S is displaced and narrower than B, while the background-dominated SBI
+    shape remains close to B. The destructive phase retains a second
+    likelihood basin below mu=1, without nearly identifying all three shapes.
+    Exposure controls the visible likelihood scale, independently of the
+    generated Monte Carlo sample size.
     The sole nuisance displaces the NI Gaussian mean by 30% of the norm
     of its nominal mean, toward S in the paper benchmark. S, B and
     their coherent SBI sum remain fixed under this variation.
@@ -65,16 +65,16 @@ class PhysicsModel:
     lambda_s: float = 100.0
     lambda_b: float = 1000.0
     lambda_ni: float = 10000.0
-    exposure: float = 2000.0
-    phase_cos: float = -0.273
+    exposure: float = 50.0
+    phase_cos: float = -0.24
     mean_s: tuple[float, ...] = (1.5, 1.1, 0.7)
-    mean_b: tuple[float, ...] = (1.4762221822829635, 1.083015844487831, 0.6932063377951324)
+    mean_b: tuple[float, ...] = (1.2225921266211124, 0.9018515190650804, 0.6207406075560321)
     mean_ni: tuple[float, ...] = (-0.6, -0.4, 0.1)
     cov_s: tuple[tuple[float, ...], ...] = (
         (0.72, 0.18, 0.06), (0.18, 0.64, 0.10), (0.06, 0.10, 0.81)
     )
     cov_b: tuple[tuple[float, ...], ...] = (
-        (0.72324, 0.18081, 0.06027), (0.18081, 0.64288, 0.10045), (0.06027, 0.10045, 0.813645)
+        (0.9, 0.225, 0.075), (0.225, 0.8, 0.125), (0.075, 0.125, 1.0125)
     )
     cov_ni: tuple[tuple[float, ...], ...] = (
         (1.35, -0.15, 0.12), (-0.15, 1.10, 0.22), (0.12, 0.22, 1.25)

@@ -7,7 +7,7 @@ Drive; the source lives in this repository.
 The nearby-minimum benchmark makes secondary-minimum and nuisance effects
 visible. It is an illustrative toy, not a numerical reproduction of an ATLAS
 measurement. The generating value is $\mu_*=1$, with a secondary branch designed
-to lie near $\mu\simeq0.5$.
+to lie between zero and one while S has a visibly distinct shape.
 
 | Notebook | Purpose | Open in Colab |
 |---|---|---|
@@ -31,9 +31,9 @@ to lie near $\mu\simeq0.5$.
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
    The other notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
-   `RUN_NAME = "paper-nearby-v2"` and `MODE = "production"`. For an initial
+   `RUN_NAME = "paper-distinct-s-v3"` and `MODE = "production"`. For an initial
    short check, choose `MODE = "smoke"` and a distinct run name such as
-   `paper-nearby-smoke-v2`.
+   `paper-distinct-s-smoke-v3`.
    Computational budgets can be changed through `CONFIG_OVERRIDES`, for example
    `{"quadrature_per_process": 500_000, "epochs": 150}`. Use identical overrides
    in every notebook and a new run name when changing the configuration.
@@ -71,7 +71,7 @@ Use a new run name when changing the configuration: incompatible saved settings
 are rejected rather than silently mixed.
 
 For this changed physics benchmark, use the new run directory
-`paper-nearby-v2` and rerun notebooks 1–5. Schema-5 manifests prevent reuse
+`paper-distinct-s-v3` and rerun notebooks 1–9. Schema-6 manifests prevent reuse
 of the earlier physics configuration.
 If an earlier version was already run in Colab, start a fresh runtime, or
 refresh `/content/poodemo` and restart the runtime, so that the new source is
@@ -101,18 +101,35 @@ $$
 
 These are Gaussian wavefunctions. Inclusive yields, the destructive phase,
 means, and correlated covariance matrices are displayed in notebook 1 and
-recorded in `run.json`. S and B shapes are deliberately close to make the
-interference ambiguity visible. The SBI template is a positive process with intensity
+recorded in `run.json`. S is displaced to larger means and has narrower widths than B,
+while SBI stays close to B. The destructive phase retains a second basin below 1. The SBI template is a positive process with intensity
 \(D_{SBI}=|A_S+A_B|^2\). Its integral is calculated analytically, including
 interference, and is reported rather than assigned an independent normalization.
 NI is incoherent.
 
-Relative to the earlier distant-branch benchmark, the destructive phase has
-smaller magnitude and S/B shapes are even more similar. The expected exposure
-is increased to keep the barrier between the nearby branches visible. Exposure
-scales physical event yields, preserving the process-yield ratios; it does not
-increase the five-million-event Monte Carlo samples. Notebook 1 prints the
-exposure multiplier and the actual inclusive yields.
+The distinct-signal benchmark uses exposure 50, phase cosine -0.24 and a
+background covariance 1.25 times the signal covariance. The B mean is displaced
+by 0.35 along the negative NI-nuisance direction. The normalized full-space
+S/B total-variation distance is approximately 17%, versus 0.4% for SBI/B.
+With an independently calibrated ideal selector, the secondary minima are near
+mu=0.120 (NI fixed) and 0.069 (NI profiled); the primary is at 1. The second
+basin also exists before selection. Production trained-selector results may
+shift these values. See `VALIDATION.md` and `validation/distinct_s_v3.json`.
+
+Notebook 01 now shows mplhep ATLAS-style histograms without an ATLAS label:
+normalized process overlays with both linear/log axes, and physical coherent
+SBI(mu)+NI stacks at mu=0,0.5,1,2 in both scales. Exact Gaussian marginal bin
+integrals show tails and preserve coherent positivity; optional generated MC
+markers check the sampling. Figures are saved as PDF/PNG.
+
+The physical expected-yield exposure is separate from Monte Carlo counts;
+there are still six generated samples and five ratio-training tasks. Use the
+new run name `paper-distinct-s-v3` and rerun generation and training. Earlier
+runs remain available. Notebook output cells are cleared to avoid presenting
+old-physics results under the new defaults, while user binning choices
+in notebooks 02–09 are retained (the standard zoom lower bound is extended to 0.02). The scan now begins at 0.02 and the score scale
+is 0.04 to cover the lower branch and avoid saturating its broader score.
+
 
 The physical intensity is
 
@@ -144,13 +161,11 @@ analytical likelihood, separately with NI fixed and profiled. Any secondary
 minimum must be established from those curves rather than inferred from the
 sign of interference alone.
 
-For the target partner near $0.5$ with truth $1$, the rate relation is
-$-\lambda_I/\lambda_S\simeq1+\sqrt{0.5}$. Its turnover lies near
-$(-\lambda_I/(2\lambda_S))^2\simeq0.729$, between the two branches.
-The score-distribution panels choose their anchors dynamically from the
-selected-rate turnover and partner, so they display this nearby structure.
-These are rate landmarks; the measured full-likelihood minima can move because
-of shape information and NI profiling.
+For the distinct-signal benchmark the rate turnover is
+$(-\lambda_I/(2\lambda_S))^2$. This and the equal-rate partner guide the
+distribution plots, but shape information and NI profiling move the actual
+likelihood extrema. The scan starts at 0.02 to include the lower secondary
+branch; zoom controls in notebooks 03–09 also include that branch.
 The analytical landscape figure defaults to $0\le t_A\le10$ so that the
 nearby minima and barrier remain visible; set `LANDSCAPE_Q_MAX = None` in
 notebook 3 for automatic vertical scaling. The overview plot and scan tables
@@ -249,7 +264,7 @@ use analytical generating weights, so `analytic unbinned` remains their
 like-for-like compression benchmark. The fit table records `asimov_source`,
 the generating value and event count, and the objective at the generating point.
 
-The nearby branches and increased exposure make density-ratio precision more
+The cancellation between coherent components makes density-ratio precision more
 demanding: small neural shape errors can produce appreciable likelihood
 distortions. Analytical benchmark agreement does not establish closure of the
 trained networks. The five-epoch smoke fit is a workflow check; production
@@ -390,7 +405,7 @@ claiming a physics-level closure precision.
 ```bash
 python -m pip install -r requirements-colab.txt
 python -m pip install -e '.[dev]'
-export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-nearby-smoke-v2
+export POODEMO_ROOT=/absolute/path/to/poodemo-runs/paper-distinct-s-smoke-v3
 export POODEMO_MODE=smoke
 ```
 
@@ -459,11 +474,11 @@ Notebook sources are maintained in `scripts/build_notebooks.py`:
 ```bash
 python scripts/build_notebooks.py
 python -m pytest
-python scripts/smoke.py --root /tmp/poodemo-paper-nearby-smoke
+python scripts/smoke.py --root /tmp/poodemo-distinct-s-smoke
 ```
 
 The notebook generator produces clean notebooks. This intentional physics
-revision clears earlier numerical outputs so that all five notebooks can be
+revision clears earlier numerical outputs so that all nine notebooks can be
 rerun consistently; targeted runtime fixes normally preserve user outputs. Toolkit
 source is pinned to commit `fc09848fc6540fd32310faebbe9db6eea7ecd17b`;
 `requirements-colab.txt` includes the dependencies its package metadata does

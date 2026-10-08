@@ -1,5 +1,49 @@
 # Validation
 
+## Distinct-signal benchmark and notebook 01 (8 October 2026)
+
+Fresh run name: `paper-distinct-s-v3` (schema 6). Samples and networks from the
+previous physics model must be regenerated/retrained. Old run directories are
+untouched; notebook output cells are cleared and their source settings retained,
+except for the shared run name and scan zoom lower bound.
+
+- B mean is shifted by -0.35 along the NI direction; cov_B=1.25*cov_S,
+  phase_cos=-0.24, exposure=50. S/B full-space total-variation distance is about
+  0.17, versus 0.004 for SBI/B. There are still six samples and five ratio tasks.
+- Independent ideal-selector integration uses 2^16 Sobol nodes per S/B/NI
+  process, scramble seeds 1011–1013, and the frozen threshold 0.2843 calibrated
+  independently with 2^18 nodes per process (seeds 900–902). It retains 118,529
+  quadrature nodes, approximately 91.5% of S, and selected S/NI=0.09997.
+- Fixed-NI secondary minimum: mu=0.11977, q=4.2902; barrier q=7.3276.
+  Profiled-NI secondary: mu=0.06889, q=2.3134; barrier q=7.1063.
+  The primary remains at mu=1. Local sigma_mu increases 0.13759→0.14775.
+  The complete selected scan is saved in `validation/distinct_s_v3.json`.
+- A separate full-phase-space calculation also has secondary minima at about
+  0.126 (NI fixed) and 0.111 (profiled). The effect is not created by selection.
+  These checks use analytical selection, not a retrained network; the actual
+  production selection and learned fits can shift the extrema.
+- All five notebook-01 scientific code cells executed on a fresh 12,000-event
+  per sample run. The process overlay and linear/log coherent stacks produced
+  six PDF/PNG outputs; all were rendered and visually inspected. No ATLAS label
+  is added. The stacks use exact Gaussian marginal bin integrals to avoid
+  negative bins from subtraction of independent MC samples.
+- **77 tests passed, 12 skipped**. Skipped tests require optional toolkit,
+  training or JAX dependencies unavailable in this environment. New plotting
+  checks cover full-space integrals, positivity, mu=0 yielding B, and an
+  independent MC marginal check. Benchmark tests verify shape contrast and
+  the lifted secondary basin with and without the constrained NI nuisance.
+
+The numerical benchmark can be regenerated with:
+
+```bash
+python scripts/validate_benchmark.py --threshold .2843 --power 16 --seed 1011 --output benchmark_validation.json
+```
+
+Production training and notebooks 02–09 have not been rerun for this model.
+The scan starts at 0.02. The score scale changes to 0.04 to accommodate its
+broader distribution; leaving the old 0.005 scale would cause artificial
+finite-bin saturation in comparisons with the ratio observables.
+
 ## Physical-reference ratio notebooks (7 October 2026)
 
 Notebooks 08/09 mirror the current 06/07 sources with the analytical observable

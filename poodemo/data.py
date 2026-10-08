@@ -54,7 +54,7 @@ def default_config(mode="production"):
     if mode not in ("production", "smoke"):
         raise ValueError("mode must be production or smoke")
     small = mode == "smoke"
-    return dict(schema_version=5, mode=mode, seed=20261006,
+    return dict(schema_version=6, mode=mode, seed=20261006,
                 physics_overrides={},
                 toolkit_commit=TOOLKIT_COMMIT,
                 n_per_sample=12_000 if small else 5_000_000,
@@ -68,7 +68,7 @@ def default_config(mode="production"):
                 ensemble_size=1 if small else 3,
                 quadrature_per_process=1500 if small else 250_000,
                 asimov_mu=1., target_s_over_ni=.1,
-                score_scale=.005, mu_min=.20, mu_max=1.40,
+                score_scale=.04, mu_min=.02, mu_max=1.40,
                 # The production scan is deliberately not aligned with the
                 # uniform spline grid, so it tests interpolation between knots.
                 mu_points=17 if small else 82,

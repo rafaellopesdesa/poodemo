@@ -34,7 +34,7 @@ and `MODE` in every notebook. Set `MODE = "smoke"` for a short workflow check;
 the production default generates five million events **per sample**.
 Use `CONFIG_OVERRIDES` to change a computational budget without editing source,
 for example `{"quadrature_per_process": 500_000, "epochs": 150}`. Use the same
-overrides in all five notebooks, and choose a new `RUN_NAME` when changing them.
+overrides in all notebooks, and choose a new `RUN_NAME` when changing them.
 
 This repository may be private. Grant Colab access when opening it from GitHub.
 For the runtime download, either save a GitHub fine-grained token with **Contents:
@@ -44,8 +44,8 @@ written into files, Git remotes, shell arguments, or notebook output. Alternativ
 upload a repository ZIP to `/content/poodemo_source.zip`; no token is then needed.
 An existing `/content/poodemo` checkout is reused. Delete that checkout to fetch
 new source after updating the repository; your Drive run is separate.
-For the nearby-minimum benchmark, use the new default
-`RUN_NAME = "paper-nearby-v2"` and rerun notebooks 1–5.
+For the distinct-signal benchmark, use the new default
+`RUN_NAME = "paper-distinct-s-v3"` and rerun notebooks 1–9.
 If you ran an earlier version, start a fresh Colab runtime (or refresh the
 temporary source checkout and restart the runtime) before proceeding. Existing
 run manifests from the earlier physics model are incompatible and are not
@@ -57,7 +57,7 @@ import os
 import sys
 from pathlib import Path
 
-RUN_NAME = "paper-nearby-v2"
+RUN_NAME = "paper-distinct-s-v3"
 MODE = os.environ.get("POODEMO_MODE", "production")  # production or smoke
 CONFIG_OVERRIDES = {}  # e.g. {"quadrature_per_process": 500_000, "epochs": 150}
 JAX_BACKEND = os.environ.get("POODEMO_JAX_BACKEND", "auto")  # auto, gpu, or cpu
@@ -722,8 +722,8 @@ def build():
     expected event yields of the statistical experiment are separate quantities.
     This benchmark is designed to make interference and nuisance effects visible;
     it illustrates the method and is not a numerical reproduction of an ATLAS
-    measurement. The nearby branch is designed to lie around \(\mu\simeq0.5\)
-    while the generating signal strength is \(\mu_*=1\).
+    measurement. The second branch remains below \(\mu=1\), while S now has a visibly
+    different shape from B. The generating signal strength is \(\mu_*=1\).
     """)
     cells += [
         md(r"""
@@ -739,13 +739,19 @@ def build():
         Their square roots are Gaussian functions, so these are Gaussian
         wavefunctions. The configured phase gives destructive interference.
         The means, positive-definite covariance matrices, phase, and inclusive
-        yields are displayed below and saved with this run. Similar S and B
-        shapes make two different signal strengths harder to distinguish.
-        Compared with the earlier distant-branch benchmark, the interference
-        phase has smaller magnitude and S/B shapes are even closer. The
-        expected exposure is increased to keep the barrier between the nearby
-        branches visible; all process-yield ratios and generated sample counts
-        retain their separate roles.
+        yields are displayed below and saved with this run. S has a higher
+        mean and narrower widths than B; SBI remains close to B because the
+        coherent process is background dominated. The model was retuned to
+        retain a secondary minimum **below 1**, without requiring it near 0.5.
+        In an independent analytical-selector validation, the secondary minimum
+        is near 0.120 with NI fixed and 0.069 with NI profiled; the primary
+        minimum is at 1. A trained selector can shift these values. The
+        full-space analytical likelihood also has a secondary minimum.
+
+        The exposure is now 50, independently of generated sample counts.
+        The scan starts at 0.02 to include the second basin. The bounded-score
+        scale is 0.04, adapted to its broader distribution, so later comparisons
+        do not saturate the old score transformation.
 
         The coherent process at \(\mu=1\) is
         \[
@@ -816,19 +822,48 @@ def build():
         print("Expected-yield exposure multiplier:", run.model.exposure)
         '''),
         code("from poodemo.pipeline import generate_data\n\nsample_summary = generate_data(run)\ndisplay(sample_summary)"),
+        md(r"""
+        ### Shape and expected-yield views
+
+        The first figure overlays normalized S, SBI, B and NI marginals in
+        linear and logarithmic views. Exact model bin averages are shown as
+        steps, with a subset of generated MC as markers. The log panels expose
+        tail differences without relying on sparsely populated MC bins.
+
+        The next figures show expected yields at mu=0, 0.5, 1 and 2, before
+        preselection. Each stack contains the positive coherent SBI(mu) sum
+        and NI. Signed S/SBI/B basis terms are combined **before** stacking.
+        At mu=0 the coherent component is exactly B. Exact Gaussian marginal
+        integrals preserve normalization and positivity; no yield is inferred
+        by subtracting independently fluctuating generated samples.
+        """),
         code(r'''
-        fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
-        edges = np.linspace(-4, 5, 75)
-        for process in ["S", "SBI", "B", "NI"]:
-            points = np.load(ROOT / "raw" / f"{process}.npy", mmap_mode="r")[:100_000]
-            for coordinate, ax in enumerate(axes):
-                ax.hist(points[:, coordinate], bins=edges, density=True, histtype="step", label=process)
-                ax.set(xlabel=fr"$x_{coordinate+1}$", ylabel="Normalized marginal density")
-        axes[0].legend()
-        fig.tight_layout()
-        (ROOT / "plots").mkdir(exist_ok=True)
-        fig.savefig(ROOT / "plots" / "01_process_marginals.pdf", bbox_inches="tight")
+        from poodemo.plotting import plot_process_marginals, plot_coherent_stacks
+
+        # Plot-only controls: changing these never regenerates or retrains samples.
+        PLOT_MAX_EVENTS = 100_000
+        PLOT_EDGES = np.linspace(-5, 6, 67)  # Extend the range to inspect farther tails.
+        STACK_MUS = [0., 0.5, 1., 2.]
+        PLOT_SAMPLES = {
+            process: np.load(ROOT / "raw" / f"{process}.npy", mmap_mode="r")[:PLOT_MAX_EVENTS]
+            for process in ["S", "SBI", "B", "NI"]
+        }
+        plot_process_marginals(run.model, PLOT_EDGES, samples=PLOT_SAMPLES,
+                               output=ROOT / "plots")
         plt.show()
+        for log_y in [False, True]:
+            plot_coherent_stacks(run.model, PLOT_EDGES, STACK_MUS, log=log_y,
+                                 output=ROOT / "plots")
+            plt.show()
+
+        # Full-space yields, not just the finite visible plotting window.
+        display(pd.DataFrame({
+            "mu": STACK_MUS,
+            "coherent_SBI_yield": [run.model.total_yield(mu) - run.model.component_yield("NI")
+                                    for mu in STACK_MUS],
+            "NI_yield": run.model.component_yield("NI"),
+            "total_yield": [run.model.total_yield(mu) for mu in STACK_MUS],
+        }))
         '''),
         md(r"""
         ### Inspect the saved experiment
@@ -1001,7 +1036,7 @@ def build():
         and rate control; an analysis without an oracle would estimate those
         quantities from its simulation and auxiliary measurements.
 
-        Bringing the two branches close while increasing exposure makes this a
+        The interference cancellations make this a
         more stringent test of learned ratios. Small shape-estimation errors
         can now have a substantial likelihood effect. Agreement of the
         analytical benchmark with the target landscape does not establish
@@ -1032,7 +1067,7 @@ def build():
         """),
         code("from poodemo.pipeline import run_unbinned\n\nunbinned = run_unbinned(run)\ndisplay(unbinned['scans'])"),
         code(PLOT_HELPER),
-        code("SCAN_XLIM = None  # e.g. (0.35, 1.15); None keeps the default x-axis range.\nSCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.\nplot_scans(unbinned['scans'], 'Unbinned Asimov likelihood scans', '03_unbinned_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
+        code("SCAN_XLIM = None  # e.g. (0.02, 1.15); None keeps the default x-axis range.\nSCAN_YLIM = None  # e.g. (0, 8); None keeps the default y-axis range.\nplot_scans(unbinned['scans'], 'Unbinned Asimov likelihood scans', '03_unbinned_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
         md(r"""
         ### Why a second minimum can appear
 
@@ -1059,16 +1094,15 @@ def build():
         shape information can lift it. Profiling NI can change its depth and
         location, with the Gaussian constraint penalizing the required shift.
 
-        For a nearby partner at \(\mu\simeq0.5\) with \(\mu_*=1\), the target
-        rate relation is
+        The distinct-signal benchmark keeps the second basin below 1 rather
+        than forcing it near 0.5. The selected-rate turnover is
         \[
-        -\lambda_I/\lambda_S\simeq1+\sqrt{0.5},\qquad
-        \mu_{\rm turnover}=\left(-\frac{\lambda_I}{2\lambda_S}\right)^2
-        \simeq0.729.
+        \mu_{\rm turnover}=\left(-\frac{\lambda_I}{2\lambda_S}\right)^2.
         \]
-        These rate landmarks explain the design. The precise full-likelihood
-        minima are measured from the nominal and profiled curves below, and can
-        shift when shape information and the NI constraint are included.
+        Neither this turnover nor the equal-rate partner is generally a
+        full-likelihood extremum. The analytical-selector validation gives
+        secondary minima near 0.120 (NI fixed) and 0.069 (NI profiled);
+        remeasure these locations with the trained selector below.
 
         The following analytical-only panels separate fixed-NI and profiled-NI
         curves. Dots mark interior minima on the evaluated grid, rather than
@@ -1234,7 +1268,7 @@ def build():
         code(UNBINNED_ASIMOV_REFRESH),
         code("from dataclasses import replace\nfrom poodemo.pipeline import run_binning_study\n\nBIN_COUNTS = list(range(4, 61, 4))\n# Change only this resolution study; reuse the saved experiment and models.\nbinning_run = replace(run, config={**run.config, \"bin_counts\": BIN_COUNTS})\nbinning = run_binning_study(binning_run)\ndisplay(binning['scans'])\ndisplay(binning['fidelity'])"),
         code(PLOT_HELPER),
-        code("SCAN_BIN_COUNTS = [4, 12, 24, 36, 60]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].eq(\"analytic unbinned\")\n    | scans[\"model\"].str.startswith(\"learned unbinned\", na=False)\n].copy()\nSCAN_XLIM = (0.35, 1.15)  # Set None to keep the default x-axis range.\nSCAN_YLIM = (0, 8)  # Set None to keep the default y-axis range.\nscan_title = 'Score histograms: ' + ', '.join(map(str, SCAN_BIN_COUNTS)) + ' bins'\nplot_scans(shown_scans, scan_title, '04_binning_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
+        code("SCAN_BIN_COUNTS = [4, 12, 24, 36, 60]\nscans = binning[\"scans\"]\nshown_scans = scans.loc[\n    (scans[\"model\"].eq(\"direct score histogram\") & scans[\"n_bins\"].isin(SCAN_BIN_COUNTS))\n    | scans[\"model\"].eq(\"analytic unbinned\")\n    | scans[\"model\"].str.startswith(\"learned unbinned\", na=False)\n].copy()\nSCAN_XLIM = (0.02, 1.15)  # Set None to keep the default x-axis range.\nSCAN_YLIM = (0, 8)  # Set None to keep the default y-axis range.\nscan_title = 'Score histograms: ' + ', '.join(map(str, SCAN_BIN_COUNTS)) + ' bins'\nplot_scans(shown_scans, scan_title, '04_binning_scans.pdf',\n           xlim=SCAN_XLIM, ylim=SCAN_YLIM);"),
         md(r"""
         ### What convergence can and cannot show
 
@@ -1452,7 +1486,7 @@ def ratio_histogram_cells():
             | scans["model"].eq("analytic unbinned")
             | scans["model"].str.startswith("learned unbinned", na=False)
         ].copy()
-        SCAN_XLIM = (0.35, 1.15)  # Set None to show the full scan range.
+        SCAN_XLIM = (0.02, 1.15)  # Set None to show the full scan range.
         SCAN_YLIM = (0, 8)  # Set None to show the full vertical range.
         scan_title = "Ratio histograms: " + ", ".join(map(str, SCAN_BIN_COUNTS)) + " bins"
         plot_scans(shown_scans, scan_title, "06_binning_scans.pdf",
@@ -1573,7 +1607,7 @@ def ratio_spline_cells():
         md(PHYSICAL_YIELD_INTRO),
         code(physical_yield_plot_code("07")),
         code(PLOT_HELPER),
-        code(spline_scan_plot_code("07", xlim=(0.35, 1.15), ylim=(0, 8))),
+        code(spline_scan_plot_code("07", xlim=(0.02, 1.15), ylim=(0, 8))),
         md(r"""
         ### Read the comparisons separately
 

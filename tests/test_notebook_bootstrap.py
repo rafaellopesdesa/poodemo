@@ -59,7 +59,7 @@ from poodemo.pipeline import create_run
 import poodemo.pipeline
 assert Path(poodemo.pipeline.__file__).resolve() == checkout / "poodemo" / "pipeline.py"
 run = create_run(namespace["ROOT"], mode="smoke")
-assert run.config["schema_version"] == 5
+assert run.config["schema_version"] == 6
 
 # Re-executing setup after a successful import must keep the loaded package.
 loaded = sys.modules["poodemo"]

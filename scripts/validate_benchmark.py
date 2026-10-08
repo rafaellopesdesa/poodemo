@@ -2,8 +2,8 @@
 """Validate the analytic interference benchmark before expensive training.
 
 This uses the ideal balanced S/B/NI classifier, not a trained network. The
-default cut was calibrated separately with 16,384 Sobol nodes per S/B/NI
-process using scramble seeds 900/901/902 and rounded to 0.3354. Use
+default cut was calibrated separately with 262,144 Sobol nodes per S/B/NI
+process using scramble seeds 900/901/902 and rounded to 0.2843. Use
 --seed 1011 --power 16 for independent integration with that cut frozen.
 All nuisance profiles use the notebooks' normalized
 rate/shape exp-poly TemplateLikelihood, including the unit Gaussian penalty.
@@ -118,15 +118,15 @@ def main():
     config = default_config()
     parser.add_argument("--power", type=int, default=15, help="Sobol draws per process are 2**power.")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--threshold", type=float, default=.3354)
+    parser.add_argument("--threshold", type=float, default=.2843)
     parser.add_argument("--mu-min", type=float, default=config["mu_min"])
     parser.add_argument("--mu-max", type=float, default=config["mu_max"])
     parser.add_argument("--scan-points", type=int, default=config["mu_points"])
     parser.add_argument("--score-scale", type=float, default=config["score_scale"])
     parser.add_argument("--output", type=Path, default=Path("benchmark_validation.json"))
     args = parser.parse_args()
-    if not 4 <= args.power <= 20 or args.scan_points < 9 or not 0 < args.mu_min < .5 < 1 < args.mu_max:
-        parser.error("Use power in [4,20], at least 9 scan points, and a positive scan range enclosing .5 and 1.")
+    if not 4 <= args.power <= 20 or args.scan_points < 9 or not 0 < args.mu_min < .05 < 1 < args.mu_max:
+        parser.error("Use power in [4,20], at least 9 scan points, and a positive scan range starting below .05 and enclosing 1.")
     if not 0 < args.threshold < 1 or args.score_scale <= 0:
         parser.error("threshold must be between 0 and 1; score-scale must be positive.")
     physics = PhysicsModel()
