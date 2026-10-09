@@ -18,7 +18,7 @@ import pandas as pd
 from scipy.special import expit
 
 from .data import PROCESSES, file_digest, save_json
-from .inference import YieldFractionSpline, component_coefficients, histogram_components
+from .inference import component_coefficients, histogram_components
 from .pipeline import observable_bin_edges, prepare_quadrature
 from .toy_likelihood import StatOnlyLikelihood
 
@@ -54,7 +54,7 @@ def reference_observable(fields, rates, eta, power):
     """Apply the analytic observable with frozen selected-rate normalizers.
 
     Rates MUST come from the original integration bank, not the toy events.
-    The returned coordinates agree with notebook 09's reference-ratio bins.
+    The returned coordinates agree with notebook 08's reference-ratio bins.
     """
     fields, rates = np.asarray(fields, float), np.asarray(rates, float)
     if not np.isfinite(eta) or eta < 0 or not np.isfinite(power) or power <= 0:
@@ -76,48 +76,29 @@ def reference_observable(fields, rates, eta, power):
                               - np.log(base) + np.log(base_total)))
 
 
-def _load_templates(run, quad, mus, n_bins, power):
-    path = run.path("results", "reference_ratio_spline_templates.npz")
-    if not path.exists():
-        raise FileNotFoundError("Run notebook 09 with 12 bins before notebook 11.")
-    with np.load(path, allow_pickle=False) as saved:
-        required = {"etas", "edges", "bin_yields", "totals", "reference_ratio_power", "binning_policy"}
-        if not required.issubset(saved.files):
-            raise ValueError("Notebook 09 spline metadata is incomplete; rerun 09.")
-        expected_edges = observable_bin_edges(n_bins, "reference_ratio")
-        if (saved["edges"].shape != expected_edges.shape
-                or not np.array_equal(saved["edges"], expected_edges)
-                or float(saved["reference_ratio_power"]) != power
-                or str(saved["binning_policy"]) != "reference_halfstep_interior_v1"):
-            raise ValueError("Notebook 09 spline bins or REFERENCE_RATIO_A do not match this toy study.")
-        etas, values, totals = saved["etas"].copy(), saved["bin_yields"].copy(), saved["totals"].copy()
-    if values.ndim != 4 or values.shape[1:] != (3, 4, n_bins):
-        raise ValueError("Notebook 09 templates must have nominal/down/up x four process axes")
+def _direct_templates(quad, mus, n_bins, power):
+    """Integrate process yields directly in the frozen observable bins.
+
+    Each eta gets its own histogram of the original analytical quadrature,
+    including eta=0. As in notebook 08, these process yields remain fixed
+    throughout a fit; only the exact physical mu coefficients change.
+    No notebook 09 output or interpolated template is read.
+    """
+    edges = observable_bin_edges(n_bins, "reference_ratio")
     rates = np.asarray(quad["nominal"]) @ quad["weights"]
-    if not np.allclose(totals[0], rates, rtol=1e-8, atol=1e-10):
-        raise ValueError("Notebook 09 spline totals differ from the current quadrature; rerun 09.")
-    spline = YieldFractionSpline(etas, values, totals=totals)
     templates, rows, provenance = {}, [], {}
+    source = "direct analytical quadrature histogram (notebook 08 method)"
     for mu in mus:
         z = reference_observable(quad["nominal"], rates, mu, power)
-        direct = histogram_components(z, quad["nominal"], quad["weights"], expected_edges)
-        if mu == 0. and etas[0] > 0.:
-            predicted = direct.copy()
-            source = "direct eta=0 endpoint (09 spline does not include zero; no extrapolation)"
-        else:
-            predicted = spline(mu)[0]
-            source = "notebook 09 nominal yield-fraction spline"
-        templates[mu] = predicted
+        yields = histogram_components(z, quad["nominal"], quad["weights"], edges)
+        templates[mu] = yields
         provenance[str(mu)] = source
         for j, process in enumerate(PROCESSES):
             for bi in range(n_bins):
                 rows.append(dict(mu_test=mu, eta=mu, process=process, bin=bi,
-                                 direct_yield=direct[j, bi], model_yield=predicted[j, bi],
-                                 fraction_difference=(predicted[j, bi] - direct[j, bi]) / rates[j],
-                                 template_source=source))
-    return templates, expected_edges, pd.DataFrame(rows), {
-        "spline_sha256": file_digest(path), "spline_eta_min": float(etas[0]),
-        "spline_eta_max": float(etas[-1]), "template_sources": provenance,
+                                 expected_yield=yields[j, bi], template_source=source))
+    return templates, edges, pd.DataFrame(rows), {
+        "template_method": "direct_quadrature", "template_sources": provenance,
     }
 
 
@@ -191,7 +172,7 @@ def summarize_toys(results, levels=(.68, .90, .95, .99)):
 
 def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
                   reference_power=100., exposure=1., seed=None, mu_bounds=(0., 2.),
-                  grid_size=65, output_tag="toy_study", progress_every=10):
+                  grid_size=65, output_tag="toy_study_direct", progress_every=10):
     """Run/resume five stat-only ensembles with paired simulator event toys.
 
     ``exposure`` is a multiplier of the existing run's physical exposure.
@@ -199,7 +180,8 @@ def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
     settings or changed model/bank content reject stale cached toy results.
     Every completed toy ID is checkpointed atomically. No event arrays are
     persisted. The learned-bank source is a finite quadrature approximation,
-    whose effective sample size is recorded rather than hidden.
+    whose effective sample size is recorded rather than hidden. Binned process
+    yields are direct quadrature histograms at each fixed eta, without interpolation.
     """
     from .toy_sources import (QuadraturePoissonSource, load_frozen_selector,
                               make_frozen_workspace, sample_simulator_poisson)
@@ -208,7 +190,7 @@ def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
         if isinstance(value, (bool, np.bool_)) or int(value) != value or value < minimum:
             raise ValueError(f"{name} must be an integer >= {minimum}")
     if n_bins != 12:
-        raise ValueError("This comparison uses the notebook 09 model with exactly 12 bins")
+        raise ValueError("This comparison uses direct reference-ratio histograms with exactly 12 bins")
     bounds = np.asarray(mu_bounds, float)
     mus = tuple(float(mu) for mu in mu_values)
     if (bounds.shape != (2,) or np.any(~np.isfinite(bounds)) or bounds[0] != 0
@@ -223,7 +205,7 @@ def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
     if not re.fullmatch(r"[A-Za-z0-9_-]+", output_tag):
         raise ValueError("output_tag must contain only letters, digits, underscores or hyphens")
     quad = prepare_quadrature(run)
-    templates, edges, closure, template_metadata = _load_templates(run, quad, mus, n_bins, reference_power)
+    templates, edges, bin_yields, template_metadata = _direct_templates(quad, mus, n_bins, reference_power)
     selector, threshold, selection_provenance = load_frozen_selector(run)
     workspace = make_frozen_workspace(run, quad)
     learned = np.asarray(workspace.learned_quadrature[0])
@@ -248,7 +230,7 @@ def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
         for path in sorted(model_dir.rglob("*")):
             if path.is_file() and path.name in {"model.pt", "ensemble.json", "calibrator.joblib"}:
                 dependencies[str(path.relative_to(run.root))] = file_digest(path)
-    configuration = dict(version=1, statistic="two-sided q_mu; exact physical boundary; eta fixed during fit",
+    configuration = dict(version=2, statistic="two-sided q_mu; exact physical boundary; eta fixed during fit",
                          mu_values=list(mus), n_bins=int(n_bins), reference_power=float(reference_power),
                          exposure_multiplier=float(exposure), seed=int(seed), mu_bounds=bounds.tolist(),
                          grid_size=int(grid_size), bin_edges=edges.tolist(), physics=run.model.to_dict(),
@@ -343,9 +325,9 @@ def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
     all_results = pd.DataFrame(records)
     results = all_results.loc[all_results.toy_id < n_toys].sort_values(["mu_test", "toy_id", "case"]).reset_index(drop=True)
     summary, coverage = summarize_toys(results)
-    for suffix, frame in (("summary", summary), ("coverage", coverage), ("template_closure", closure)):
+    for suffix, frame in (("summary", summary), ("coverage", coverage), ("bin_yields", bin_yields)):
         _atomic_csv(frame, run.path("results", f"{output_tag}_{suffix}.csv"))
-    return dict(results=results, summary=summary, coverage=coverage, template_closure=closure, metadata=metadata)
+    return dict(results=results, summary=summary, coverage=coverage, bin_yields=bin_yields, metadata=metadata)
 
 
 def plot_toy_study(study, output):

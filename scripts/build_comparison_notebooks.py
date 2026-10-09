@@ -31,6 +31,19 @@ changing this notebook's mode does not create the prerequisite samples/models.
 Only a migration from an older, incompatible run requires rerunning 01–03.
 """
 
+TOY_SETUP_INTRO = SETUP_INTRO.replace(
+    "`CONFIG_OVERRIDES` used for your completed notebooks 01–03 and 08–09. These new\n"
+    "studies do not require regeneration, retraining, or notebooks 04–07. Notebook 10\n"
+    "uses the selected integration bank; notebook 11 also loads the trained ratios\n"
+    "and the **12-bin, a=100** spline model saved by notebook 09.",
+    "`CONFIG_OVERRIDES` used for your completed notebooks 01–03. This notebook\n"
+    "loads the trained ratios and selected integration bank, then computes the\n"
+    "**12-bin, a=100** process yields directly with the histogram method of\n"
+    "notebook 08. It does not load spline templates or require outputs from 08–10.\n"
+    "For this update, rerun **11 only**; no regeneration or retraining is needed."
+)
+
+
 STYLE = r'''
 import mplhep as hep
 hep.style.use("ATLAS")
@@ -39,8 +52,8 @@ plt.rcParams.update({"axes.grid": False, "figure.dpi": 110})
 '''
 
 
-def start(title, introduction):
-    return [md(f"# {title}\n\n{introduction}"), md(SETUP_INTRO),
+def start(title, introduction, *, setup_intro=SETUP_INTRO):
+    return [md(f"# {title}\n\n{introduction}"), md(setup_intro),
             code(BOOTSTRAP), code(COMMON_IMPORTS + "\n" + STYLE)]
 
 
@@ -203,12 +216,12 @@ from poodemo.toy_study import run_toy_study, plot_toy_study
 MU_VALUES = (0.0, 1.4)  # In each ensemble, mu_true = mu_test.
 N_TOYS = 12 if MODE == "smoke" else 500
 N_BINS = 12
-REFERENCE_RATIO_A = 100.0  # Must match the 12-bin notebook 09 spline file.
+REFERENCE_RATIO_A = 100.0  # Direct 12-bin observable, as in notebook 08.
 EXPOSURE = 1.0  # Scale all selected expected yields together.
 SEED = 110923
 MU_BOUNDS = (0.0, 2.0)  # 1.4 is an interior tested point, not a fit boundary.
 FIT_GRID_SIZE = 65  # Grid in kappa=sqrt(mu), followed by local refinement.
-OUTPUT_TAG = "toy_study"  # Change for a study with different core settings.
+OUTPUT_TAG = "toy_study_direct"  # Fresh results; preserve the earlier spline-toy study.
 PROGRESS_EVERY = 10
 
 print(f"{N_TOYS} toys per case at each of {MU_VALUES}; five comparisons")
@@ -225,8 +238,8 @@ toys = run_toy_study(
 )
 print("Generation, fit, and numerical settings:")
 display(pd.Series(toys["metadata"]))
-print("Direct-versus-spline template closure at the tested anchors:")
-display(toys["template_closure"])
+print("Direct process yields in each bin at the frozen observable anchors:")
+display(toys["bin_yields"])
 '''
 
 TOY_PLOTS = r'''
@@ -246,14 +259,15 @@ def toy_cells():
     Measure the **stat-only** sampling distribution at the two requested
     hypotheses, \(\mu=0\) and \(\mu=1.4\). In each ensemble the tested value is
     also the generating truth. Compare analytical and learned unbinned fits
-    with the 12-bin spline model from notebook 09, using both physical
-    simulator toys and each approximate model's own toys.
+    with the **direct 12-bin histogram model**, using the same binning method
+    as notebook 08, physical simulator toys, and each model's own toys.
 
-    Run **01–03 and 09** first in the same v4 run; 09 itself uses the completed
-    08 study. Notebook 10 and notebooks 04–07 are not prerequisites. No training
-    is performed here. The full production toy study is intentionally left for
-    you to run; saved progress makes it resumable.
-    """)
+    Reuse completed **01–03** in the same v4 run. This notebook integrates
+    process yields directly in the bins; it does not use notebook 09's spline
+    parametrizations. No training or rerun of earlier notebooks is needed.
+    Saved progress makes the toy study resumable. The default output tag
+    `toy_study_direct` keeps these results separate from the earlier spline study.
+    """, setup_intro=TOY_SETUP_INTRO)
     cells += [
         md(r"""
         ### Define one statistic and five comparisons
@@ -276,7 +290,7 @@ def toy_cells():
         | Analytical / simulator | Physical simulator | Analytical unbinned |
         | Learned / simulator | Same physical simulator experiments | Learned unbinned |
         | Learned / learned | Learned model on the integration bank | Learned unbinned |
-        | Binned / simulator | Same simulator experiments, histogrammed | 12-bin model from 09 |
+        | Binned / simulator | Same simulator experiments, histogrammed | Direct 12-bin model |
         | Binned / binned | Independent Poisson counts from the binned model | Same 12-bin model |
 
         The simulator rows deliberately share each experiment across fit
@@ -307,14 +321,26 @@ def toy_cells():
         **Binned-model toys:** draw independent Poisson counts directly from
         the frozen binned model's predicted means, without using the analytical
         simulator as the toy source. The physical simulator and binned-model
-        rows therefore expose the effect of template approximation separately.
+        rows therefore test whether calibration under the histogram model
+        transfers to fresh physical experiments.
 
-        Notebook 09's saved eta grid starts above zero. At **eta=0**, this
-        notebook builds the direct analytical boundary template using the same
-        12 bins and observable, rather than extrapolating its spline. At 1.4
-        it uses the saved spline interpolation. The template-closure table
-        makes this distinction visible. The model at each frozen eta is then
-        used for the entire physical-mu fit and for its own Poisson toys.
+        **Direct bin yields at every eta:** construct the observable once at
+        each tested \(\eta=\mu_0\), and integrate each process intensity in its
+        bins using the saved quadrature. Keep these process bin yields fixed
+        while varying the physical signal strength:
+        \[
+        \nu_i(\mu;\eta)
+        =(\mu-\sqrt\mu)\nu_{S,i}(\eta)
+        +\sqrt\mu\,\nu_{SBI,i}(\eta)
+        +(1-\sqrt\mu)\nu_{B,i}(\eta)+\nu_{NI,i}(\eta).
+        \]
+        These are the exact physical coefficients multiplying numerically
+        integrated bin yields, with NI fixed at nominal. The same method is
+        used at **eta=0 and eta=1.4**, without spline interpolation or
+        extrapolation. The bin-yield table exposes every process and bin.
+        This frozen histogram model supplies both its full physical-mu
+        likelihood and its own Poisson toy means. Its remaining numerical
+        integration error is separate from finite binning and toy fluctuations.
         """),
         md(r"""
         ### Run or resume the experiment ensembles
@@ -328,6 +354,8 @@ def toy_cells():
         completed experiments. The full sample of test statistics and fitted
         values is saved, including fit diagnostics; failed fits must be
         inspected rather than silently counted as successful calibration.
+        Keep `OUTPUT_TAG="toy_study_direct"` for this direct-bin version;
+        the earlier spline-based toy files are preserved and are not reused.
         """),
         code(TOY_RUN),
         md(r"""
@@ -383,7 +411,7 @@ def toy_cells():
         and use a new output tag before interpreting quantiles. If the
         empirical tails remain noisy, increase `N_TOYS`. A larger ensemble
         reduces toy uncertainty; it does not fix a learned-density error,
-        spline mismatch, or insufficient numerical integration.
+        insufficient histogram resolution, or inaccurate numerical integration.
         """),
     ]
     return cells

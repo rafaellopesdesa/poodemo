@@ -25,9 +25,10 @@ to lie between zero and one while S has a visibly distinct shape.
 
 ## Run in Colab
 
-1. The physical-reference workflow is **01–03 → 08 → 09 → 10/11**.
-   Notebooks 04–07 are optional score/S-reference comparisons. For a private
-   repository, authorize GitHub access in Colab's notebook browser. If the link
+1. The physical-reference workflow is **01–03 → 08**, followed by the studies
+   in 09, 10 and 11. Notebook 11 builds its own direct bin yields and does not
+   require 09's splines. Notebooks 04–07 are optional score/S-reference
+   comparisons. For a private repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
 2. Choose a GPU runtime for notebooks 2–3. Both PyTorch training and JAX
    likelihood fits use the GPU. `JAX_BACKEND = "auto"` detects an NVIDIA GPU;
@@ -599,7 +600,8 @@ it does not rewrite 01–07.
 
 Use the existing completed v4 run. Notebook 10 reuses the selected integration
 bank and analytical baseline; notebook 11 additionally requires the trained
-ratios and the **12-bin, a=100** spline file from notebook 09. No new run name,
+ratios. It builds **12-bin, a=100** yields directly from the integration bank,
+as in notebook 08; no notebook-09 products are required. No new run name,
 training, or execution of 04–07 is needed. Build just these notebooks with
 `python scripts/build_comparison_notebooks.py`.
 
@@ -635,11 +637,16 @@ preselection. Histogrammed simulator counts already fluctuate as Poisson
 counts; no second fluctuation is applied. Learned-model toys are conditional
 on a finite quadrature approximation, with effective bank size recorded.
 Analytical selected-rate integrals also carry numerical integration error.
-The eta=0 template is constructed directly because the saved 09 spline begins
-above zero; there is no extrapolation. The 1.4 template uses the saved spline.
+At both eta=0 and eta=1.4, the process bin yields are integrated directly on
+the selected bank using notebook 08's observable and bin edges. The bins and
+process yields remain frozen during each fit; their physical mu dependence
+comes from the exact S/SBI/B/NI coefficients. These same direct predictions
+define the binned model's own Poisson toys. No spline interpolation is used.
 
-The default is 500 toys per hypothesis and five fit/source combinations
-(12 toys in smoke mode). Each complete toy ID is checkpointed. Increasing
+Rerun only notebook 11 in a fresh runtime after this update. Its default
+`OUTPUT_TAG="toy_study_direct"` keeps the new direct-yield study separate from
+earlier spline-based results. The default is 500 toys per hypothesis and five
+fit/source combinations (12 toys in smoke mode). Each complete toy ID is checkpointed. Increasing
 `N_TOYS` resumes and extends the same deterministic streams; changed models,
 banks, powers, exposure or fit settings require a new `OUTPUT_TAG`. Large event
 arrays are not saved. Results include failures, fitted boundaries, test-statistic
@@ -648,4 +655,5 @@ cross-calibration. Even self-model toy IDs set critical values; odd IDs evaluate
 acceptance. Binomial errors are conditional on those estimated critical values;
 tail precision and finite calibration-sample uncertainty need larger ensembles.
 Asymptotic curves are illustrative references, not imposed calibration laws.
-Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON manifest.
+Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON manifest,
+including the directly integrated process yields in `<OUTPUT_TAG>_bin_yields.csv`.

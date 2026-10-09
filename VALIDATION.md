@@ -1,5 +1,27 @@
 # Validation
 
+## Direct bin yields for notebook 11 (9 October 2026)
+
+Notebook 11 now integrates process bin yields directly at every fixed eta,
+including 0 and 1.4, with notebook 08's observable and bin edges. It no longer
+loads notebook 09 products. The physical mu coefficients are exact; finite
+quadrature error remains. The default output tag is `toy_study_direct`, and
+version-2 fingerprints prevent reuse of earlier spline-based toy results.
+
+- All **9 toy-study tests passed**, including direct yields at both hypotheses,
+  frozen eta throughout the fit, identical templates for Poisson generation
+  and likelihood evaluation, absent/malformed spline files, rejection of old
+  caches, and deterministic resume/extension. Saved diagnostics now contain
+  actual process bin yields rather than direct-versus-spline comparisons.
+- A reduced integration run with the saved trained networks and selector
+  exercised all five cases at both hypotheses: **30/30 fits valid**. Direct
+  bin yields matched notebook 08's calculation exactly on the same bank.
+  An explicit guard rejected any spline-file read; none occurred. Resuming
+  reproduced all results. This run used three toys per hypothesis at 0.01
+  times the run exposure and does not establish production calibration.
+- Notebook 11 passes format/syntax validation and matches its generator.
+  Notebook 10, including the user's newly saved outputs, is unchanged.
+
 ## Discriminator compression and frequentist toys (9 October 2026)
 
 New notebooks 10 and 11 reuse the completed v4 run and leave notebooks 01–09,

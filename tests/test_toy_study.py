@@ -1,14 +1,15 @@
-"""Five-case pairing, fixed observable, boundary templates and resumable toys."""
+"""Direct fixed-eta histograms, paired sources and resumable five-case toys."""
 from types import SimpleNamespace
+import hashlib
+import json
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from poodemo.data import Run
-from poodemo.inference import histogram_components
-from poodemo.pipeline import observable_bin_edges
-from poodemo.toy_study import (CASES, _load_templates, reference_observable,
+from poodemo.inference import component_coefficients
+from poodemo.toy_study import (CASES, _direct_templates, reference_observable,
                                run_toy_study, summarize_toys)
 
 
@@ -32,18 +33,6 @@ def workspace(tmp_path, monkeypatch):
     run.path("models").mkdir()
     quad = dict(x=np.asarray([[0., 0., 0.], [1., 0., 0.]]), weights=np.ones(2), nominal=model.fields.copy())
     quad["down"], quad["up"] = quad["nominal"][None].copy(), quad["nominal"][None].copy()
-    etas = np.asarray([.02, .6, 1., 1.4, 2.])
-    edges = observable_bin_edges(12, "reference_ratio")
-    rates = quad["nominal"].sum(axis=1)
-    values = []
-    for eta in etas:
-        z = reference_observable(quad["nominal"], rates, eta, 100.)
-        nominal = histogram_components(z, quad["nominal"], quad["weights"], edges)
-        values.append(np.repeat(nominal[None], 3, axis=0))
-    values = np.asarray(values)
-    np.savez(run.path("results", "reference_ratio_spline_templates.npz"),
-             etas=etas, edges=edges, bin_yields=values, totals=values[0].sum(axis=-1),
-             reference_ratio_power=100., binning_policy="reference_halfstep_interior_v1")
     monkeypatch.setattr(toy_study, "prepare_quadrature", lambda run: quad)
     monkeypatch.setattr(toy_sources, "load_frozen_selector", lambda run: (object(), .5, {"selector": "frozen"}))
     frozen = SimpleNamespace(learned_quadrature=(model.fields.copy(), None, None),
@@ -71,18 +60,87 @@ def test_reference_coordinates_use_frozen_rates_and_exact_collapse():
     np.testing.assert_array_equal(reference_observable(replicated, rates, 1., 100.), .5)
 
 
-def test_zero_uses_exact_template_without_extrapolation(workspace):
+def test_both_hypotheses_use_direct_fixed_eta_templates_without_notebook09(workspace):
     run, quad, _ = workspace
-    templates, edges, closure, metadata = _load_templates(run, quad, (0., 1.4), 12, 100.)
-    z = reference_observable(quad["nominal"], quad["nominal"].sum(axis=1), 0., 100.)
-    expected = histogram_components(z, quad["nominal"], quad["weights"], edges)
-    np.testing.assert_array_equal(templates[0.], expected)
-    assert "no extrapolation" in metadata["template_sources"]["0.0"]
-    assert not np.any(closure.fraction_difference)
-    with pytest.raises(ValueError, match="extrapolation"):
-        _load_templates(run, quad, (2.1,), 12, 100.)
-    with pytest.raises(ValueError, match="match"):
-        _load_templates(run, quad, (0.,), 12, 20.)
+    assert not run.path("results", "reference_ratio_spline_templates.npz").exists()
+    templates, edges, yields, metadata = _direct_templates(quad, (0., 1.4), 12, 100.)
+    assert metadata["template_method"] == "direct_quadrature"
+    assert set(yields.columns) == {"mu_test", "eta", "process", "bin", "expected_yield", "template_source"}
+    for eta in (0., 1.4):
+        z = reference_observable(quad["nominal"], quad["nominal"].sum(axis=1), eta, 100.)
+        expected = np.asarray([np.histogram(z, edges, weights=quad["weights"] * fields)[0]
+                               for fields in quad["nominal"]])
+        np.testing.assert_array_equal(templates[eta], expected)
+        np.testing.assert_array_equal(yields.loc[yields.eta == eta].expected_yield, expected.ravel())
+        # Physical mu varies during the fit, but the observable stays at eta.
+        for fitted_mu in (0., .1, .5, 1.3, 2.):
+            expected_counts = np.histogram(z, edges, weights=quad["weights"] *
+                                          (component_coefficients(fitted_mu) @ quad["nominal"]))[0]
+            np.testing.assert_allclose(component_coefficients(fitted_mu) @ templates[eta], expected_counts)
+
+
+def test_existing_or_malformed_notebook09_files_are_ignored(workspace):
+    run, _, calls = workspace
+    original = run_toy_study(run, n_toys=2, grid_size=9)
+    path = run.path("results", "reference_ratio_spline_templates.npz")
+    # An unrelated (and subsequently malformed) old spline must not affect
+    # either the likelihood or its cache fingerprint.
+    np.savez(path, etas=np.asarray([.02, 2.]), wrong_templates=np.zeros(3))
+    existing = run_toy_study(run, n_toys=2, grid_size=9)
+    path.write_bytes(b"not an npz file")
+    malformed = run_toy_study(run, n_toys=2, grid_size=9)
+    assert len(calls) == 4
+    for actual in (existing, malformed):
+        pd.testing.assert_frame_equal(original["results"], actual["results"], check_dtype=False)
+        pd.testing.assert_frame_equal(original["bin_yields"], actual["bin_yields"])
+        assert original["metadata"]["fingerprint"] == actual["metadata"]["fingerprint"]
+    assert run.path("results", "toy_study_direct_bin_yields.csv").exists()
+
+
+def test_binned_toy_means_and_fit_templates_use_the_same_direct_yields(workspace, monkeypatch):
+    import poodemo.toy_study as module
+    run, quad, _ = workspace
+    expected, _, _, _ = _direct_templates(quad, (0., 1.4), 12, 100.)
+    original_rng = module._rng
+    original_binned = module.StatOnlyLikelihood.from_binned
+    means, fitted_fields = [], []
+
+    def record_rng(seed, mu, toy_id, stream):
+        rng = original_rng(seed, mu, toy_id, stream)
+        if stream != 2:
+            return rng
+        def poisson(values):
+            means.append((mu, np.asarray(values).copy()))
+            return rng.poisson(values)
+        return SimpleNamespace(poisson=poisson)
+
+    def record_binned(fields, counts, *, exposure):
+        fitted_fields.append(np.asarray(fields).copy())
+        return original_binned(fields, counts, exposure=exposure)
+
+    monkeypatch.setattr(module, "_rng", record_rng)
+    monkeypatch.setattr(module.StatOnlyLikelihood, "from_binned", record_binned)
+    run_toy_study(run, n_toys=2, grid_size=9, exposure=3.)
+    for mu, values in means:
+        np.testing.assert_allclose(values, 3. * (component_coefficients(mu) @ expected[mu]))
+    assert len(means) == 4 and len(fitted_fields) == 8
+    for fields, mu in zip(fitted_fields, [0.] * 4 + [1.4] * 4):
+        np.testing.assert_array_equal(fields, expected[mu])
+
+
+def test_old_interpolated_template_cache_is_rejected(workspace):
+    run, _, _ = workspace
+    study = run_toy_study(run, n_toys=1, grid_size=9)
+    path = run.path("results", "toy_study_direct_config.json")
+    metadata = study["metadata"]
+    metadata["configuration"]["version"] = 1
+    metadata["configuration"].pop("template_method")
+    metadata["configuration"]["spline_sha256"] = "old template hash"
+    metadata["fingerprint"] = hashlib.sha256(json.dumps(
+        metadata["configuration"], sort_keys=True, allow_nan=False).encode()).hexdigest()
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="differ"):
+        run_toy_study(run, n_toys=1, grid_size=9)
 
 
 def test_five_cases_share_simulator_and_resume_deterministically(workspace):
@@ -110,7 +168,7 @@ def test_five_cases_share_simulator_and_resume_deterministically(workspace):
     with pytest.raises(ValueError, match="differ"):
         run_toy_study(run, n_toys=6, grid_size=9, exposure=2.)
     quad["nominal"][3, 0] += .1
-    with pytest.raises(ValueError, match="totals differ"):
+    with pytest.raises(ValueError, match="differ"):
         run_toy_study(run, n_toys=6, grid_size=9)
 
 
