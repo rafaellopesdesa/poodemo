@@ -733,3 +733,35 @@ New outputs are under the original diagnostic directories in
 study's settings, choose a new `CONVERGENCE_TAG`, while retaining the original
 `OUTPUT_TAG` so its saved banks and toy selection can be found. The notebook
 builder appends this section without replacing earlier executed cells.
+
+**Section 7: likelihood decomposition** reuses the completed section 6 run.
+In a fresh runtime with updated source, execute the first two setup/import code
+cells, then jump directly to section 7. Keep the same run configuration,
+`SOURCE_TAG`, `OUTPUT_TAG` and `CONVERGENCE_TAG`. No earlier sections, training,
+integration extension or fits need to be repeated.
+
+With the observable frozen at the tested hypothesis eta and reference mu=1,
+define `D(mu) = -2 log[L(mu)/L(1)]`. The paired difference splits exactly as
+`delta_q = delta_D(eta) - delta_D(mu_hat)`, where each model uses its own saved
+best fit. The first term tests the fixed hypothesis comparison; the second
+measures the change in the freely fitted minimum. Both are evaluated directly
+and checked against the saved q. The same bank supplies analytical rates and
+binned yields, so the fixed-pair rate contribution cancels within each pair.
+
+Defaults compare the two largest completed integration prefixes, both replicas,
+12/36 bins and the original-bank control. Only the existing selected simulator
+experiments are reconstructed; no optimizer or ratio-network evaluation is
+needed. Read-only bank loading rejects missing section 6 checkpoints. The new
+results authenticate the saved context, predictions, fits and event coordinates.
+Per-toy tables retain flagged experiments and failures, while population means,
+RMS values, paired bank changes and branch comparisons use random controls.
+Reported standard errors condition on the banks and explicitly counted valid
+fits. Signed decomposition plots use linear axes. This diagnoses compression
+and numerical sensitivity; it does not recalibrate coverage.
+
+New tables/checkpoints are saved below
+`results/12_toy_diagnostics/<OUTPUT_TAG>/convergence/<CONVERGENCE_TAG>/decomposition/<DECOMPOSITION_TAG>`
+with matching plot directories. The default `DECOMPOSITION_TAG="fixed_pair"`
+resumes unchanged settings; choose a new decomposition tag if changing this
+diagnostic. The builder appends section 7 while preserving all executed cells
+and outputs above it.

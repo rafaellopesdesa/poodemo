@@ -173,6 +173,100 @@ def _save_state(path, state, rng, completed, fingerprint):
                 state_kind=np.array("analytic_only_v1"), rng_state=np.array(json.dumps(rng.bit_generator.state)))
 
 
+def _convergence_metadata(context, original, source_files, sizes, bin_counts, convergence_tag):
+    metadata = dict(version=1, convergence_tag=convergence_tag, source_fingerprint=context["fingerprint"],
+                    original_integration_fingerprint=original["fingerprint"],
+                    original_files_sha256=source_files, original_sizes=original["sizes"],
+                    sizes=sizes, replicas=original["replicas"],
+                    generated_per_source=original["generated_per_source"],
+                    seed=original["seed"], chunk_size=original["chunk_size"],
+                    n_bins=list(map(int, bin_counts)), mu_values=original["mu_values"],
+                    frozen_observable_rates=original["frozen_observable_rates"],
+                    reference_power=original["reference_power"],
+                    exposure_multiplier=original["exposure_multiplier"],
+                    note="Analytical-only continuation of original RNG streams; fixed generated counts include rejected draws. Prefixes within a replica are correlated, replicas are independent. Original observable normalizers and selector remain frozen.")
+    metadata["fingerprint"] = _digest(metadata)
+    return metadata
+
+
+def _finalize_banks(context, banks, metadata):
+    for (replica, size), bank in banks.items():
+        item = dict(source_fingerprint=context["fingerprint"],
+                    integration_fingerprint=metadata["fingerprint"],
+                    replica=int(replica), generated_per_source=int(size),
+                    cached_original=size in metadata["original_sizes"], selected=bank.pop("selected"))
+        # Include the actual predictions, so downstream caches cannot silently
+        # reuse results if a checkpoint is manually replaced.
+        item["prediction_sha256"] = _digest(dict(rates=bank["rates"].tolist(),
+            templates={f"{b}:{mu}": value.tolist() for (b, mu), value in bank["templates"].items()}))
+        item["fingerprint"] = _digest(item)
+        bank["metadata"] = item
+    return dict(banks=dict(sorted(banks.items())), metadata=metadata)
+
+
+def load_completed_convergence_banks(context, *, convergence_tag="bank_convergence"):
+    """Authenticate and load section 6's completed banks without any mutation.
+
+    Settings come from its saved manifest. Every prefix and replica must already
+    have its completed checkpoints; partial work snapshots are never continued.
+    No directories, RNG draws, network evaluations, or files are created here.
+    The return value is identical to ``prepare_convergence_banks`` for those
+    saved settings, including prediction fingerprints used by the saved refits.
+    """
+    if not isinstance(convergence_tag, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", convergence_tag):
+        raise ValueError("convergence_tag must contain only letters, digits, underscores or hyphens")
+
+    def require(path):
+        if not path.is_file():
+            raise ValueError(f"Missing completed integration artifact {path.name}. "
+                             "Run or complete notebook 12 section 6 and its prerequisite integration section.")
+        return path
+
+    original_dir = Path(context["output_dir"]) / "integration"
+    directory = Path(context["output_dir"]) / "convergence" / convergence_tag / "integration"
+    manifest = json.loads(require(directory / "configuration.json").read_text())
+    payload = {key: value for key, value in manifest.items() if key != "fingerprint"}
+    if manifest.get("version") != 1 or manifest.get("fingerprint") != _digest(payload):
+        raise ValueError("Convergence bank manifest has an invalid fingerprint or version")
+    require(original_dir / "configuration.json")
+    original, specs = _original_configuration(context, original_dir, manifest["n_bins"])
+    original_sizes = original["sizes"]
+    sizes = [_integer(size, "saved convergence size", 2) for size in manifest["sizes"]]
+    if not sizes or sizes != sorted(set(sizes)) or not set(original_sizes).issubset(sizes):
+        raise ValueError("Convergence bank manifest has invalid or missing prefix sizes")
+    extra_sizes = sorted(set(sizes) - set(original_sizes))
+    if any(size <= original_sizes[-1] or size % original["generated_per_source"] for size in extra_sizes):
+        raise ValueError("Convergence bank manifest has an invalid extended prefix size")
+    source_files = {"configuration.json": _file_digest(original_dir / "configuration.json")}
+    banks = {}
+    for replica in range(original["replicas"]):
+        for size in original_sizes:
+            states = []
+            for source in _SOURCES:
+                path = require(original_dir / f"replica_{replica}_{source}_{size}.npz")
+                state, _ = _load_state(path, original["fingerprint"], specs, size, original=True)
+                source_files[path.name] = _file_digest(path)
+                states.append(state)
+            bank = _combine(states, size, specs)
+            path = require(original_dir / f"moments_replica_{replica}_{size}.npz")
+            _check_original_moments(path, bank, specs)
+            source_files[path.name] = _file_digest(path)
+            banks[replica, size] = bank
+    expected = _convergence_metadata(context, original, source_files, sizes, manifest["n_bins"], convergence_tag)
+    if manifest != expected:
+        raise ValueError("Convergence bank configuration or original snapshots changed; "
+                         "complete section 6 with consistent saved inputs before this diagnostic")
+    for replica in range(original["replicas"]):
+        for size in extra_sizes:
+            states = []
+            for source in _SOURCES:
+                path = require(directory / f"replica_{replica}_{source}_{size}.npz")
+                state, _ = _load_state(path, manifest["fingerprint"], specs, size)
+                states.append(state)
+            banks[replica, size] = _combine(states, size, specs)
+    return _finalize_banks(context, banks, manifest)
+
+
 def prepare_convergence_banks(context, *, extra_multiples=(10,), bin_counts=(12, 36),
                               convergence_tag="bank_convergence"):
     """Return every original prefix/replica and extend its exact saved RNG stream.
@@ -215,18 +309,7 @@ def prepare_convergence_banks(context, *, extra_multiples=(10,), bin_counts=(12,
             _check_original_moments(path, bank, specs)
             source_files[path.name] = _file_digest(path)
             banks[replica, size] = bank
-    metadata = dict(version=1, convergence_tag=convergence_tag, source_fingerprint=context["fingerprint"],
-                    original_integration_fingerprint=original["fingerprint"],
-                    original_files_sha256=source_files, original_sizes=original_sizes,
-                    sizes=all_sizes, replicas=original["replicas"],
-                    generated_per_source=original["generated_per_source"],
-                    seed=original["seed"], chunk_size=original["chunk_size"],
-                    n_bins=list(map(int, bin_counts)), mu_values=original["mu_values"],
-                    frozen_observable_rates=original["frozen_observable_rates"],
-                    reference_power=original["reference_power"],
-                    exposure_multiplier=original["exposure_multiplier"],
-                    note="Analytical-only continuation of original RNG streams; fixed generated counts include rejected draws. Prefixes within a replica are correlated, replicas are independent. Original observable normalizers and selector remain frozen.")
-    metadata["fingerprint"] = _digest(metadata)
+    metadata = _convergence_metadata(context, original, source_files, all_sizes, bin_counts, convergence_tag)
     directory = Path(context["output_dir"]) / "convergence" / convergence_tag / "integration"
     manifest = directory / "configuration.json"
     if manifest.exists() and json.loads(manifest.read_text()) != metadata:
@@ -278,15 +361,4 @@ def prepare_convergence_banks(context, *, extra_multiples=(10,), bin_counts=(12,
                 snapshots[replica, source, size] = {k: v.copy() for k, v in state.items()}
         for size in extra_sizes:
             banks[replica, size] = _combine([snapshots[replica, source, size] for source in _SOURCES], size, specs)
-    for (replica, size), bank in banks.items():
-        item = dict(source_fingerprint=context["fingerprint"],
-                    integration_fingerprint=metadata["fingerprint"],
-                    replica=int(replica), generated_per_source=int(size),
-                    cached_original=size in original_sizes, selected=bank.pop("selected"))
-        # Include the actual predictions, so downstream refit caches cannot
-        # silently reuse results if a checkpoint is manually replaced.
-        item["prediction_sha256"] = _digest(dict(rates=bank["rates"].tolist(),
-            templates={f"{b}:{mu}": value.tolist() for (b, mu), value in bank["templates"].items()}))
-        item["fingerprint"] = _digest(item)
-        bank["metadata"] = item
-    return dict(banks=dict(sorted(banks.items())), metadata=metadata)
+    return _finalize_banks(context, banks, metadata)

@@ -1,4 +1,4 @@
-"""Append notebook 12's integration follow-up without touching executed cells.
+"""Append notebook 12's diagnostic follow-ups without touching executed cells.
 
 Run from the repository root: python scripts/build_toy_diagnostics_notebook.py
 An existing follow-up is left untouched. Use --clean only for a fresh notebook
@@ -646,13 +646,242 @@ def convergence_cells():
     return cells
 
 
-def append_convergence_cells(destination):
+DECOMPOSITION_MARKER = "likelihood-decomposition-v1"
+
+DECOMPOSITION_SETUP = r'''
+# Standalone follow-up: only the first two notebook setup/import cells are needed.
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mplhep as hep
+from IPython.display import display
+
+from poodemo.toy_diagnostic_context import prepare_toy_diagnostic_context
+from poodemo.toy_likelihood_decomposition import (
+    run_likelihood_decomposition, plot_likelihood_decomposition,
+)
+
+hep.style.use("ATLAS")  # Typography and ticks; no experiment label.
+plt.rcParams.update({"axes.grid": False, "figure.dpi": 110})
+
+SOURCE_TAG = "toy_study_direct"
+OUTPUT_TAG = "toy_diagnostics"
+CONVERGENCE_TAG = "bank_convergence"  # The completed section 6 run.
+DECOMPOSITION_TAG = "fixed_pair"  # New results, separate from section 6 fits.
+LARGEST_PREFIXES = 2  # Normally 5x and 10x, using both saved replicas.
+DECOMPOSITION_PROGRESS_EVERY = 10
+
+decomposition_context = prepare_toy_diagnostic_context(
+    run, source_tag=SOURCE_TAG, output_tag=OUTPUT_TAG,
+)
+decomposition_figure_dir = (
+    Path(ROOT) / "plots" / "12_toy_diagnostics" / OUTPUT_TAG
+    / "convergence" / CONVERGENCE_TAG / "decomposition" / DECOMPOSITION_TAG
+)
+print("Reading completed section 6:", CONVERGENCE_TAG)
+print("Largest independent prefixes per replica:", LARGEST_PREFIXES)
+print("The original bank is also retained as a control.")
+print("Reference hypothesis: mu=1; observable frozen at eta=mu_test.")
+'''
+
+DECOMPOSITION_RUN = r'''
+decomposition_study = run_likelihood_decomposition(
+    decomposition_context,
+    convergence_tag=CONVERGENCE_TAG,
+    decomposition_tag=DECOMPOSITION_TAG,
+    largest_prefixes=LARGEST_PREFIXES,
+    progress_every=DECOMPOSITION_PROGRESS_EVERY,
+)
+print("Provenance:")
+display(pd.Series({key: value for key, value in decomposition_study["metadata"].items()
+                   if key != "configuration"}))
+decomposition_records = decomposition_study["records"]
+failed_decompositions = decomposition_records.loc[~decomposition_records.decomposition_valid]
+if len(failed_decompositions):
+    print("Failed source fits or decomposition checks (complete records also saved):")
+    display(failed_decompositions[[
+        "mu_test", "toy_id", "bank_kind", "replica", "generated_per_source", "model",
+        "valid", "decomposition_message",
+    ]])
+print("Maximum absolute q reproduction error:",
+      decomposition_records.q_reproduction_error.abs().max())
+if (failed_decompositions.valid).any():
+    raise RuntimeError(
+        "A saved valid fit failed the fixed-reference likelihood checks. "
+        "Inspect the displayed failures before interpreting the decomposition."
+    )
+print("Maximum absolute paired decomposition identity error:",
+      decomposition_study["paired"].reconstruction_error.abs().max())
+
+decomposition_summary = decomposition_study["summary"]
+decomposition_overall = decomposition_summary.loc[decomposition_summary.branch_pair.eq("all")]
+decomposition_keys = ["mu_test", "bank_kind", "replica", "generated_per_source", "model"]
+print("Random-control counts; means and RMS condition on jointly valid fits:")
+with pd.option_context("display.max_rows", None):
+    display(decomposition_overall[decomposition_keys + [
+        "n_random", "n_paired_valid", "n_paired_failed",
+    ]])
+for statistic in ("mean", "rms"):
+    print(statistic, "of each signed term: delta_q = delta_pair - delta_min")
+    columns = [f"{statistic}_{term}{suffix}"
+               for term in ("delta_pair", "delta_min", "delta_q") for suffix in ("", "_se")]
+    with pd.option_context("display.max_rows", None, "display.max_columns", None):
+        display(decomposition_overall[decomposition_keys + columns])
+print("Branch strata, ordered analytical / binned; conditional on branch membership:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(decomposition_summary.loc[decomposition_summary.branch_pair.ne("all"),
+        decomposition_keys + ["branch_pair", "n_stratum", "branch_fraction",
+                              "mean_delta_pair", "mean_delta_min", "mean_delta_q"]])
+print("Changes between bank prefixes and independent replicas on the same toys:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(decomposition_study["changes"].loc[
+        decomposition_study["changes"].comparison_type.ne("original"),
+        ["mu_test", "model", "term", "comparison_type", "from_replica", "to_replica",
+         "from_size", "to_size", "n_valid", "n_failed", "mean_change", "paired_se", "rms_change"],
+    ])
+print("Complete per-toy tables are saved as CSVs alongside the new results.")
+'''
+
+DECOMPOSITION_PLOTS = r'''
+decomposition_figures = plot_likelihood_decomposition(
+    decomposition_study, output=decomposition_figure_dir,
+)
+for name, figure in decomposition_figures.items():
+    print(name)
+    display(figure)
+    plt.close(figure)
+print("New tables:", decomposition_study["metadata"]["output_dir"])
+print("New figures:", decomposition_figure_dir)
+'''
+
+
+def decomposition_cells():
+    cells = [
+        md(r"""
+        ### 7. Follow-up: fixed-pair comparison versus the freely fitted minimum
+
+        **Run only this new section.** In a fresh runtime with the updated source,
+        execute the first two notebook code cells (setup, then common imports and
+        `create_run`), keep the same run name, mode and configuration, and jump
+        here. Section 6 must already be complete on disk; it does not need to run
+        again. Keep its `SOURCE_TAG`, `OUTPUT_TAG` and `CONVERGENCE_TAG` below.
+
+        We separate two reasons why the binned and analytical test statistics
+        can differ. With the observable frozen at \(\eta=\mu_{\rm test}\), define
+        for either likelihood \(m\)
+
+        \[
+        D_{m,\eta}(\mu)=-2\log\frac{L_{m,\eta}(\mu)}{L_{m,\eta}(1)},\qquad
+        q_m(\eta)=D_{m,\eta}(\eta)-D_{m,\eta}(\hat\mu_m).
+        \]
+
+        The unbinned analytical likelihood does not itself depend on the
+        observable partition. The subscript \(\eta\) records the matched bank
+        and frozen partition used in its comparison with the binned model.
+        Writing \(\Delta=\mathrm{binned}-\mathrm{analytical}\),
+
+        \[
+        \boxed{\Delta q=\underbrace{\Delta D(\eta)}_{\text{fixed-pair term}}
+        -\underbrace{\Delta D(\hat\mu)}_{\text{minimum term}}.}
+        \]
+
+        Here the minimum term uses **each model's own saved best fit**. It is
+        not the difference evaluated at one common best-fit parameter. Its
+        contribution to \(\Delta q\) has a minus sign.
+
+        The fixed-pair term tests the comparison between \(\eta\) and the
+        reference \(1\) that the ratio observable is designed to preserve
+        before binning. The minimum term tests the change in improvement of
+        fit when the denominator is free to explore the full parameter range.
+        Finite bins and finite integration samples can affect both terms.
+        """),
+        code(DECOMPOSITION_SETUP),
+        md(r"""
+        #### Reuse the completed fits and reconstruct their exact experiments
+
+        Defaults use the two largest completed prefixes (normally 5x and 10x),
+        both independent replicas, 12 and 36 bins, and the original-bank control.
+        No integration samples or new toy IDs are added. The saved simulator
+        experiments are reconstructed once each, passed through the same frozen
+        preselection, and shared by all comparisons. No ratio-network evaluation
+        or optimization is required in this stage.
+
+        We evaluate \(D(\eta)\) and \(D(\hat\mu)\) at the stored fit result and
+        check that their difference reproduces the saved \(q\). The context,
+        predictions, fit settings, selected toy IDs and reconstructed event
+        coordinates are checked against section 6. Missing or incompatible
+        inputs fail visibly rather than triggering new fits or bank generation.
+        Each analytical/binned pair uses the same selected-rate integrals, so
+        its fixed-pair Poisson rate contribution cancels up to numerical
+        precision; the remaining difference probes the event/bin log ratios.
+
+        Population summaries use only the original **random controls**. Failed
+        fits are explicitly counted; valid-only summaries are conditional on
+        joint validity. The additional flagged experiments remain in the
+        per-toy CSVs. Error bars are paired toy-sampling standard errors
+        conditional on the banks, not finite-MC integration uncertainties.
+        Matching new checkpoints resume under `DECOMPOSITION_TAG`.
+        """),
+        code(DECOMPOSITION_RUN),
+        md(r"""
+        #### Plot both terms, their spread, and their bank dependence
+
+        Inspect the signed mean **and RMS** of each term: a small signed mean
+        can conceal cancellation between large positive and negative errors.
+        The per-toy plots identify whether the two fitted minima occupy the
+        same or different branches, using the saved split at \(\mu=1\).
+        This branch label is an operational diagnostic, not a fit constraint.
+
+        All signed decomposition axes are **linear**, because these quantities
+        can be negative. Logarithmic test-statistic distributions in earlier
+        sections serve a different purpose. Compare each experiment across
+        bank sizes and replicas before interpreting a residual as compression.
+        """),
+        code(DECOMPOSITION_PLOTS),
+        md(r"""
+        #### What would identify the next step?
+
+        - **Small fixed-pair error, large minimum contribution:** the intended
+          hypothesis comparison is preserved more accurately than the full
+          family explored by the fitted denominator. Inspect branch changes;
+          adding bins to the same one-dimensional ratio may not cure this.
+        - **Terms change materially between large banks or their replicas:**
+          integration precision remains a limiting uncertainty. Two replicas
+          diagnose sensitivity but do not establish a finite-MC error model.
+        - **Stable banks and smaller fixed-pair RMS with 36 bins:** finite-bin
+          coarsening contributes to the discrepancy. Check the minimum term
+          separately; the total test statistic need not improve monotonically.
+        - **Failed reproduction or invalid fits:** resolve those records before
+          interpreting the corresponding conditional means or tails.
+
+        A possible subsequent control is the two-dimensional analytical
+        statistic \((u,v)\), with the event count, where
+        \(u=I/(B+\mathrm{NI})\), \(v=S/(B+\mathrm{NI})\) and
+        \(I=\mathrm{SBI}-S-B\). For \(\kappa=\sqrt\mu\), the stat-only intensity
+        is \(\lambda_\kappa=(B+\mathrm{NI})(1+\kappa u+\kappa^2v)\).
+        Before binning this retains the parameter dependence of the full
+        family wherever the reference intensity is positive. A finite 2D
+        histogram would still have binning and integration errors. This section
+        does not implement that separate control.
+
+        These tests do not recalibrate confidence intervals. Once the numerical
+        and compression contributions are understood, assess coverage using
+        each binned model's own toys and physical simulator toys. Agreement with
+        the analytical distribution of \(q\) is not itself a coverage criterion.
+        """),
+    ]
+    cells[0].metadata["poodemo_append_section"] = DECOMPOSITION_MARKER
+    return cells
+
+
+def append_section_cells(destination, marker, factory, id_prefix):
     """Append only new cells, preserving the original notebook text verbatim."""
     original = destination.read_text()
     notebook = json.loads(original)
-    if any(cell.get("metadata", {}).get("poodemo_append_section") == CONVERGENCE_MARKER
+    if any(cell.get("metadata", {}).get("poodemo_append_section") == marker
            for cell in notebook["cells"]):
-        print(f"Convergence section already present; preserved {destination}")
+        print(f"{id_prefix.capitalize()} section already present; preserved {destination}")
         return False
 
     # Locate the end of the top-level cells array without normalizing any old
@@ -662,10 +891,10 @@ def append_convergence_cells(destination):
     parsed_cells, cells_end = json.JSONDecoder().raw_decode(original, cells_start)
     if parsed_cells != notebook["cells"]:
         raise ValueError("Could not identify the notebook's top-level cells array")
-    extra = convergence_cells()
+    extra = factory()
     used_ids = {cell.get("id") for cell in notebook["cells"]}
     for index, cell in enumerate(extra):
-        cell.id = f"convergence-{index:03d}"
+        cell.id = f"{id_prefix}-{index:03d}"
         if cell.id in used_ids:
             raise ValueError(f"Notebook cell ID already exists: {cell.id}")
         cell.source = cell.source.splitlines(keepends=True)
@@ -685,12 +914,17 @@ def append_convergence_cells(destination):
     return True
 
 
+def append_convergence_cells(destination):
+    return append_section_cells(destination, CONVERGENCE_MARKER, convergence_cells, "convergence")
+
+
 def build_toy_diagnostics_notebook(*, clean=False):
     destination = REPO / "notebooks" / "12_toy_diagnostics.ipynb"
     if destination.exists() and not clean:
         append_convergence_cells(destination)
+        append_section_cells(destination, DECOMPOSITION_MARKER, decomposition_cells, "decomposition")
     else:
-        write(destination.name, diagnostic_cells() + convergence_cells())
+        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells())
 
 
 if __name__ == "__main__":
