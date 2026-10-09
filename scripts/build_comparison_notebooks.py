@@ -214,19 +214,20 @@ TOY_SETTINGS = r'''
 from poodemo.toy_study import run_toy_study, plot_toy_study
 
 MU_VALUES = (0.0, 1.4)  # In each ensemble, mu_true = mu_test.
-N_TOYS = 12 if MODE == "smoke" else 500
+N_TOYS = 12 if MODE == "smoke" else 5000
 N_BINS = 12
 REFERENCE_RATIO_A = 100.0  # Direct 12-bin observable, as in notebook 08.
 EXPOSURE = 1.0  # Scale all selected expected yields together.
 SEED = 110923
 MU_BOUNDS = (0.0, 2.0)  # 1.4 is an interior tested point, not a fit boundary.
 FIT_GRID_SIZE = 65  # Grid in kappa=sqrt(mu), followed by local refinement.
-OUTPUT_TAG = "toy_study_direct"  # Fresh results; preserve the earlier spline-toy study.
+OUTPUT_TAG = "toy_study_direct"  # Keep unchanged to extend completed direct-bin toys.
 PROGRESS_EVERY = 10
 
 print(f"{N_TOYS} toys per case at each of {MU_VALUES}; five comparisons")
 print(f"Exposure={EXPOSURE:g}; mu fit range={MU_BOUNDS}; stat-only")
-print("Matching completed rows are reused. Increase N_TOYS to extend an ensemble.")
+print("Matching completed rows are reused, including a previous 500-toy run.")
+print("The production default extends that run to 5000 toys; keep OUTPUT_TAG unchanged.")
 '''
 
 TOY_RUN = r'''
@@ -345,10 +346,12 @@ def toy_cells():
         md(r"""
         ### Run or resume the experiment ensembles
 
-        The default 500 toys per case and hypothesis are a first calibration
-        study, not a precise tail measurement. `MODE="smoke"` uses 12 toys to
-        check execution only. Increase `N_TOYS` in this same study to extend
-        it; deterministic seeds and saved rows preserve completed toys.
+        The production default is **5000 toys per case and hypothesis**.
+        `MODE="smoke"` keeps 12 toys to check execution only. Keep the same
+        `OUTPUT_TAG="toy_study_direct"` to extend a completed 500-toy run to
+        5000; deterministic seeds and saved rows reuse the existing toys and
+        generate only the additional ones. Increasing `N_TOYS` does not require
+        restarting the ensemble. Even 5000 toys leave uncertainty in rare tails.
         Changing a core setting such as exposure, the fit range, or observable
         requires a different `OUTPUT_TAG`. Periodic progress messages identify
         completed experiments. The full sample of test statistics and fitted
@@ -362,7 +365,10 @@ def toy_cells():
         ### Empirical distributions and calibrated acceptance
 
         Compare the test-statistic histograms, empirical survival curves,
-        quantiles, and fitted-\(\mu\) distributions. Similar Asimov scans do
+        quantiles, and fitted-\(\mu\) distributions. Both the test-statistic
+        histograms and survival curves use **logarithmic vertical axes** to
+        expose the tails. Their test-statistic axes remain linear so that the
+        probability mass at zero remains represented. Similar Asimov scans do
         not force these sampling distributions to agree. In particular,
         the zero boundary and the second interference minimum can invalidate
         a simple common asymptotic reference. The gray dashed asymptotic

@@ -1,5 +1,21 @@
 # Validation
 
+## Larger toy ensembles and logarithmic tails (9 October 2026)
+
+Notebook 11 and its backend now default to 5,000 production toys per hypothesis
+and fit/source combination; smoke mode remains at 12. The output tag and
+scientific cache fingerprint are unchanged, so completed direct-bin toys are
+reused when extending an existing run. The deterministic resume/extension
+regression test passed.
+
+Test-statistic histograms and inclusive survival curves now use log-y axes,
+with positive display limits that include probabilities below one toy's
+contribution. The q axis remains linear and includes the zero boundary. No
+pseudocounts are added. All four figures rendered from saved real-model toy
+results; axis settings and notebook format/source parity were checked, and
+the histogram layout was inspected. This update does not run a new production
+ensemble or change the fitted-mu and coverage plot scales.
+
 ## Direct bin yields for notebook 11 (9 October 2026)
 
 Notebook 11 now integrates process bin yields directly at every fixed eta,

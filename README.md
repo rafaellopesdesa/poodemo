@@ -645,7 +645,7 @@ define the binned model's own Poisson toys. No spline interpolation is used.
 
 Rerun only notebook 11 in a fresh runtime after this update. Its default
 `OUTPUT_TAG="toy_study_direct"` keeps the new direct-yield study separate from
-earlier spline-based results. The default is 500 toys per hypothesis and five
+earlier spline-based results. The default is 5,000 toys per hypothesis and five
 fit/source combinations (12 toys in smoke mode). Each complete toy ID is checkpointed. Increasing
 `N_TOYS` resumes and extends the same deterministic streams; changed models,
 banks, powers, exposure or fit settings require a new `OUTPUT_TAG`. Large event
@@ -654,6 +654,11 @@ histograms and survival curves, quantiles, fitted-mu distributions, and empirica
 cross-calibration. Even self-model toy IDs set critical values; odd IDs evaluate
 acceptance. Binomial errors are conditional on those estimated critical values;
 tail precision and finite calibration-sample uncertainty need larger ensembles.
-Asymptotic curves are illustrative references, not imposed calibration laws.
+Test-statistic histograms and survival curves use logarithmic vertical axes
+to display their tails; the horizontal q axis remains linear and includes zero.
+Empty bins are not assigned artificial positive contents. Asymptotic curves
+are illustrative references, not imposed calibration laws. Increasing an
+existing direct-yield run from 500 to 5,000 toys reuses its completed rows;
+keep the same `OUTPUT_TAG`, seed and scientific settings.
 Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON manifest,
 including the directly integrated process yields in `<OUTPUT_TAG>_bin_yields.csv`.

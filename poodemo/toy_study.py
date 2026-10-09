@@ -170,7 +170,7 @@ def summarize_toys(results, levels=(.68, .90, .95, .99)):
     return pd.DataFrame(summaries), pd.DataFrame(coverage)
 
 
-def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
+def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                   reference_power=100., exposure=1., seed=None, mu_bounds=(0., 2.),
                   grid_size=65, output_tag="toy_study_direct", progress_every=10):
     """Run/resume five stat-only ensembles with paired simulator event toys.
@@ -331,7 +331,11 @@ def run_toy_study(run, *, n_toys=500, mu_values=(0., 1.4), n_bins=12,
 
 
 def plot_toy_study(study, output):
-    """Save mplhep-style distributions, inclusive survival curves and coverage."""
+    """Save mplhep plots with logarithmic q densities and survival curves.
+
+    The q axis stays linear to retain the physical zero boundary. Zero
+    frequencies stay outside the visible log range, without adding pseudocounts.
+    """
     import matplotlib.pyplot as plt
     import mplhep as hep
     from scipy.stats import chi2
@@ -347,6 +351,7 @@ def plot_toy_study(study, output):
             for ax, mu in zip(axes[0], mus):
                 subset = results.loc[results.mu_test == mu]
                 finite = subset.loc[subset.valid.astype(bool) & np.isfinite(subset.q)]
+                largest_ensemble = max(1, int(finite.groupby("case").size().max())) if len(finite) else 1
                 if name == "mu_hat":
                     lo, hi = study["metadata"]["configuration"]["mu_bounds"]
                     edges = np.linspace(lo, hi, 31)
@@ -379,9 +384,17 @@ def plot_toy_study(study, output):
                     factor = .5 if mu == 0. else 1.
                     asym_label = (r"$\frac{1}{2}\delta_0+\frac{1}{2}\chi^2_1$ reference" if mu == 0. else r"$\chi^2_1$ reference")
                     ax.plot(grid, factor * chi2.sf(grid, 1), "--", color="0.5", label=asym_label)
-                    ax.set(xlabel=r"$q_\mu=-2\log[L(\mu)/L(\widehat{\mu})]$", ylabel=r"$P(q_\mu\geq q)$", xlim=(0, edges[-1]), ylim=(0, 1.05))
+                    ax.set(xlabel=r"$q_\mu=-2\log[L(\mu)/L(\widehat{\mu})]$", ylabel=r"$P(q_\mu\geq q)$", xlim=(0, edges[-1]),
+                           ylim=(.5 / largest_ensemble, 1.3))
+                    ax.set_yscale("log", nonpositive="clip")
                 else:
                     ax.set(xlabel=r"$q_\mu=-2\log[L(\mu)/L(\widehat{\mu})]$", ylabel="Toy probability density", xlim=(0, edges[-1]))
+                    # Display below a single-toy bin probability without
+                    # inventing a nonzero value for unoccupied bins.
+                    lower = .5 / (largest_ensemble * np.max(np.diff(edges)))
+                    upper = ax.get_ylim()[1] if len(finite) else 10. * lower
+                    ax.set_ylim(lower, max(upper * 1.4, 2. * lower))
+                    ax.set_yscale("log", nonpositive="clip")
                 ax.legend(fontsize=10, frameon=False)
                 failed = len(subset) - len(finite)
                 if failed:
