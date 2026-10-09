@@ -1,5 +1,37 @@
 # Validation
 
+## Notebook 12 integration-convergence follow-up (9 October 2026)
+
+Section 6 was appended to the user's executed notebook. All 21 existing cell
+objects, outputs, execution counts and notebook metadata were preserved; seven
+new cells pass notebook-schema and code-syntax checks. The builder is now
+append-only by default and idempotent; `--clean` explicitly requests a fresh
+notebook without saved outputs.
+
+- The regression suite passed **237 tests**, with 11 optional JAX checks skipped.
+  After the final resume check was added, all **12 focused convergence tests**
+  passed. These cover both-bank reuse, analytical selected-rate normalization,
+  rejected proposals, exact RNG continuation, interrupted resume, source and
+  template fingerprints, matching analytical/binned integrals, paired errors,
+  failure handling, and event-coordinate checks for partial-toy resume.
+- An actual saved-network smoke run reused the old 1,000/2,000-event integration
+  prefixes and extended both replicas to 4,000 generated events per process.
+  Four previously selected physical toys produced **84 fits**, including the
+  original-bank controls. Resume returned identical results and all earlier
+  diagnostic files retained their byte checksums. A failing stub confirmed no
+  ratio-network evaluations were needed during bank extension or refitting.
+- All five plot families rendered to PDF and PNG; paired-gap and bank-change
+  plots were visually checked. The appended code cells were exercised against
+  the saved smoke run with reduced integration budgets.
+
+Production defaults reuse the original 1/2/5-times banks and extend both to
+10 times the diagnostic base count, with the original saved toy selection.
+Analytical rate integrals and binned yields change together; event densities,
+observable normalizers, bin boundaries and fit settings remain fixed. Paired
+errors describe toy sampling conditional on the banks; two replicas do not
+constitute a fitted finite-MC uncertainty model or establish convergence by
+themselves. No production refit ensemble was run here.
+
 ## Notebook 12 toy diagnostics (9 October 2026)
 
 Added notebook 12 and a standalone builder that leaves executed notebooks

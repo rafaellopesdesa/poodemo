@@ -1,8 +1,13 @@
-"""Build notebook 12 alone, preserving every existing notebook and its outputs.
+"""Append notebook 12's integration follow-up without touching executed cells.
 
 Run from the repository root: python scripts/build_toy_diagnostics_notebook.py
+An existing follow-up is left untouched. Use --clean only for a fresh notebook
+without saved outputs; all other notebooks are always left untouched.
 """
-from build_notebooks import BOOTSTRAP, COMMON_IMPORTS, code, md, write
+import argparse
+import json
+
+from build_notebooks import BOOTSTRAP, COMMON_IMPORTS, REPO, code, md, write
 
 
 SETUP = r"""
@@ -424,9 +429,272 @@ def diagnostic_cells():
     ]
 
 
-def build_toy_diagnostics_notebook():
-    write("12_toy_diagnostics.ipynb", diagnostic_cells())
+CONVERGENCE_MARKER = "integration-convergence-v1"
+
+CONVERGENCE_SETUP = r'''
+# This follow-up is independent of the earlier analysis-stage variables.
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mplhep as hep
+from IPython.display import display
+
+from poodemo.toy_diagnostic_context import prepare_toy_diagnostic_context
+from poodemo.toy_convergence_banks import prepare_convergence_banks
+from poodemo.toy_convergence_refits import (
+    load_convergence_selection, run_convergence_refits, plot_convergence_refits,
+)
+
+hep.style.use("ATLAS")  # Typography and ticks; no experiment label.
+plt.rcParams.update({"axes.grid": False, "figure.dpi": 110})
+
+SOURCE_TAG = "toy_study_direct"
+OUTPUT_TAG = "toy_diagnostics"  # Must match the completed stages above.
+CONVERGENCE_TAG = "bank_convergence"  # New checkpoints live below this tag.
+EXTRA_BANK_MULTIPLES = (10,)  # Extend the saved 1x/2x/5x banks, for both replicas.
+CONVERGENCE_BIN_COUNTS = (12, 36)
+CONVERGENCE_MU_BOUNDS = (0.0, 3.0)
+CONVERGENCE_GRID_SIZE = 129
+CONVERGENCE_PROGRESS_EVERY = 10
+
+convergence_context = prepare_toy_diagnostic_context(
+    run, source_tag=SOURCE_TAG, output_tag=OUTPUT_TAG,
+)
+convergence_selection = load_convergence_selection(convergence_context)
+convergence_figure_dir = (
+    Path(ROOT) / "plots" / "12_toy_diagnostics" / OUTPUT_TAG
+    / "convergence" / CONVERGENCE_TAG
+)
+convergence_figure_dir.mkdir(parents=True, exist_ok=True)
+
+
+def show_convergence_figures(figures):
+    for name, figure in figures.items():
+        print(name)
+        display(figure)
+        plt.close(figure)
+
+
+print("Verified saved toy selection; no new random subset was drawn:")
+display(convergence_selection.groupby("mu_test").agg(
+    selected=("toy_id", "size"),
+    random=("is_random", "sum"),
+    flagged=("is_flagged", "sum"),
+))
+print("New bank multiples:", EXTRA_BANK_MULTIPLES)
+print("Population summaries use only the saved random subset.")
+print("New diagnostic tag:", CONVERGENCE_TAG)
+'''
+
+CONVERGENCE_BANKS = r'''
+convergence_banks = prepare_convergence_banks(
+    convergence_context,
+    extra_multiples=EXTRA_BANK_MULTIPLES,
+    bin_counts=CONVERGENCE_BIN_COUNTS,
+    convergence_tag=CONVERGENCE_TAG,
+)
+print("Integration provenance:")
+display(pd.Series(convergence_banks["metadata"]))
+print("Independent bank checkpoints available for refitting:")
+display(pd.DataFrame([
+    {"replica": replica, "generated_per_source": size}
+    for replica, size in sorted(convergence_banks["banks"])
+]))
+'''
+
+CONVERGENCE_FITS = r'''
+convergence_study = run_convergence_refits(
+    convergence_context, convergence_selection, convergence_banks,
+    mu_bounds=CONVERGENCE_MU_BOUNDS,
+    grid_size=CONVERGENCE_GRID_SIZE,
+    bin_counts=CONVERGENCE_BIN_COUNTS,
+    progress_every=CONVERGENCE_PROGRESS_EVERY,
+    convergence_tag=CONVERGENCE_TAG,
+)
+
+count_mismatches = convergence_study["refits"].loc[
+    ~convergence_study["refits"].count_reproduced.astype(bool)
+]
+if len(count_mismatches):
+    display(count_mismatches)
+    raise RuntimeError(
+        "Reconstructed event counts differ from the saved experiments. "
+        "Inspect these records before interpreting convergence results."
+    )
+
+convergence_summary = convergence_study["summary"]
+bank_columns = ["mu_test", "bank_kind", "replica", "generated_per_source", "model"]
+print("Random-subset fit checks, including original-bank controls:")
+display(convergence_summary[bank_columns + [
+    "n_random", "n_valid", "n_failed", "upper_boundary_fraction",
+]])
+print("Mean q and its toy-sampling standard error, conditional on each bank:")
+display(convergence_summary[bank_columns + ["mean_q", "mean_q_se"]])
+print("Binned minus matched analytical fit on the same toys and integration bank:")
+display(convergence_summary.loc[convergence_summary.model.ne("analytic"), bank_columns + [
+    "n_paired_valid", "n_paired_failed", "mean_delta_q", "mean_delta_q_se",
+    "branch_disagreement_fraction", "branch_disagreement_se",
+]])
+print("Paired changes in the gap with bank size and between independent replicas:")
+display(convergence_study["convergence"].loc[
+    convergence_study["convergence"].metric.eq("gap")
+])
+show_convergence_figures(plot_convergence_refits(
+    convergence_study, output=convergence_figure_dir,
+))
+print("New tables and checkpoints:", convergence_study["metadata"]["output_dir"])
+print("New figures:", convergence_figure_dir)
+'''
+
+
+def convergence_cells():
+    cells = [
+        md(r"""
+        ### 6. Follow-up: repeat the paired fits across independent, larger banks
+
+        **Start here for the new tests.** In a fresh runtime, execute the first
+        two code cells of this notebook: runtime setup, then common imports and
+        `create_run`. Keep the same v4 run name, mode, and configuration. Then
+        jump directly to this section. The completed stages above do not need
+        to run again, and their saved results remain available for comparison.
+
+        We now refit the **exact same selected simulator experiments** with
+        both independent integration replicas, at every saved bank size and
+        at a new, larger size. The default extends each 1x/2x/5x bank to 10x.
+        The analytical benchmark receives rate integrals from the same bank
+        used for the corresponding binned predictions. Its event densities
+        remain analytical; its selected-rate integrals are numerical.
+
+        This addresses two questions separately: whether the result changes
+        when replacing replica 0 by replica 1, and whether those changes shrink
+        as each bank grows. We compare mean \(q_\mu\), the paired
+        binned-minus-analytical difference, the zero-\(q\) fraction, and branch
+        disagreement. The 12-bin model and its nested 36-bin refinement use the
+        same events, fit bounds, minimizer, and integration proposals.
+
+        The observable, original normalization constants, networks, physical
+        exposure, and preselection stay frozen. These templates use the
+        **analytical ratio observable**, as in the completed refit stage; the
+        bank extension evaluates the frozen selector and analytical densities,
+        without retraining networks or evaluating new learned density ratios.
+
+        **Keep `OUTPUT_TAG` unchanged:** it locates the completed integration
+        checkpoints and saved toy selection. New outputs live under
+        `convergence/CONVERGENCE_TAG`. Matching checkpoints resume; if changing
+        the new settings, use a new `CONVERGENCE_TAG` (for example, to request
+        `EXTRA_BANK_MULTIPLES=(10, 20)`). The original stages are preserved.
+        """),
+        code(CONVERGENCE_SETUP),
+        md(r"""
+        #### Recover both replicas and extend their integration prefixes
+
+        The saved 1x/2x/5x component sums are reused. Only the additional proposals
+        needed for the larger banks are generated and preselected. Sample sizes
+        count generated events **per proposal source before preselection**;
+        multiplying the bank size does not multiply the experiment's luminosity.
+
+        Within a replica, larger banks contain the smaller prefixes and are
+        therefore correlated. Replica 0 and replica 1 have independent proposal
+        streams. The helper verifies the saved configuration and retains this
+        distinction in its provenance. This stage can take time; intermediate
+        checkpoints allow it to resume after interruption.
+        """),
+        code(CONVERGENCE_BANKS),
+        md(r"""
+        #### Refit the same experiments and measure paired changes
+
+        The saved `refit_selection.csv` is checked against the original refit
+        configuration. No toy IDs are redrawn. Both the random controls and
+        flagged experiments are retained, with their original membership flags.
+        Only the **random subset** enters population summaries; the additional
+        flagged toys remain useful individual diagnostics.
+
+        For each bank, compare the binned result with the analytical fit using
+        **that same bank's selected rates**. The convergence tables then compare
+        each experiment with itself across sizes and replicas. Their paired
+        standard errors measure variation across the sampled experiments,
+        conditional on the banks. They are not errors on the MC integration
+        itself. Failed fits and upper-bound hits must be inspected alongside
+        the means; they are not silently counted as successful closure.
+        """),
+        code(CONVERGENCE_FITS),
+        md(r"""
+        #### How to interpret this follow-up
+
+        - If both replicas approach similar means and paired gaps as their
+          sizes grow, the original discrepancy was partly integration error.
+        - If the analytical mean moves as well, the earlier analytical curve
+          was not yet an integration-independent reference.
+        - If the binned-minus-analytical gap remains stable across the larger
+          independent banks, inspect the paired branch changes and 12-to-36-bin
+          comparison before attributing it to finite-MC noise.
+        - If replicas still disagree, increase the integration budget before
+          drawing a conclusion about the remaining compression effect.
+
+        Two independent replicas provide a sensitivity check, not a precise
+        estimate of MC uncertainty and not a profiled finite-MC statistical
+        model. Shared toy events make comparisons more precise; they do not
+        remove bank uncertainty. Prefix growth need not improve every result
+        monotonically. The fixed-reference ratio preserves a particular
+        hypothesis comparison, not necessarily the full likelihood family
+        explored by the freely fitted denominator, so agreement of all test
+        statistic distributions is not guaranteed even after convergence.
+        """),
+    ]
+    cells[0].metadata["poodemo_append_section"] = CONVERGENCE_MARKER
+    return cells
+
+
+def append_convergence_cells(destination):
+    """Append only new cells, preserving the original notebook text verbatim."""
+    original = destination.read_text()
+    notebook = json.loads(original)
+    if any(cell.get("metadata", {}).get("poodemo_append_section") == CONVERGENCE_MARKER
+           for cell in notebook["cells"]):
+        print(f"Convergence section already present; preserved {destination}")
+        return False
+
+    # Locate the end of the top-level cells array without normalizing any old
+    # cell, output, execution count, or notebook metadata through nbformat.
+    cells_key = original.index('"cells"')
+    cells_start = original.index("[", cells_key)
+    parsed_cells, cells_end = json.JSONDecoder().raw_decode(original, cells_start)
+    if parsed_cells != notebook["cells"]:
+        raise ValueError("Could not identify the notebook's top-level cells array")
+    extra = convergence_cells()
+    used_ids = {cell.get("id") for cell in notebook["cells"]}
+    for index, cell in enumerate(extra):
+        cell.id = f"convergence-{index:03d}"
+        if cell.id in used_ids:
+            raise ValueError(f"Notebook cell ID already exists: {cell.id}")
+        cell.source = cell.source.splitlines(keepends=True)
+    serialized = json.dumps(extra, indent=2, ensure_ascii=False)
+    inner = serialized[2:-2]  # Strip only the new array's opening/closing lines.
+    inner = "\n".join("  " + line for line in inner.splitlines())
+    insertion = ",\n" if notebook["cells"] else "\n"
+    updated = original[:cells_end - 1].rstrip() + insertion + inner + "\n  " + original[cells_end - 1:]
+    parsed_updated = json.loads(updated)
+    if parsed_updated["cells"][:len(notebook["cells"])] != notebook["cells"]:
+        raise AssertionError("Appending changed an existing notebook cell")
+    for key in notebook:
+        if key != "cells" and parsed_updated[key] != notebook[key]:
+            raise AssertionError("Appending changed notebook metadata")
+    destination.write_text(updated)
+    print(f"Appended {len(extra)} cells to {destination}; existing cells preserved")
+    return True
+
+
+def build_toy_diagnostics_notebook(*, clean=False):
+    destination = REPO / "notebooks" / "12_toy_diagnostics.ipynb"
+    if destination.exists() and not clean:
+        append_convergence_cells(destination)
+    else:
+        write(destination.name, diagnostic_cells() + convergence_cells())
 
 
 if __name__ == "__main__":
-    build_toy_diagnostics_notebook()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--clean", action="store_true",
+                        help="Regenerate notebook 12 without saved outputs")
+    build_toy_diagnostics_notebook(clean=parser.parse_args().clean)

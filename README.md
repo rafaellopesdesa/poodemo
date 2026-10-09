@@ -701,3 +701,35 @@ inputs require a new diagnostic `OUTPUT_TAG`. Tables/manifests and figures go to
 run tag changes are needed. These checks distinguish calibration and numerical
 issues from differences in information: matching the analytical distribution
 of q is not by itself a coverage criterion.
+
+Notebook 12 also has an appended **section 6: integration convergence**. After
+updating the checkout in a fresh Colab runtime, run the original setup and
+common-import cells, then jump directly to section 6. Keep the same `RUN_NAME`,
+`MODE`, `CONFIG_OVERRIDES`, `SOURCE_TAG` and original diagnostic `OUTPUT_TAG`.
+The previous notebook 12 sections do not need to be rerun.
+
+This section reloads the exact saved refit selection and both integration
+replicas. It uses all completed prefixes (normally 1×, 2× and 5× the diagnostic
+base budget), then continues each replica's saved RNG stream to 10× by default.
+For the standard 250,000-event base, the new largest bank has 2.5 million
+**generated** proposals per S/B/NI source per replica. Earlier integration
+checkpoints are reused, and extending the banks evaluates only the frozen
+preselection and analytical densities, without reevaluating ratio networks on
+new bank points.
+
+Each reconstructed physical toy is shared by every bank comparison. Analytical
+unbinned rates and 12/36-bin yields are changed together while the observable,
+its normalization, bin boundaries, fit range and optimizer remain fixed.
+Convergence plots compare mean q, paired binned-minus-analytical differences,
+branch and zero-q probabilities, and changes between bank prefixes and replicas.
+Population summaries use the original random controls; flagged experiments
+remain diagnostic examples. Error bars from the paired toy sample condition on
+the chosen banks. Correlated prefixes and two independent replicas do not define
+a full finite-MC uncertainty model or certify convergence automatically.
+
+New outputs are under the original diagnostic directories in
+`convergence/<CONVERGENCE_TAG>/`, with default
+`CONVERGENCE_TAG="bank_convergence"`. Completed refits resume. To change the new
+study's settings, choose a new `CONVERGENCE_TAG`, while retaining the original
+`OUTPUT_TAG` so its saved banks and toy selection can be found. The notebook
+builder appends this section without replacing earlier executed cells.
