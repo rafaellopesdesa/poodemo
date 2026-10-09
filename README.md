@@ -1,6 +1,6 @@
 # Parameterized optimal observables: an interference toy
 
-Eleven Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
+The Google Colab notebook series connects analytical quantum amplitudes, ATLAS-style
 neural simulation-based inference, and a parameterized binned approximation
 built from either the likelihood score or a bounded density ratio. Data and trained models persist in your Google
 Drive; the source lives in this repository.
@@ -14,26 +14,24 @@ to lie between zero and one while S has a visibly distinct shape.
 | [01_generate_amplitudes.ipynb](notebooks/01_generate_amplitudes.ipynb) | Generate coherent S/B amplitudes, SBI and NI samples, and nuisance variations | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/01_generate_amplitudes.ipynb) |
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
-| [04_score_histograms.ipynb](notebooks/04_score_histograms.ipynb) | Study score histograms, local widths, and fitted signal strength versus the observable anchor | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/04_score_histograms.ipynb) |
-| [05_spline_templates.ipynb](notebooks/05_spline_templates.ipynb) | Interpolate moving bin fractions, validate splines, and compare profiled scans | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/05_spline_templates.ipynb) |
-| [06_ratio_histograms.ipynb](notebooks/06_ratio_histograms.ipynb) | Repeat notebook 4 using the bounded analytical ratio to the S reference | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/06_ratio_histograms.ipynb) |
-| [07_ratio_spline_templates.ipynb](notebooks/07_ratio_spline_templates.ipynb) | Repeat notebook 5 with ratio-observable templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/07_ratio_spline_templates.ipynb) |
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Repeat notebook 6 with the bounded physical ratio p(x;eta)/p(x;1) | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Repeat notebook 7 with physical-reference ratio templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 1D/2D/3D process-ratio histograms with the moving 12-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
+| [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
 
 ## Run in Colab
 
 1. The physical-reference workflow is **01–03 → 08**, followed by the studies
-   in 09, 10 and 11. Notebook 11 builds its own direct bin yields and does not
-   require 09's splines. Notebooks 04–07 are optional score/S-reference
-   comparisons. For a private repository, authorize GitHub access in Colab's notebook browser. If the link
+   in 09, 10 and 11, then 12 to investigate the saved toy results. Notebook 11
+   builds its own direct bin yields and does not require 09's splines.
+   Notebooks 04–07 are retired; their earlier studies remain in the history.
+   For a private repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
 2. Choose a GPU runtime for notebooks 2–3. Both PyTorch training and JAX
    likelihood fits use the GPU. `JAX_BACKEND = "auto"` detects an NVIDIA GPU;
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
-   Notebook 11 also benefits from a GPU for evaluating the saved networks on
+   Notebooks 11–12 also benefit from a GPU for evaluating the saved networks on
    fresh simulator toys. The histogram and scalar fitting code runs on the CPU.
    Other histogram notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
@@ -662,3 +660,44 @@ existing direct-yield run from 500 to 5,000 toys reuses its completed rows;
 keep the same `OUTPUT_TAG`, seed and scientific settings.
 Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON manifest,
 including the directly integrated process yields in `<OUTPUT_TAG>_bin_yields.csv`.
+
+## Investigating toy discrepancies (12)
+
+Run **only notebook 12**, in a fresh runtime, with the same completed v4 run,
+mode and configuration overrides. It reads notebook 11's direct-yield
+`SOURCE_TAG="toy_study_direct"` products; it does not extend that ensemble or
+retrain the networks. Build this notebook alone with
+`python scripts/build_toy_diagnostics_notebook.py`.
+
+The saved-table stage pairs analytical, learned and binned fits to each physical
+toy, separates local and remote branches, and bootstraps coverage while
+re-estimating the model-derived critical values. Simulator fits are resampled
+together; independent toy sources stay independent. Even calibration IDs and
+odd evaluation IDs remain disjoint. Failed and missing fits are reported.
+
+The integration stage generates independent stratified S/B/NI proposals, with
+1, 2 and 5 times the original generated count per source and two independent
+replicas. It tests process and physical bin yields, total rates, and the expected
+score in `kappa=sqrt(mu)`, particularly at zero. Networks, observable boundaries,
+and reference normalizers remain frozen. Rejected proposals enter the MC
+variance as zeros; process and bin correlations are retained where needed.
+Errors on closure residuals are conditional on the original prediction and
+partition, rather than a claimed exact combined old-plus-new MC pull.
+
+Refits reconstruct the same simulator toys from their recorded seeds. Defaults
+use 200 randomly selected toys per hypothesis plus all upper-bound cases,
+compare the original and denser 129-point kappa searches, widen the upper mu
+bound from 2 to 3, and compare 12 bins with a nested 36-bin refinement. Fresh
+integration predictions are tested on the same events. Original-fit reproduction
+is checked first; population summaries use only the random subset, since the
+flagged subset is deliberately enriched. The denser grid remains a numerical
+search, not a proof that every possible minimum has been found.
+
+Both heavy stages can be disabled for a quick first look. Intermediate MC
+prefixes and complete refit toys are checkpointed; changed settings or source
+inputs require a new diagnostic `OUTPUT_TAG`. Tables/manifests and figures go to
+`results/12_toy_diagnostics/<OUTPUT_TAG>` and
+`plots/12_toy_diagnostics/<OUTPUT_TAG>`, separately from notebook 11. No model or
+run tag changes are needed. These checks distinguish calibration and numerical
+issues from differences in information: matching the analytical distribution
+of q is not by itself a coverage criterion.

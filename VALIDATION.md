@@ -1,5 +1,40 @@
 # Validation
 
+## Notebook 12 toy diagnostics (9 October 2026)
+
+Added notebook 12 and a standalone builder that leaves executed notebooks
+unchanged. It reuses the completed v4/direct-yield notebook 11 study, with no
+retraining or run-tag change. Notebook 04–07 deletions remain preserved.
+
+- **226 tests passed; 11 optional JAX checks skipped.** The 35 new tests cover
+  paired records, whole-experiment bootstrap resampling and critical-value
+  uncertainty, provenance checks, fixed-generated-size MC covariance including
+  rejected draws, cross-bin expected-score covariance, nested bin refinement,
+  deterministic reconstruction, failures and checkpoint compatibility.
+- The generated notebook passes nbformat and code-cell syntax validation.
+  Its saved-table cells ran on an actual completed smoke ensemble without
+  importing PyTorch. The heavy-stage skip paths were exercised.
+- An end-to-end check loaded the actual saved selector and ratio networks from
+  the notebook 11 direct-yield smoke run. All four selected physical toys
+  reproduced their three original likelihood fits. It exercised 52 refits,
+  independent integration at 1,000 and 2,000 generated events per source with
+  two seeds, the 12/36-bin comparisons, and analytical rate replacement.
+  Repeating the refits returned identical checkpointed results.
+- The tiny smoke bank exposed empty-bin support failures in some 36-bin fits.
+  These were retained as failures; no density floor or artificial bin content
+  was introduced. The notebook gates interpretation on successful reproduction
+  of the originally valid fits and displays failures in later variants.
+- All plotting families rendered. Logarithmic tail plots, closure with ratio
+  and standardized residual panels, and representative likelihood scans were
+  visually inspected. Plots use mplhep's ATLAS style without an ATLAS label.
+
+The production integration and refit budgets have not been run here. Numerical
+validation on a small saved run does not establish production calibration.
+Independent-bank residual errors are conditional on the original prediction;
+the bootstrap is conditional on the frozen model and does not represent
+finite-MC template uncertainty. Population refit summaries use the random
+subset only, not the deliberately enriched upper-bound examples.
+
 ## Larger toy ensembles and logarithmic tails (9 October 2026)
 
 Notebook 11 and its backend now default to 5,000 production toys per hypothesis
