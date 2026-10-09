@@ -1,5 +1,45 @@
 # Validation
 
+## Discriminator compression and frequentist toys (9 October 2026)
+
+New notebooks 10 and 11 reuse the completed v4 run and leave notebooks 01–09,
+their saved outputs, the physics model and training configuration unchanged.
+Notebook 11 reads the 12-bin, a=100 spline products from notebook 09.
+
+- **188 tests passed; 11 optional JAX checks skipped.** The 43 new tests cover
+  multidimensional histogram assignments, process normalization, nested grids,
+  fixed-observable scans, analytical Poisson test statistics, interference
+  minima, exact boundaries, empty samples/bins, weighted-event equivalence,
+  physical Poisson thinning, learned-bank sampling, and deterministic resume.
+- Notebook 10 was exercised on an independent bank with 5,885 selected nodes.
+  All 50 scan fits across five methods and stat-only/profiled comparisons were
+  valid. Marginal, joint, likelihood and local-information figures rendered;
+  representative scan and joint-distribution layouts were visually inspected.
+- Notebook 11 was exercised with actual saved ratio networks and the frozen
+  selector, fresh physical toys, and real 12-bin spline templates. Five toys
+  per hypothesis were resumed and extended to seven without changing earlier
+  results. Of 70 fits, 69 were valid. One simulator toy entered a bin with zero
+  template support in the small 2,727-node integration bank; the failed fit
+  remains explicit in the results and coverage diagnostics, without clipping
+  the expectation or dropping the toy. All four PNG/PDF plot pairs rendered
+  and were visually inspected. This smoke used 0.01 times the run exposure.
+- Each fit freezes eta and observed coordinates/counts, compares all minima
+  resolved by a sqrt(mu) grid, and includes the exact mu=0 boundary. Simulator
+  events are paired across analytical, learned and binned fits. Histograms of
+  physical Poisson experiments are not fluctuated a second time. Learned
+  self-toys use the same finite-bank normalization as their fitted model;
+  metadata explicitly records that numerical approximation and bank size.
+- Notebook 09's spline begins above zero, so the eta=0 endpoint template is
+  integrated directly; eta=1.4 uses the saved spline. Cross-calibration uses
+  disjoint even/odd toy IDs and retains invalid fits. Inclusive survival plots
+  preserve the boundary atom. Both notebooks pass nbformat and Python syntax
+  validation and match their dedicated generator.
+
+These reduced runs establish execution, diagnostics and resumption, not
+production calibration or tail precision. The production 500-toy ensembles
+were not run here. Existing JAX unbinned overlays were omitted when preparing
+the integration-smoke spline products; the new toy fits use NumPy/SciPy.
+
 ## Reference-ratio stretch and binning (8 October 2026)
 
 Notebook 08 now displays eta = 0, 0.3, 0.6, 1 and 1.5, and both 08/09 expose

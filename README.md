@@ -1,6 +1,6 @@
 # Parameterized optimal observables: an interference toy
 
-Nine Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
+Eleven Google Colab notebooks connect analytical quantum amplitudes, ATLAS-style
 neural simulation-based inference, and a parameterized binned approximation
 built from either the likelihood score or a bounded density ratio. Data and trained models persist in your Google
 Drive; the source lives in this repository.
@@ -20,16 +20,21 @@ to lie between zero and one while S has a visibly distinct shape.
 | [07_ratio_spline_templates.ipynb](notebooks/07_ratio_spline_templates.ipynb) | Repeat notebook 5 with ratio-observable templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/07_ratio_spline_templates.ipynb) |
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Repeat notebook 6 with the bounded physical ratio p(x;eta)/p(x;1) | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Repeat notebook 7 with physical-reference ratio templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
+| [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 1D/2D/3D process-ratio histograms with the moving 12-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
+| [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 
 ## Run in Colab
 
-1. Open notebook 1, then run notebooks in numerical order. For a private
+1. The physical-reference workflow is **01–03 → 08 → 09 → 10/11**.
+   Notebooks 04–07 are optional score/S-reference comparisons. For a private
    repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
 2. Choose a GPU runtime for notebooks 2–3. Both PyTorch training and JAX
    likelihood fits use the GPU. `JAX_BACKEND = "auto"` detects an NVIDIA GPU;
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
-   The other notebooks can use a CPU runtime.
+   Notebook 11 also benefits from a GPU for evaluating the saved networks on
+   fresh simulator toys. The histogram and scalar fitting code runs on the CPU.
+   Other histogram notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
    `RUN_NAME = "paper-distinct-s-v4"` and `MODE = "production"`. For an initial
    short check, choose `MODE = "smoke"` and a distinct run name such as
@@ -589,3 +594,58 @@ also requires rerunning 08 and 09 with the same value; no new run name is needed
 Rebuild only these new notebooks with `python scripts/build_reference_notebooks.py`.
 The builder reads the current 06/07 cell sources and clears outputs in 08/09;
 it does not rewrite 01–07.
+
+## Process discriminators and sampling calibration (10–11)
+
+Use the existing completed v4 run. Notebook 10 reuses the selected integration
+bank and analytical baseline; notebook 11 additionally requires the trained
+ratios and the **12-bin, a=100** spline file from notebook 09. No new run name,
+training, or execution of 04–07 is needed. Build just these notebooks with
+`python scripts/build_comparison_notebooks.py`.
+
+Notebook 10 compares fixed process ratios `r_j=p_j/p_S` in one, two, and three
+dimensions: NI; NI × SBI; NI × SBI × B. Each coordinate has 12 bins and uses
+`sigmoid(a_j*log(r_j))`, with editable defaults `a_NI=1`, `a_SBI=a_B=2`. It
+compares their Asimov scans to the moving 12-bin physical-reference ratio and
+analytical unbinned likelihood, with NI fixed and profiled. Distribution plots,
+bin occupancy/effective statistics, and local information accompany the scans.
+Default analytical axes isolate compression loss; optional learned axes apply
+the saved networks to both the fixed and moving observables. The continuous
+three-ratio vector and event count contain the nominal mu-family information;
+finite multidimensional bins and nuisance profiling require separate checks.
+Similarity of SBI and B does not make their interference-bearing difference
+automatically irrelevant. Products are in `results/10_discriminator_study`.
+
+Notebook 11 measures the **two-sided stat-only** statistic
+`q_mu = -2 log[L(mu)/L(mu_hat)]`, with `mu_true=mu_test` at 0 and 1.4.
+The fit searches all grid-resolved minima in `sqrt(mu)` over `[0,2]`, including
+exactly zero; the observable stays frozen at `eta=mu_test` throughout each fit.
+Its five comparisons are:
+
+| Likelihood | Toy source |
+|---|---|
+| Analytical unbinned | Fresh physical simulator Poisson experiments |
+| Learned unbinned | Those same simulator experiments |
+| Learned unbinned | Poisson resampling of the frozen learned intensity on its integration bank |
+| 12-bin model | Those same simulator experiments histogrammed once |
+| 12-bin model | Independent Poisson counts from the fitted bin means |
+
+The simulator uses exact Gaussian-amplitude Poisson thinning and the frozen
+preselection. Histogrammed simulator counts already fluctuate as Poisson
+counts; no second fluctuation is applied. Learned-model toys are conditional
+on a finite quadrature approximation, with effective bank size recorded.
+Analytical selected-rate integrals also carry numerical integration error.
+The eta=0 template is constructed directly because the saved 09 spline begins
+above zero; there is no extrapolation. The 1.4 template uses the saved spline.
+
+The default is 500 toys per hypothesis and five fit/source combinations
+(12 toys in smoke mode). Each complete toy ID is checkpointed. Increasing
+`N_TOYS` resumes and extends the same deterministic streams; changed models,
+banks, powers, exposure or fit settings require a new `OUTPUT_TAG`. Large event
+arrays are not saved. Results include failures, fitted boundaries, test-statistic
+histograms and survival curves, quantiles, fitted-mu distributions, and empirical
+cross-calibration. Even self-model toy IDs set critical values; odd IDs evaluate
+acceptance. Binomial errors are conditional on those estimated critical values;
+tail precision and finite calibration-sample uncertainty need larger ensembles.
+Asymptotic curves are illustrative references, not imposed calibration laws.
+Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON manifest.
