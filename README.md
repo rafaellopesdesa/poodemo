@@ -765,3 +765,35 @@ with matching plot directories. The default `DECOMPOSITION_TAG="fixed_pair"`
 resumes unchanged settings; choose a new decomposition tag if changing this
 diagnostic. The builder appends section 7 while preserving all executed cells
 and outputs above it.
+
+**Section 8: full-family control and branch preference** adds analytical
+`u=I/(B+NI)` and `v=S/(B+NI)` coordinates, whose unbinned likelihood ratios
+retain the complete stat-only family. It checks that identity, then compares
+12x12 and 36x36 histograms with the existing analytical and scalar 12/36-bin
+models on the same saved toys. Axis boundaries are nested, parameter-independent
+quantiles of the original bank weighted by `B+NI`, with infinite outer edges.
+
+Run the first two setup/import code cells in a fresh runtime and jump directly
+to section 8; keep the completed section 6 tags. The new `FAMILY_TAG="family_control"`
+namespace supports resume. Rebinning requires replaying the saved integration
+streams through frozen preselection (15 million proposals for the standard two
+10x banks). Chunk/checkpoint boundaries are reproduced, and rates and scalar
+predictions must match before the 2D templates are accepted. No ratio-network
+inference or training is needed. Empty observed cells with zero prediction
+invalidate the corresponding fit; yields are never floored to hide missing MC
+support. Support tables and heatmaps report sparsity and integration precision.
+
+For every model, separate constrained low/high fits measure
+`G = min_high D - min_low D`, where negative values favor the high branch.
+Evaluating each model at the same two analytical minima separates changes in
+relative evidence from movement of the minima during refitting. Population
+summaries use saved random controls; representative scans deliberately include
+branch-switching examples. Ambiguous ties, split-boundary minima, failed fits
+and bank dependence remain explicit. The 2D control diagnoses full-family
+compression; its finite histograms still require binning and MC convergence.
+
+Outputs are below
+`results/12_toy_diagnostics/<OUTPUT_TAG>/convergence/<CONVERGENCE_TAG>/family/<FAMILY_TAG>`
+with matching plot directories. All earlier notebook outputs and notebooks 08–11
+are preserved. This study retains the scalar observable's fixed reference mu=1;
+MLE-based reference selection and coverage calibration are separate tests.

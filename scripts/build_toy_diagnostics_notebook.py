@@ -875,6 +875,280 @@ def decomposition_cells():
     return cells
 
 
+FAMILY_MARKER = "family-branch-control-v1"
+
+FAMILY_SETUP = r'''
+# Run the first two notebook setup/import cells, then jump directly here.
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mplhep as hep
+from IPython.display import display
+
+from poodemo.toy_diagnostic_context import prepare_toy_diagnostic_context
+from poodemo.toy_family_banks import prepare_family_banks
+from poodemo.toy_family_diagnostics import run_family_diagnostics
+from poodemo.toy_family_plots import plot_family_diagnostics
+
+hep.style.use("ATLAS")  # Typography and ticks only; no experiment label.
+plt.rcParams.update({"axes.grid": False, "figure.dpi": 110})
+
+SOURCE_TAG = "toy_study_direct"
+OUTPUT_TAG = "toy_diagnostics"
+CONVERGENCE_TAG = "bank_convergence"  # Completed section 6.
+FAMILY_TAG = "family_control"  # New checkpoints; keep unchanged to resume.
+FAMILY_AXIS_BINS = (12, 36)  # 12x12 and 36x36 full-family histograms.
+FAMILY_LARGEST_PREFIXES = 2  # Normally 5x and 10x, both replicas.
+FAMILY_GRID_SIZE = 129
+FAMILY_N_SCANS = 3  # Representative experiments per tested hypothesis.
+FAMILY_PROGRESS_EVERY = 10
+
+family_context = prepare_toy_diagnostic_context(
+    run, source_tag=SOURCE_TAG, output_tag=OUTPUT_TAG,
+)
+family_figure_dir = (
+    Path(ROOT) / "plots" / "12_toy_diagnostics" / OUTPUT_TAG
+    / "convergence" / CONVERGENCE_TAG / "family" / FAMILY_TAG
+)
+print("Completed source:", CONVERGENCE_TAG, "| New diagnostic:", FAMILY_TAG)
+print("2D bins:", [f"{n} x {n}" for n in FAMILY_AXIS_BINS])
+print("The integration replay requires preselection, but no ratio-network evaluation.")
+'''
+
+FAMILY_BANKS = r'''
+family_banks = prepare_family_banks(
+    family_context,
+    convergence_tag=CONVERGENCE_TAG,
+    family_tag=FAMILY_TAG,
+    axis_bins=FAMILY_AXIS_BINS,
+    largest_prefixes=FAMILY_LARGEST_PREFIXES,
+)
+print("Reproduction of the saved integration streams and 1D predictions:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(family_banks["closure"])
+print("2D template support and integration precision:")
+family_support = family_banks["support"]
+family_support_summary = family_support.groupby([
+    "replica", "generated_per_source", "n_axis", "mu",
+]).agg(
+    cells=("bin_index", "size"), empty_cells=("empty_mc", "sum"),
+    expected_events=("predicted_yield", "sum"),
+    median_relative_mc_se=("relative_mc_se", "median"),
+    p95_relative_mc_se=("relative_mc_se", lambda values: values.quantile(.95)),
+    cells_above_20pct_mc_se=("relative_mc_se", lambda values: (values > .2).sum()),
+).reset_index()
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(family_support_summary)
+print("MC-error summaries condition on positive-yield cells; complete cell data are saved.")
+print("The quantile boundaries are fixed using the original bank before toy fitting.")
+'''
+
+FAMILY_FITS = r'''
+family_study = run_family_diagnostics(
+    family_context, family_banks,
+    convergence_tag=CONVERGENCE_TAG,
+    family_tag=FAMILY_TAG,
+    grid_size=FAMILY_GRID_SIZE,
+    n_scans=FAMILY_N_SCANS,
+    progress_every=FAMILY_PROGRESS_EVERY,
+)
+family_records = family_study["records"]
+print("Maximum unbinned (u,v) versus analytical likelihood difference:",
+      family_records.family_identity_max_abs.max())
+print("Maximum analytical/1D saved-q reproduction difference:",
+      family_records.saved_q_error.abs().max())
+family_failures = family_records.loc[~family_records.valid]
+if len(family_failures):
+    print("Failed fits, including missing MC support (first 30; full details saved):")
+    display(family_failures[["mu_test", "toy_id", "replica", "generated_per_source",
+                             "model", "empty_observed_bins", "message"]].head(30))
+family_reproduction_failures = family_records.loc[
+    family_records.saved_fit_available & ~family_records.saved_fit_reproduced
+]
+if len(family_reproduction_failures):
+    display(family_reproduction_failures[["mu_test", "toy_id", "replica", "model",
+                                          "q", "saved_q", "saved_q_error", "message"]])
+    raise RuntimeError("Resolve analytical/1D reproduction failures before interpreting the 2D comparison.")
+
+family_summary = family_study["summary"]
+family_keys = ["mu_test", "replica", "generated_per_source", "model"]
+print("Random-control fit and support checks:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(family_summary[family_keys + ["n_random", "n_valid", "n_failed", "n_empty_support",
+                                         "n_branch_ambiguous", "n_at_upper"]])
+print("High-branch fractions condition on valid, unambiguous preferences:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(family_summary[family_keys + ["n_branch_valid", "high_branch_fraction", "high_branch_se",
+                                         "mean_q", "mean_q_se", "mean_G", "mean_G_se"]])
+for statistic in ("mean", "rms"):
+    print(statistic, "paired terms: delta_G = delta_common + delta_refit; negative delta_G favors high")
+    columns = [f"{statistic}_{term}{suffix}"
+               for term in ("delta_G", "delta_common", "delta_refit", "delta_q")
+               for suffix in ("", "_se")]
+    with pd.option_context("display.max_rows", None, "display.max_columns", None):
+        display(family_summary.loc[family_summary.model.ne("analytic"),
+            family_keys + ["n_paired_valid", "n_paired_failed"] + columns])
+print("Paired changes between bank prefixes and replicas:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(family_study["changes"])
+print("Representative scan selection; these examples are deliberately enriched:")
+display(family_study["scan_selection"])
+print("Complete records, including invalid-support cells and failed fits, are saved.")
+'''
+
+FAMILY_PLOTS = r'''
+family_figures = plot_family_diagnostics(
+    family_study, family_banks, output=family_figure_dir,
+)
+for name, figure in family_figures.items():
+    print(name)
+    display(figure)
+    plt.close(figure)
+print("New diagnostic tables:", family_study["metadata"]["output_dir"])
+print("New figures:", family_figure_dir)
+'''
+
+
+def family_cells():
+    cells = [
+        md(r"""
+        ### 8. Full-family control: why does the histogram favor the other branch?
+
+        **Run only this new section after the first two setup/import code cells**
+        in a fresh runtime with updated source. Keep the same run configuration
+        and the completed section 6 tags. Its integration banks and fits are
+        prerequisites; sections 1–7 do not need to be rerun.
+
+        Section 7 showed that finer bins improve the fixed hypothesis comparison
+        while some toys still select different minima. Here we directly measure
+        the evidence separating the two branches, and add a two-dimensional
+        analytical control that retains the **full stat-only family before
+        binning**. Write \(C=B+\mathrm{NI}\), \(I=\mathrm{SBI}-S-B\), and
+        \[
+        u(x)=\frac{I(x)}{C(x)},\qquad v(x)=\frac{S(x)}{C(x)},\qquad
+        \lambda(x;\kappa)=C(x)\,[1+\kappa u(x)+\kappa^2v(x)],\quad
+        \kappa=\sqrt\mu.
+        \]
+        The factor \(C(x)\) cancels in likelihood ratios. Consequently the
+        event count and unbinned \((u,v)\) retain this model's parameter
+        dependence. We check that identity numerically on each reconstructed
+        experiment before interpreting the binned control.
+
+        We compare the analytical likelihood, the existing 12/36-bin scalar
+        observable, and **12x12/36x36 histograms of \((u,v)\)**, on the same
+        toys and integration proposals. The 2D histograms are still finite
+        approximations; sufficiency of their unbinned coordinates does not
+        guarantee that any particular 2D grid is adequate.
+        """),
+        code(FAMILY_SETUP),
+        md(r"""
+        #### Replay the same integration points into a frozen two-dimensional grid
+
+        Each axis uses quantiles of the original integration bank, weighted by
+        \(B+\mathrm{NI}\). Boundaries are fixed before looking at toy outcomes
+        and stay independent of \(\mu\), \(\eta\), bank replica and fit result.
+        The 36-bin axis refines the 12-bin axis, so the two grids are nested.
+        Infinite outer edges retain the tails. Heatmap axes show quantile-bin
+        coordinates, rather than a uniform spacing in physical \(u\) or \(v\).
+
+        **This stage adds computation:** earlier checkpoints retained component
+        sums, not event coordinates, so those sums cannot be rebinned into 2D.
+        We replay the original proposal streams with their exact chunk and
+        checkpoint boundaries, applying the frozen preselection. The standard
+        two 10x banks require replaying 15 million generated proposals in total.
+        No density-ratio network is evaluated and no new independent integration
+        stream is introduced. Replayed rates and original scalar templates must
+        reproduce section 6 before the 2D comparison is accepted. New checkpoints
+        make the replay resumable and leave all earlier artifacts unchanged.
+
+        Empty predicted cells and MC precision are reported explicitly. Cells
+        with zero prediction and positive observed counts invalidate that toy's
+        binned fit; we do not add yield floors or pseudocounts. Empty cells with
+        no observations are allowed. A sparse 36x36 grid can therefore reveal
+        an integration-support limitation rather than improve the fit.
+        """),
+        code(FAMILY_BANKS),
+        md(r"""
+        #### Fit both branches and separate changed evidence from movement of minima
+
+        With \(D_m(\mu)=-2\log[L_m(\mu)/L_m(1)]\), define
+        \[
+        G_m=\min_{\mu\in[1,3]}D_m(\mu)
+             -\min_{\mu\in[0,1]}D_m(\mu).
+        \]
+        **Negative \(G_m\) favors the high branch; positive \(G_m\) favors the
+        low branch.** The actual bounds and split follow the saved study.
+        Ties and a winning minimum at the shared split are flagged as ambiguous.
+        Each branch's split-boundary flag is also recorded: a losing constrained
+        minimum at the split is not evidence of a second interior solution,
+        but does not make an otherwise clear branch preference ambiguous.
+
+        To explain a shift in preference, evaluate every binned model at the
+        **same two analytical branch minima**:
+        \[
+        C_m=D_m(\hat\mu_H^{A})-D_m(\hat\mu_L^{A}),\qquad
+        G_m-G_A=\underbrace{C_m-G_A}_{\text{same-hypothesis evidence change}}
+              +\underbrace{G_m-C_m}_{\text{within-branch refitting change}}.
+        \]
+        A negative first term means the histogram makes the analytical high
+        solution relatively more attractive even before moving either fitted
+        point. A negative second term means additional movement of the branch
+        minima further favors the high solution. Neither sign is imposed.
+
+        Population summaries use the saved random controls only. Additional
+        flagged toys remain in the detailed records. Representative scans
+        deliberately include large branch discrepancies and a control; their
+        frequencies are not population estimates. All branches use the same
+        fit bounds and search precision, and the existing analytical/1D global
+        results are checked against the branch fits. Paired error bars condition
+        on the banks; they do not estimate a profiled MC uncertainty.
+        """),
+        code(FAMILY_FITS),
+        md(r"""
+        #### Inspect the branch preference, full scans and 2D support together
+
+        The \(G_m\)-versus-\(G_A\) plots show which toys cross zero and change
+        branch. The signed means and RMS distinguish a systematic shift from
+        broadening. Full scans show whether the same high solution became less
+        penalized, or whether the fitted point itself moved. The largest-bank
+        support maps identify low-yield or imprecise 2D cells; compare both bank
+        replicas and prefixes before interpreting compression.
+
+        Coarsening can erase event structure that distinguishes a low hypothesis
+        from a high alternative. That can let a competing high minimum win when
+        the original likelihood preferred the low solution. It is a mechanism
+        to test here, **not a universal prediction of upward bias from binning**.
+        Finite-bank errors can also change branch preference.
+        """),
+        code(FAMILY_PLOTS),
+        md(r"""
+        #### What would this establish?
+
+        - If the 2D control restores analytical branch preference across both
+          integration replicas while the scalar control does not, this supports
+          loss of full-family information in the scalar observable as a cause.
+        - If increasing 2D resolution changes the answer substantially, its
+          remaining coarsening still matters. Inspect support failures and MC
+          precision before interpreting any apparent improvement.
+        - If preferences move appreciably between banks, integration uncertainty
+          still affects the competition; a stable mean alone is insufficient.
+        - If the same-hypothesis term dominates, the relevant evidence changes
+          before reoptimization. If the refitting term dominates, inspect the
+          movement and local shape of the two minima in the scans.
+
+        This control uses analytical component densities throughout. It does
+        not attribute an observed effect to NN calibration, and it does not
+        recalibrate confidence intervals. The scalar observable still uses
+        reference \(\mu=1\); testing a reference based on each experiment's
+        unbinned MLE remains a separate follow-up. Notebooks 08–11 and their
+        production binning are unchanged by this diagnostic.
+        """),
+    ]
+    cells[0].metadata["poodemo_append_section"] = FAMILY_MARKER
+    return cells
+
+
 def append_section_cells(destination, marker, factory, id_prefix):
     """Append only new cells, preserving the original notebook text verbatim."""
     original = destination.read_text()
@@ -923,8 +1197,9 @@ def build_toy_diagnostics_notebook(*, clean=False):
     if destination.exists() and not clean:
         append_convergence_cells(destination)
         append_section_cells(destination, DECOMPOSITION_MARKER, decomposition_cells, "decomposition")
+        append_section_cells(destination, FAMILY_MARKER, family_cells, "family")
     else:
-        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells())
+        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells() + family_cells())
 
 
 if __name__ == "__main__":
