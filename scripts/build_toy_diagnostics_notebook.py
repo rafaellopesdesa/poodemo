@@ -1409,6 +1409,249 @@ def mle_reference_cells():
     return cells
 
 
+SHIFTED_REFERENCE_MARKER = "shifted-reference-control-v1"
+
+SHIFTED_REFERENCE_SETUP = r'''
+# Run the first two notebook setup/import cells, then jump directly here.
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mplhep as hep
+from IPython.display import display
+
+from poodemo.toy_diagnostic_context import prepare_toy_diagnostic_context
+from poodemo.toy_mle_reference_banks import prepare_mle_reference_banks
+from poodemo.toy_shifted_reference import run_shifted_reference_diagnostics
+from poodemo.toy_shifted_reference_plots import plot_shifted_reference_diagnostics
+
+hep.style.use("ATLAS")  # Typography and ticks only; no experiment label.
+plt.rcParams.update({"axes.grid": False, "figure.dpi": 110})
+
+SOURCE_TAG = "toy_study_direct"
+OUTPUT_TAG = "toy_diagnostics"
+CONVERGENCE_TAG = "bank_convergence"  # Completed section 6.
+CACHE_REFERENCE_TAG = "mle_reference"  # Reuse section 9's event-level MC cache.
+SHIFT_TAG = "shifted_reference"  # Separate new fits; unchanged means resume.
+SHIFT_LARGEST_PREFIXES = 1  # Match the cached section-9 setting: both largest replicas.
+NUMERATOR_SHIFT = 0.1  # Absolute shift in mu: eta -> eta + 0.1.
+DENOMINATOR_SHIFT = 0.1  # Absolute shift in mu: 1 -> 1.1.
+SHIFT_GRID_SIZE = 129
+SHIFT_N_SCANS = 3
+SHIFT_PROGRESS_EVERY = 10
+
+shift_context = prepare_toy_diagnostic_context(
+    run, source_tag=SOURCE_TAG, output_tag=OUTPUT_TAG,
+)
+shift_figure_dir = (
+    Path(ROOT) / "plots" / "12_toy_diagnostics" / OUTPUT_TAG
+    / "convergence" / CONVERGENCE_TAG / "shifted_reference" / SHIFT_TAG
+)
+print("Physical toy/test hypotheses remain the saved mu=0 and mu=1.4.")
+print("Observable endpoints: (eta, 1), (eta + eps, 1), (eta, 1 + delta), (eta + eps, 1 + delta).")
+print("eps =", NUMERATOR_SHIFT, "| delta =", DENOMINATOR_SHIFT)
+print("The original density normalizers, power and 12/36-bin edges remain fixed.")
+'''
+
+SHIFTED_REFERENCE_BANKS = r'''
+shift_banks = prepare_mle_reference_banks(
+    shift_context,
+    convergence_tag=CONVERGENCE_TAG,
+    reference_tag=CACHE_REFERENCE_TAG,
+    largest_prefixes=SHIFT_LARGEST_PREFIXES,
+    progress_every=SHIFT_PROGRESS_EVERY,
+)
+print("Authentication of the saved event banks:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(shift_banks["closure"])
+print("Banks used:", sorted(shift_banks["banks"]))
+'''
+
+SHIFTED_REFERENCE_FITS = r'''
+shift_study = run_shifted_reference_diagnostics(
+    shift_context, shift_banks,
+    convergence_tag=CONVERGENCE_TAG,
+    shift_tag=SHIFT_TAG,
+    numerator_shift=NUMERATOR_SHIFT,
+    denominator_shift=DENOMINATOR_SHIFT,
+    grid_size=SHIFT_GRID_SIZE,
+    n_scans=SHIFT_N_SCANS,
+    progress_every=SHIFT_PROGRESS_EVERY,
+)
+shift_records = shift_study["records"]
+shift_reproduction_failures = shift_records.loc[
+    shift_records["saved_fit_available"].astype(bool)
+    & ~shift_records["saved_fit_reproduced"].astype(bool)
+]
+if len(shift_reproduction_failures):
+    display(shift_reproduction_failures)
+    raise RuntimeError("The analytical or unshifted control did not reproduce section 6; inspect before interpreting shifts.")
+print("Maximum absolute saved-control q discrepancy:", shift_records["saved_q_error"].abs().max())
+print("Maximum absolute decomposition residual:", shift_study["paired"]["decomposition_error"].abs().max())
+print("Population summaries use saved random controls; flagged examples are excluded.")
+shift_population = shift_study["summary"].query("stratum == 'all'")
+shift_ids = ["mu_test", "replica", "generated_per_source", "variant", "n_bins"]
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    print("Fit support and branch ambiguity:")
+    display(shift_population[shift_ids + [
+        "n_random", "n_valid", "n_failed", "n_branch_ambiguous", "n_empty_support",
+    ]])
+    print("Mean and RMS discrepancy from the analytical test statistic:")
+    display(shift_population.loc[shift_population.variant != "analytic", shift_ids + [
+        "mean_delta_q", "mean_delta_q_se", "rms_delta_q", "rms_delta_q_se",
+        "mean_delta_pair", "mean_refit_gain",
+    ]])
+    print("Direct paired contrasts against the unshifted observable:")
+    display(shift_study["contrasts"].query(
+        "stratum == 'all' and term in ['abs_delta_q', 'squared_delta_q', 'branch_disagreement']"
+    )[shift_ids + [
+        "term", "n_random", "n_paired_valid", "n_paired_failed",
+        "n_branch_comparable", "n_branch_ambiguous",
+        "mean_baseline", "mean_shifted", "mean_change", "paired_se",
+    ]])
+    print("Changes between independent banks:")
+    display(shift_study["changes"].query("term == 'delta_q'"))
+    print("Selected scan examples (diagnostic, not population frequencies):")
+    display(shift_study["scan_selection"])
+'''
+
+SHIFTED_REFERENCE_PLOTS = r'''
+shift_figures = plot_shifted_reference_diagnostics(
+    shift_study, output=shift_figure_dir,
+)
+for name, figure in shift_figures.items():
+    print(name)
+    display(figure)
+    plt.close(figure)
+print("Tables and resumable fits:", shift_study["metadata"]["output_dir"])
+print("Figures:", shift_figure_dir)
+'''
+
+
+def shifted_reference_cells():
+    cells = [
+        md(r"""
+        ### 10. Shift the ratio endpoints and repeat the free fits
+
+        **In a fresh runtime with updated source, run the first two setup/import
+        code cells and then this section.** Keep the existing run and source
+        tags. Sections 1–9 do not need to be rerun; the section-9 integration
+        cache is reused. No generation or training changes are needed.
+
+        Test whether shifting only the denominator is sufficient to improve
+        the scalar observable. For each physical tested hypothesis \(\eta\),
+        compare these four **fixed** mappings:
+
+        | Variant | Ratio defining the observable |
+        |---|---|
+        | Unshifted baseline | \(r(x;\eta)/r(x;1)\) |
+        | Numerator only | \(r(x;\eta+\epsilon)/r(x;1)\) |
+        | Denominator only | \(r(x;\eta)/r(x;1+\delta)\) |
+        | Both endpoints | \(r(x;\eta+\epsilon)/r(x;1+\delta)\) |
+
+        Defaults are \(\epsilon=\delta=0.1\). At \(\eta=0\), this gives
+        endpoint pairs \((0,1),(0.1,1),(0,1.1),(0.1,1.1)\). At
+        \(\eta=1.4\), it gives \((1.4,1),(1.5,1),(1.4,1.1),(1.5,1.1)\).
+        These offsets are in \(\mu\), not \(\sqrt\mu\); moving from zero
+        to 0.1 is a displacement of about 0.316 in the amplitude parameter.
+
+        Only the **observable** changes. Toys and the numerator of the test
+        statistic remain at their actual physical \(\eta=0\) or \(1.4\).
+        The expected bin yields retain their full physical \(\mu\) dependence,
+        and every binned denominator is freely fitted across both branches.
+        """),
+        code(SHIFTED_REFERENCE_SETUP),
+        md(r"""
+        #### Reuse the same events, rates and bin edges
+
+        As in the preceding compression controls, the ratios are evaluated
+        from **analytical component densities**, isolating information loss
+        from neural calibration. We use \(T=\operatorname{sigmoid}(a\log R)\)
+        with the saved power, original density normalizers, and the same
+        12/36-bin edges; 0.5 remains inside a bin. This is a controlled change
+        of endpoints, without simultaneous power or bin optimization.
+
+        Both independent replicas at the largest completed section-6 bank
+        size are used. If section 9's cache is present, it is authenticated and
+        read directly. If missing, its integration streams are replayed once
+        to rebuild it; no section-9 MLE-reference fits are required. Match
+        `CACHE_REFERENCE_TAG` and `SHIFT_LARGEST_PREFIXES` to your saved cache.
+        Each fixed endpoint pair requires only one set of templates per bank
+        and physical hypothesis, reused across toys. New fits have their own
+        `SHIFT_TAG`; changing shifts or fit settings requires a new shift tag.
+        """),
+        code(SHIFTED_REFERENCE_BANKS),
+        md(r"""
+        #### Compare the complete test statistic on paired toys
+
+        Reconstruct the identical saved simulator toys and verify their event
+        hashes. The unshifted analytical and binned controls must reproduce
+        section 6 before interpreting a shift. The same free-fit decomposition
+        is evaluated for every mapping:
+        \[
+        q_B-q_A=
+        \underbrace{D_B(\eta)-D_B(\hat\mu_A)-q_A}_{\delta_{\rm pair}}
+        +\underbrace{D_B(\hat\mu_A)-D_B(\hat\mu_B)}_{g_B\geq0}.
+        \]
+        The analytical MLE is used as a common diagnostic anchor; it does not
+        set these observable endpoints or constrain the binned fit. The pair
+        term stays signed. Unsupported observations and failed fits are
+        reported explicitly, without prediction floors or pseudocounts.
+
+        Population tables use only the saved random controls (normally 200
+        per physical hypothesis). Direct comparisons with the unshifted
+        mapping use the same jointly valid toys in the same bank and binning.
+        Compare the change in squared error as well as mean error: cancellation
+        can make a mean look better while individual test statistics worsen.
+        Branch comparisons report ambiguous cases separately. Standard errors
+        condition on the fixed bank; bank-to-bank changes assess a separate
+        numerical sensitivity. Additional flagged toys supply illustrative
+        scans and are excluded from population summaries.
+        """),
+        code(SHIFTED_REFERENCE_FITS),
+        md(r"""
+        #### Inspect closure, competing branches and bin occupancy
+
+        Look first at the **denominator-only versus unshifted** comparison for
+        36 bins, then check consistency at 12 bins and in the other bank.
+        Inspect RMS \(\Delta q\), paired squared-error changes, branch
+        agreement and the pair/refit decomposition together. Occupied observed
+        and predicted bins help determine whether a change also improves use
+        of the fixed binning. Shifts can change both the retained direction and
+        the allocation of events to finite bins. Test-statistic distributions use logarithmic
+        vertical axes; signed differences and likelihood scans use linear axes.
+        """),
+        code(SHIFTED_REFERENCE_PLOTS),
+        md(r"""
+        #### What this comparison can establish
+
+        Neither physical hypothesis \(\mu=0\) nor \(\mu=1\) is itself
+        degenerate. Equal ratio endpoints produce a constant observable;
+        a nonconstant scalar can also lose information about other hypotheses
+        during a free fit. Shifting endpoints changes the retained combination
+        of signal and interference information but does not guarantee that a
+        scalar preserves the full likelihood family. Section 8's 2D control
+        remains a useful benchmark.
+
+        A successful denominator-only shift should reduce discrepancies in
+        the **fully refitted** statistic and improve competing-branch agreement
+        across both banks, with adequate support. Merely reducing the signed
+        mean or increasing occupied bins is insufficient. Rows stratified by
+        `analytical_at_test` mean \(\hat\mu_A=\eta\); this does **not** mean
+        the fixed shifted observable is constant.
+
+        These four choices are specified before this comparison; no endpoint
+        is optimized on its toys. If the shifts help, a subsequent study can
+        choose references near an independently determined competing Asimov
+        minimum, or optimize expected likelihood separation, then validate on
+        fresh toys. This diagnostic selection is not a coverage calibration.
+        Existing outputs, the model/run tag, and notebooks 08–11 are preserved.
+        """),
+    ]
+    cells[0].metadata["poodemo_append_section"] = SHIFTED_REFERENCE_MARKER
+    return cells
+
+
 def append_section_cells(destination, marker, factory, id_prefix):
     """Append only new cells, preserving the original notebook text verbatim."""
     original = destination.read_text()
@@ -1459,8 +1702,9 @@ def build_toy_diagnostics_notebook(*, clean=False):
         append_section_cells(destination, DECOMPOSITION_MARKER, decomposition_cells, "decomposition")
         append_section_cells(destination, FAMILY_MARKER, family_cells, "family")
         append_section_cells(destination, MLE_REFERENCE_MARKER, mle_reference_cells, "mle-reference")
+        append_section_cells(destination, SHIFTED_REFERENCE_MARKER, shifted_reference_cells, "shifted-reference")
     else:
-        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells() + family_cells() + mle_reference_cells())
+        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells() + family_cells() + mle_reference_cells() + shifted_reference_cells())
 
 
 if __name__ == "__main__":

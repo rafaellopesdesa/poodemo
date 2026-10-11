@@ -839,3 +839,36 @@ toy. This diagnostic does not establish coverage. Outputs are below
 `results/12_toy_diagnostics/<OUTPUT_TAG>/convergence/<CONVERGENCE_TAG>/mle_reference/<REFERENCE_TAG>`
 with matching plot directories. Earlier executed cells and notebooks 08–11 are
 preserved; no model or run tag changes are needed.
+
+**Section 10: shifted ratio endpoints** compares the unshifted observable with
+numerator-only, denominator-only and simultaneous shifts. Run the first two
+setup/import code cells in a fresh runtime with updated source, then jump to
+section 10. No rerun of sections 1–9 or notebooks 01–11 is required. Keep
+`CACHE_REFERENCE_TAG="mle_reference"` and `SHIFT_LARGEST_PREFIXES=1` to reuse
+the default section-9 event-level integration cache. If that cache is absent,
+the same saved streams are replayed to build it; the section-9 fits are not
+needed. New results use the separate `SHIFT_TAG="shifted_reference"`.
+
+With `NUMERATOR_SHIFT=DENOMINATOR_SHIFT=0.1`, the endpoint pairs are
+`(eta,1)`, `(eta+0.1,1)`, `(eta,1.1)`, and `(eta+0.1,1.1)`. The shifts affect
+only the observable: the physical toy/test hypotheses remain eta=0 and 1.4,
+and the predicted yields are freely fitted over the saved physical mu range
+and both branches. These use analytical component ratios to isolate compression
+effects, the original density normalizers and power, and the saved 12/36-bin
+edges. Templates are reused across toys for each fixed mapping and bank.
+
+The same saved random controls provide paired comparisons with analytical
+unbinned results and direct contrasts against the unshifted mapping. Inspect
+RMS q differences, changes in absolute/squared error, branch agreement,
+ambiguities, unsupported observations, and the signed pair-error/free-fit-gain
+decomposition. Log-scale q distributions, occupancy plots and selected full
+likelihood scans accompany the tables. Two bank replicas reuse the same toys;
+their errors are conditional toy errors, not independent extra toy statistics.
+Changing endpoints can alter both retained information and finite-bin occupancy.
+This predefined comparison does not optimize offsets on the toys or establish
+coverage. Change `SHIFT_TAG` if changing shifts or fit settings.
+
+Outputs are below
+`results/12_toy_diagnostics/<OUTPUT_TAG>/convergence/<CONVERGENCE_TAG>/shifted_reference/<SHIFT_TAG>`
+with matching plot directories. Earlier executed notebook cells and the model
+and run tags are preserved.
