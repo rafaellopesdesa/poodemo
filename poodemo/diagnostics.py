@@ -8,6 +8,7 @@ do not describe a remote secondary minimum or the fluctuations of one toy.
 
 from __future__ import annotations
 
+import re
 import numpy as np
 import pandas as pd
 
@@ -192,7 +193,7 @@ def _unbinned_baselines(run, parent, information):
     return results
 
 
-def run_estimator_study(run, *, observable="score", n_bins=None):
+def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None):
     """Save/return mu_hat(eta) and local sigma_mu(eta) for one Asimov truth.
 
     Uses ``n_bins`` when specified, otherwise the finest configured
@@ -202,6 +203,9 @@ def run_estimator_study(run, *, observable="score", n_bins=None):
     ``observable`` selects the local score or the density-ratio observable;
     both use the same configured bin count, generating truth and baselines.
     Ratio results are saved separately as ``ratio_estimator_eta.csv``.
+    An optional filename-safe ``output_tag`` saves ``<tag>.csv`` and
+    ``<tag>_config.json``, so comparison studies need not replace the primary
+    result. With no tag, the established result/config filenames are retained.
     The exact unbinned baselines reuse notebook 3 toolkit fits, checking their
     likelihood values before repeating them over eta. If no saved fits exist,
     standalone runs fit these baselines once. Identified Asimov fits stay at truth;
@@ -219,6 +223,11 @@ def run_estimator_study(run, *, observable="score", n_bins=None):
 
     options = observable_metadata(observable)
     settings = observable_configuration(run, observable)
+    if output_tag is not None and (
+            not isinstance(output_tag, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", output_tag) is None):
+        raise ValueError("output_tag must be a filename-safe tag starting with a letter or digit "
+                         "and containing only letters, digits, underscores, or hyphens")
     if n_bins is not None and (
             isinstance(n_bins, (bool, np.bool_))
             or not isinstance(n_bins, (int, np.integer)) or n_bins < 2):
@@ -251,11 +260,14 @@ def run_estimator_study(run, *, observable="score", n_bins=None):
     for key, value in settings.items():
         result[key] = value
     _annotate_observable_endpoints(result, settings)
-    filename = f"{options['prefix']}estimator_eta.csv"
+    filename = f"{options['prefix']}estimator_eta.csv" if output_tag is None else f"{output_tag}.csv"
     path = run.path("results", filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(path, index=False)
-    save_json(run.path("results", f"{options['prefix']}estimator_config.json"),
+    config_filename = (f"{options['prefix']}estimator_config.json" if output_tag is None
+                       else f"{output_tag}_config.json")
+    output_metadata = {} if output_tag is None else {"output_tag": output_tag}
+    save_json(run.path("results", config_filename),
               {**settings, "n_bins": int(n_bins), "bin_edges": edges.tolist(),
-               "scan_grid": etas.tolist(), "asimov_mu": truth})
+               "scan_grid": etas.tolist(), "asimov_mu": truth, **output_metadata})
     return result

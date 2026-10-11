@@ -568,7 +568,7 @@ The analytical observable is `sigmoid(a * log(R)) = R**a/(1+R**a)`, with
 ```text
 eta_effective = max(eta, REFERENCE_RATIO_ETA_MIN)
 R = r(x; eta_effective) / r(x; 1)
-REFERENCE_RATIO_ETA_MIN = 0.1
+REFERENCE_RATIO_ETA_MIN = 0.2
 REFERENCE_RATIO_A = 100.0
 ```
 
@@ -590,7 +590,16 @@ existing half-bin shift of internal edges, with endpoints at 0 and 1. Plots
 show event yields per bin using mplhep typography without an ATLAS label.
 
 Notebook 08 displays the low-end saturation and the separate collapse at 1;
-its Fisher/score scan still uses positive physical eta. Notebook 09 includes
+its Fisher/score scan still uses positive physical eta. The estimator/local-width
+plots overlay **no floor** and **eta_min=0.2** against one analytical unbinned
+reference, with a low-eta width zoom. The two histogram studies use the same
+selected bank, 36 bins, Asimov truth, nuisance treatment, and physical fit bounds.
+The comparison measures local information retained by each frozen observable;
+it does not by itself establish coverage or an optimal floor for every truth.
+The primary estimator CSV and metadata retain the configured positive floor;
+separate `reference_ratio_estimator_eta_no_floor.csv` and
+`reference_ratio_estimator_eta_no_floor_config.json` preserve the unfloored control.
+Notebook 09 includes
 an explicit knot at the floor transition, as well as at eta=1, and validates
 intermediate template predictions. Data are refilled directly at physical
 eta using the same floored map. Saved notebook-08 metadata must match the
@@ -624,14 +633,14 @@ occupancy/effective-statistics tables and local information. Optional learned
 axes apply the saved networks to both fixed and moving observables. The
 larger Cartesian grids require more integration statistics: sparse cells
 remain explicit and are not filled with artificial counts.
-The default products are in `results/10_discriminator_study_36_floor01`.
+The default products are in `results/10_discriminator_study_36_floor02`.
 
 Notebook 11 measures the **two-sided stat-only** statistic
 `q_mu = -2 log[L(mu)/L(mu_hat)]`, with `mu_true=mu_test` at 0 and 1.4.
 Its updated fit uses 129 points in `sqrt(mu)`, local refinement of candidate
 minima, and physical bounds **[0,3]**, matching the wider domain investigated
 in notebook 12. The observable is frozen at the tested eta throughout each
-fit, with numerator endpoint `max(eta,0.1)` and denominator endpoint 1.
+fit, with numerator endpoint `max(eta,0.2)` and denominator endpoint 1.
 The five comparisons are:
 
 | Likelihood | Toy source |
@@ -651,8 +660,9 @@ uncertainty. Direct S/SBI/B/NI templates remain fixed during each fit while
 their physical mu coefficients vary. The floor is never applied to those
 coefficients or to the physical generating hypothesis.
 
-The new default **`OUTPUT_TAG="toy_study_direct_36_floor01"`** isolates this
-study from the old `toy_study_direct` results used by notebook 12. Old rows
+The new default **`OUTPUT_TAG="toy_study_direct_36_floor02"`** isolates this
+study from the earlier floor-0.1 `toy_study_direct_36_floor01` results and the
+old `toy_study_direct` results used by notebook 12. Old rows
 cannot be reused as results of the new binning/floor/domain. The default is
 5,000 toys per hypothesis and five fit/source combinations (12 toys in smoke
 mode). With unchanged settings, increasing `N_TOYS` resumes the new study's

@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from unittest.mock import patch
+import json
 
 import numpy as np
 import pandas as pd
@@ -106,6 +107,48 @@ def test_estimator_study_holds_generating_truth_fixed_and_saves_schema(tmp_path)
     for _, baseline in result[result.model == "analytic unbinned"].groupby("systematics"):
         assert baseline.mu_hat.nunique() == 1
         assert baseline.sigma_mu.nunique() == 1
+
+
+def test_alternate_estimator_tag_preserves_primary_floor_study(tmp_path):
+    model = toy_model()
+    quad = dict(nominal=model.nominal, down=model.down, up=model.up,
+                weights=model.quadrature_weights, truth=model.truth_intensity)
+    config = dict(asimov_mu=1., mu_min=.02, mu_max=1.4, mu_points=3,
+                  mu_fit_bounds=[.01, 3.], nuisance_bounds=[-3., 3.],
+                  bin_counts=[36], reference_ratio_power=100., reference_ratio_eta_floor=.2)
+    run = SimpleNamespace(config=config, path=lambda *parts: tmp_path.joinpath(*parts))
+    comparison = SimpleNamespace(config={**config, 'reference_ratio_eta_floor': 0.}, path=run.path)
+    tag = 'reference_ratio_estimator_eta_no_floor'
+    with patch('poodemo.pipeline.prepare_quadrature', return_value=quad):
+        primary = run_estimator_study(run, observable='reference_ratio', n_bins=36)
+        originals = {name: run.path('results', name).read_bytes() for name in
+                     ['reference_ratio_estimator_eta.csv', 'reference_ratio_estimator_config.json']}
+        alternate = run_estimator_study(comparison, observable='reference_ratio',
+                                        n_bins=36, output_tag=tag)
+    for name, contents in originals.items():
+        assert run.path('results', name).read_bytes() == contents
+    assert primary.valid.all() and alternate.valid.all()
+    assert (primary.reference_ratio_eta_floor == .2).all()
+    assert (alternate.reference_ratio_eta_floor == 0.).all()
+    np.testing.assert_array_equal(alternate.eta_effective, alternate.eta)
+    np.testing.assert_array_equal(primary.eta_effective, np.maximum(primary.eta, .2))
+    saved = pd.read_csv(run.path('results', tag + '.csv'))
+    assert (saved.reference_ratio_eta_floor == 0.).all()
+    metadata = json.loads(run.path('results', tag + '_config.json').read_text())
+    assert metadata['reference_ratio_eta_floor'] == 0.
+    assert metadata['output_tag'] == tag and metadata['n_bins'] == 36
+    assert config['reference_ratio_eta_floor'] == .2
+
+
+@pytest.mark.parametrize('tag', ['', '../outside', '/absolute', 'sub/file',
+                                 r'sub\file', 'name.csv', 'space name', 42, False])
+def test_estimator_output_tag_rejects_paths_before_loading_data(tmp_path, tag):
+    run = SimpleNamespace(config={}, path=lambda *parts: tmp_path.joinpath(*parts))
+    with patch('poodemo.pipeline.prepare_quadrature',
+               side_effect=AssertionError('Invalid tags must be rejected before loading data')):
+        with pytest.raises(ValueError, match='output_tag'):
+            run_estimator_study(run, observable='reference_ratio', output_tag=tag)
+    assert not list(tmp_path.iterdir())
 
 
 def saved_baseline_fixture(tmp_path):

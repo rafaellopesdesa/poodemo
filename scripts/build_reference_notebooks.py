@@ -25,7 +25,7 @@ this observable is analytical, not learned. The denominator is always at
 **mu=1 and alpha_NI=0**, independent of the fit, anchor and Asimov truth settings.
 The event count retains the Poisson rate information.
 
-Use **36 bins**, **`REFERENCE_RATIO_ETA_MIN = 0.1`** and
+Use **36 bins**, **`REFERENCE_RATIO_ETA_MIN = 0.2`** and
 **`REFERENCE_RATIO_A = 100`** throughout notebooks 08–11. The floor changes only
 which observable partitions the events. **Physical test points, generated truth,
 component coefficients and the unrestricted physical-mu fit are not floored.**
@@ -89,7 +89,7 @@ REFERENCE_SETUP = '''
 # Observable-only settings: keep these identical in notebooks 08–11.
 # The floor changes the observable, never the physical mu or its fit bounds.
 N_BINS = 36
-REFERENCE_RATIO_ETA_MIN = 0.1
+REFERENCE_RATIO_ETA_MIN = 0.2
 REFERENCE_RATIO_A = 100.0
 from dataclasses import replace
 if not np.isfinite(REFERENCE_RATIO_A) or REFERENCE_RATIO_A <= 0:
@@ -162,6 +162,124 @@ cleared because they used a different observable or resolution.
 '''
 
 
+ESTIMATOR_STUDY_CODE = '''
+from dataclasses import replace
+from poodemo.diagnostics import run_estimator_study
+
+print("Estimator-study bin count:", N_BINS)
+# Primary study: keep the configured floor and its usual downstream outputs.
+estimator_study = run_estimator_study(run, observable="reference_ratio", n_bins=N_BINS)
+# Matched control: only the observable floor changes. Truth, integration bank,
+# eta grid, bin edges, power, physical coefficients and free-fit bounds stay fixed.
+no_floor_run = replace(run, config={**run.config, "reference_ratio_eta_floor": 0.0})
+estimator_no_floor = run_estimator_study(
+    no_floor_run, observable="reference_ratio", n_bins=N_BINS,
+    output_tag="reference_ratio_estimator_eta_no_floor")
+np.testing.assert_array_equal(np.sort(estimator_study["eta"].unique()),
+                              np.sort(estimator_no_floor["eta"].unique()))
+FLOOR_LABEL = f"{N_BINS} bins, floor={REFERENCE_RATIO_ETA_MIN:g}"
+NO_FLOOR_LABEL = f"{N_BINS} bins, no floor"
+# Include a single analytical baseline per eta and NI treatment.
+is_unbinned = estimator_study["model"].eq("analytic unbinned")
+estimator_comparison = pd.concat([
+    estimator_study.loc[~is_unbinned].assign(observable_variant=FLOOR_LABEL),
+    estimator_no_floor.loc[~estimator_no_floor["model"].eq("analytic unbinned")]
+        .assign(observable_variant=NO_FLOOR_LABEL),
+    estimator_study.loc[is_unbinned].assign(observable_variant="Analytical unbinned"),
+], ignore_index=True)
+display(estimator_comparison)
+invalid_rows = estimator_comparison[
+    ~estimator_comparison["fit_valid"] | ~estimator_comparison["width_valid"]]
+if len(invalid_rows):
+    print("Invalid fits or local widths (omitted from the corresponding curves):")
+    display(invalid_rows)
+estimator_comparison.to_csv(
+    ROOT / "results" / "reference_ratio_estimator_eta_floor_comparison.csv", index=False)
+print("Primary floored estimator table:", ROOT / "results" / "reference_ratio_estimator_eta.csv")
+print("Independent no-floor control:", ROOT / "results" / "reference_ratio_estimator_eta_no_floor.csv")
+'''
+
+ESTIMATOR_PLOT_CODE = r'''
+PLOT_PREFIX = '08'
+ESTIMATOR_ZOOM_XLIM = (0.0, 0.5)  # Low-eta width comparison; edit to change the zoom.
+
+import mplhep as hep
+
+truth_mu = float(estimator_study["truth"].iloc[0])
+estimator_styles = {
+    FLOOR_LABEL: dict(color="#0072B2", linestyle="-", linewidth=2.2),
+    NO_FLOOR_LABEL: dict(color="#D55E00", linestyle="--", linewidth=1.8),
+    "Analytical unbinned": dict(color="black", linestyle=":", linewidth=2.0),
+}
+
+def estimator_curves(systematic):
+    subset = estimator_comparison.loc[estimator_comparison["systematics"].eq(systematic)]
+    for label, style in estimator_styles.items():
+        values = subset.loc[subset["observable_variant"].eq(label)].sort_values("eta")
+        yield label, values, style
+
+def mark_estimator_floor(ax):
+    if REFERENCE_RATIO_ETA_MIN > 0:
+        ax.axvline(REFERENCE_RATIO_ETA_MIN, color="0.55", ls="--", lw=1,
+                   label=fr"Floor position $\eta={REFERENCE_RATIO_ETA_MIN:g}$")
+    ax.grid(False)
+
+with plt.style.context(hep.style.ATLAS), plt.rc_context({"font.size": 14}):
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9), sharex=True, squeeze=False)
+    for row, systematic in enumerate([False, True]):
+        for label, values, style in estimator_curves(systematic):
+            sigma = values["sigma_mu"].replace([np.inf, -np.inf], np.nan).where(values["width_valid"])
+            axes[row, 0].plot(values["eta"], sigma, label=label, **style)
+            axes[row, 1].plot(values["eta"], values["mu_hat"].where(values["fit_valid"]),
+                              label=label, **style)
+        nuisance_label = "NI profiled" if systematic else "NI fixed at zero"
+        axes[row, 0].set(title=nuisance_label, ylabel=r"Local width $\sigma_\mu(\eta)$")
+        axes[row, 1].axhline(truth_mu, color="0.65", ls="-.", lw=1, label="Generating value")
+        axes[row, 1].set(title=nuisance_label + ": same Asimov experiment", ylabel=r"$\hat\mu(\eta)$")
+        subset = estimator_comparison.loc[estimator_comparison["systematics"].eq(systematic)]
+        finite_estimates = subset.loc[subset["fit_valid"], "mu_hat"].to_numpy()
+        finite_estimates = finite_estimates[np.isfinite(finite_estimates)]
+        lower = min(truth_mu, finite_estimates.min()) if len(finite_estimates) else truth_mu
+        upper = max(truth_mu, finite_estimates.max()) if len(finite_estimates) else truth_mu
+        margin = max(.03 * (run.config["mu_max"] - run.config["mu_min"]), .1 * (upper - lower))
+        axes[row, 1].set_ylim(lower - margin, upper + margin)
+        for ax in axes[row]:
+            mark_estimator_floor(ax)
+            ax.set_xlabel(r"Frozen observable anchor $\eta$")
+            ax.legend(fontsize=8, loc="best")
+    fig.tight_layout()
+    (ROOT / "plots").mkdir(exist_ok=True)
+    for extension in ("pdf", "png"):
+        fig.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_estimator_eta.{extension}",
+                    bbox_inches="tight", dpi=160)
+    plt.show()
+
+    # Same values, with vertical limits set from the displayed low-eta region.
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), sharex=True, squeeze=False)
+    for ax, systematic in zip(axes.flat, [False, True]):
+        shown_widths = []
+        for label, values, style in estimator_curves(systematic):
+            sigma = values["sigma_mu"].replace([np.inf, -np.inf], np.nan).where(values["width_valid"])
+            ax.plot(values["eta"], sigma, label=label, **style)
+            in_view = values["eta"].between(*ESTIMATOR_ZOOM_XLIM)
+            shown_widths.extend(sigma.loc[in_view & sigma.notna()].tolist())
+        if shown_widths:
+            lo, hi = min(shown_widths), max(shown_widths)
+            pad = max(.08 * (hi - lo), .02 * max(abs(lo), abs(hi)), 1e-8)
+            ax.set_ylim(max(0., lo - pad), hi + pad)
+        mark_estimator_floor(ax)
+        ax.set(xlim=ESTIMATOR_ZOOM_XLIM, xlabel=r"Frozen observable anchor $\eta$",
+               ylabel=r"Local width $\sigma_\mu(\eta)$",
+               title="NI profiled" if systematic else "NI fixed at zero")
+        ax.legend(fontsize=9, loc="best")
+    fig.suptitle(fr"Same Asimov truth $\mu_*={truth_mu:g}$: floor versus no floor", fontsize=16)
+    fig.tight_layout()
+    for extension in ("pdf", "png"):
+        fig.savefig(ROOT / "plots" / f"{PLOT_PREFIX}_estimator_eta_floor_comparison_zoom.{extension}",
+                    bbox_inches="tight", dpi=160)
+    plt.show()
+'''
+
 def configure_reference_cells(cells, number):
     """Migrate only relevant controls/text; retain custom axes and bin sweeps."""
     for cell in cells:
@@ -190,9 +308,15 @@ def configure_reference_cells(cells, number):
             if "collapse_rows = []" in source:
                 source = COLLAPSE_CODE.strip()
             if "run_estimator_study(run," in source:
-                source = source.replace('max(run.config["bin_counts"])', "N_BINS")
-                source = source.replace('run_estimator_study(run, observable="reference_ratio")',
-                                        'run_estimator_study(run, observable="reference_ratio", n_bins=N_BINS)')
+                source = ESTIMATOR_STUDY_CODE.strip()
+            if 'truth_mu = float(estimator_study["truth"].iloc[0])' in source:
+                plot_source = ESTIMATOR_PLOT_CODE.strip()
+                zoom = re.search(r"^ESTIMATOR_ZOOM_XLIM = (.+)$", source, flags=re.M)
+                if zoom:
+                    plot_source = re.sub(r"^ESTIMATOR_ZOOM_XLIM = .+$",
+                                         "ESTIMATOR_ZOOM_XLIM = " + zoom.group(1),
+                                         plot_source, flags=re.M)
+                source = plot_source
             if "splines = run_spline_study" in source:
                 source = re.sub(r"^SPLINE_BINS = 12.*$",
                                 "SPLINE_BINS = 36  # Must appear in notebook 08 BIN_COUNTS.",
@@ -205,7 +329,7 @@ def configure_reference_cells(cells, number):
         elif source.startswith("# 8."):
             source = r'''# 8. Floored reference-ratio histograms
 
-Use R_eta=r(x;max(eta,0.1))/r(x;1), with power a=100 and a primary
+Use R_eta=r(x;max(eta,0.2))/r(x;1), with power a=100 and a primary
 resolution of **36 bins**. The binning sweep remains available to compare
 coarsening. Physical mu, Asimov truth and free fits retain their full domains.
 Reuse the completed run from notebooks 01–03; no generation or training is
@@ -213,7 +337,7 @@ needed. Results use `reference_ratio_` and figures `08_`.'''
         elif source.startswith("# 9."):
             source = r'''# 9. Floored reference-ratio splines and profiled fits
 
-Interpolate **36-bin** templates for R_eta=r(x;max(eta,0.1))/r(x;1), with
+Interpolate **36-bin** templates for R_eta=r(x;max(eta,0.2))/r(x;1), with
 the same power a=100 as notebook 08. The observable floor leaves the physical
 model and NI constraint unchanged. Run 08 first with the same completed run.
 Tables use `reference_ratio_` and figures `09_`.'''
@@ -230,7 +354,8 @@ Tables use `reference_ratio_` and figures `09_`.'''
             source += "\n\n" + RUNTIME_NOTE.strip()
         elif source.startswith("### How the observable changes with eta"):
             source = source.replace("observable constructed at \\(\\eta\\)",
-                                    "observable constructed at \\(\\eta_{\\mathrm{eff}}=\\max(\\eta,0.1)\\)")
+                                    "observable constructed at \\(\\eta_{\\mathrm{eff}}=\\max(\\eta,0.2)\\)")
+            source = source.replace(r"\max(\eta,0.1)", r"\max(\eta,0.2)")
             source = source.replace("Edit `ETA_VALUES` and `HIST_BINS` below", "Edit `ETA_VALUES` and `N_BINS` below")
         elif source.startswith("### Freeze the observable inside each fit"):
             source = r'''### Freeze the observable inside each fit
@@ -264,7 +389,20 @@ The truth stays fixed while eta changes; below the floor the partition is
 constant. At eta=1 this is a rate-only measurement: multiple physical mu values
 can have equal rates. A different fitted branch need not indicate optimizer
 failure. Local widths do not describe global ambiguity; invalid widths are
-reported rather than floored.'''
+reported rather than floored.
+
+The next cells explicitly compare this floor with an otherwise identical
+**no-floor control** (eta_eff=eta), using the same 36 bins, quadrature events,
+Asimov truth, eta grid, nuisance treatments and free-fit settings. They show
+both binned variants and one analytical unbinned reference. The control writes
+its own `reference_ratio_estimator_eta_no_floor` files, preserving the primary
+floored estimator outputs. A low-eta zoom highlights the region affected by
+the floor; the vertical line marks eta_min.
+
+These are **local widths at the fixed Asimov truth**, not confidence-interval
+coverage or a proof of improved global likelihood fits. The free-fit MLE panels
+remain a separate diagnostic. Values at eta >= eta_min should agree between
+the two binned prescriptions because their partitions are then identical.'''
         elif source.startswith("### Read the comparisons separately"):
             source = source.replace(
                 "At truth 1 the continuous nominal ratio preserves the fixed-NI pairwise test.",

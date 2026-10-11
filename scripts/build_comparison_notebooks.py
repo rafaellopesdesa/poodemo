@@ -15,7 +15,7 @@ Keep **`RUN_NAME = "paper-distinct-s-v4"`**, the same `MODE`, and the same
 reuse the selected integration bank and, where requested, trained ratios.
 There is no need to regenerate samples, retrain, or run notebooks 04–09.
 The new defaults are **36 bins per coordinate**, with the moving ratio's
-numerator endpoint floored at **0.1**. The physics run and model tag are unchanged.
+numerator endpoint floored at **0.2**. The physics run and model tag are unchanged.
 
 Start a fresh Colab runtime to load the updated source. The temporary checkout
 is `/content/poodemo`; delete that checkout if reusing a runtime with old source,
@@ -36,7 +36,8 @@ TOY_SETUP_INTRO = SETUP_INTRO + r"""
 
 Notebook 11 computes **direct 36-bin process yields**, as in notebook 08.
 It does not load notebook 09's spline templates or require outputs from 08–10.
-The new output tag preserves historical 12-bin toys and notebook-12 diagnostics.
+The new output tag preserves historical 12-bin toys, the previous floor-0.1
+study, and notebook-12 diagnostics.
 """
 
 
@@ -59,8 +60,8 @@ from poodemo.discriminator_study import run_discriminator_study, plot_discrimina
 N_BINS = 36  # Per coordinate: 36, 36**2, and 36**3 cells.
 POWERS = {"NI": 1.0, "SBI": 2.0, "B": 2.0}
 REFERENCE_RATIO_A = 100.0
-REFERENCE_RATIO_ETA_MIN = 0.1  # Floor only the numerator endpoint of the moving ratio.
-OUTPUT_TAG = "10_discriminator_study_36_floor01"
+REFERENCE_RATIO_ETA_MIN = 0.2  # Floor only the numerator endpoint of the moving ratio.
+OUTPUT_TAG = "10_discriminator_study_36_floor02"  # Preserve the previous floor-0.1 study.
 RATIO_SOURCE = "analytic"  # Optional alternative: "learned".
 SYSTEMATICS = (False, True)  # Compare both fixed and profiled NI.
 MORPH_ORDER = "after"  # Interpolate the binned NI templates, as in 09.
@@ -126,7 +127,7 @@ def discriminator_cells():
         | Fixed NI discriminator | \(z_{NI}\) | 36 |
         | Fixed NI and SBI discriminators | \((z_{NI},z_{SBI})\) | 1296 |
         | Fixed NI, SBI and B discriminators | \((z_{NI},z_{SBI},z_B)\) | 46656 |
-        | Moving physical-reference ratio | \(z_\eta=R_\eta^{100}/(1+R_\eta^{100}),\ R_\eta=p_{\max(\eta,0.1)}/p_1\) | 36 |
+        | Moving physical-reference ratio | \(z_\eta=R_\eta^{100}/(1+R_\eta^{100}),\ R_\eta=p_{\max(\eta,0.2)}/p_1\) | 36 |
 
         The default **analytical axes** match the construction in 08–09 and
         isolate the information lost by compression and binning. Choosing
@@ -136,7 +137,7 @@ def discriminator_cells():
         model and analytical benchmark remain unchanged.
 
         For the moving observable, set \(\eta=\mu_0\) at each tested point,
-        use \(\eta_{\rm eff}=\max(\eta,0.1)\) in the numerator only,
+        use \(\eta_{\rm eff}=\max(\eta,0.2)\) in the numerator only,
         then **freeze the observable and the data** throughout its likelihood
         fit. The physical \(\mu\) in every expected yield and free fit is
         unchanged, including below the floor. The fixed process axes have no
@@ -220,12 +221,12 @@ MU_VALUES = (0.0, 1.4)  # In each ensemble, mu_true = mu_test.
 N_TOYS = 12 if MODE == "smoke" else 5000
 N_BINS = 36
 REFERENCE_RATIO_A = 100.0
-REFERENCE_RATIO_ETA_MIN = 0.1  # max(eta, 0.1) in the numerator; denominator stays at 1.
+REFERENCE_RATIO_ETA_MIN = 0.2  # max(eta, 0.2) in the numerator; denominator stays at 1.
 EXPOSURE = 1.0  # Scale all selected expected yields together.
 SEED = 110923
 MU_BOUNDS = (0.0, 3.0)  # Full physical fit range used in notebook 12.
 FIT_GRID_SIZE = 129  # Grid in kappa=sqrt(mu), followed by local refinement.
-OUTPUT_TAG = "toy_study_direct_36_floor01"  # Preserve historical 12-bin toys.
+OUTPUT_TAG = "toy_study_direct_36_floor02"  # Preserve 12-bin and floor-0.1 toys.
 PROGRESS_EVERY = 10
 
 print(f"{N_TOYS} toys per case at each of {MU_VALUES}; five comparisons")
@@ -272,8 +273,8 @@ def toy_cells():
     process yields directly in the bins; it does not use notebook 09's spline
     parametrizations. No training or rerun of earlier notebooks is needed.
     Saved progress makes the toy study resumable. The default output tag
-    `toy_study_direct_36_floor01` keeps these results separate from historical
-    12-bin toys and the notebook-12 diagnostic files.
+    `toy_study_direct_36_floor02` keeps these results separate from historical
+    12-bin toys, the previous floor-0.1 study, and notebook-12 diagnostic files.
     """, setup_intro=TOY_SETUP_INTRO)
     cells += [
         md(r"""
@@ -303,7 +304,7 @@ def toy_cells():
         The simulator rows deliberately share each experiment across fit
         methods. For the binned fits, build the observable at \(\eta=\mu_0\)
         and **hold it fixed while fitting every alternative \(\mu\)**.
-        Use numerator endpoint \(\eta_{\rm eff}=\max(\eta,0.1)\); the
+        Use numerator endpoint \(\eta_{\rm eff}=\max(\eta,0.2)\); the
         reference remains \(p(x;1)\). The floor does not constrain the fitted
         physical \(\mu\) or change any physical generating density. The
         fit domain \([0,3]\) and 129-point \(\sqrt\mu\) search match the
@@ -336,7 +337,7 @@ def toy_cells():
         transfers to fresh physical experiments.
 
         **Direct bin yields at every eta:** construct the observable once at
-        each tested \(\eta=\mu_0\), with \(\eta_{\rm eff}=\max(\eta,0.1)\)
+        each tested \(\eta=\mu_0\), with \(\eta_{\rm eff}=\max(\eta,0.2)\)
         used only in the observable numerator, and integrate each process intensity in its
         bins using the saved quadrature. Keep these process bin yields fixed
         while varying the physical signal strength:
@@ -348,7 +349,7 @@ def toy_cells():
         \]
         These are the exact physical coefficients multiplying numerically
         integrated bin yields, with NI fixed at nominal. The same method is
-        used at **eta=0 and eta=1.4**, with numerator endpoints **0.1 and 1.4**
+        used at **eta=0 and eta=1.4**, with numerator endpoints **0.2 and 1.4**
         respectively, without spline interpolation or
         extrapolation. The bin-yield table exposes every process and bin.
         This frozen histogram model supplies both its full physical-mu
@@ -360,10 +361,10 @@ def toy_cells():
 
         The production default is **5000 toys per case and hypothesis**.
         `MODE="smoke"` keeps 12 toys to check execution only. Keep the same
-        `OUTPUT_TAG="toy_study_direct_36_floor01"` to resume this new study;
+        `OUTPUT_TAG="toy_study_direct_36_floor02"` to resume this new study;
         deterministic seeds and saved rows reuse its matching toys and generate
-        only the missing ones. Historical 12-bin results cannot be reused with
-        the changed observable, binning, and fit settings. Increasing `N_TOYS` does not require
+        only the missing ones. Historical 12-bin and floor-0.1 results cannot be
+        reused with this observable configuration. Increasing `N_TOYS` does not require
         restarting the ensemble. Even 5000 toys leave uncertainty in rare tails.
         Changing a core setting such as exposure, the fit range, or observable
         requires a different `OUTPUT_TAG`. Periodic progress messages identify
@@ -371,7 +372,8 @@ def toy_cells():
         values is saved, including fit diagnostics; failed fits must be
         inspected rather than silently counted as successful calibration.
         Keep the new output tag for this configuration. Previous direct and
-        spline toy files, including the inputs to notebook 12, are preserved.
+        spline toy files, including the floor-0.1 study and inputs to notebook 12,
+        are preserved.
         """),
         code(TOY_RUN),
         md(r"""
