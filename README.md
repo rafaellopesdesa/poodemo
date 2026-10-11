@@ -797,3 +797,45 @@ Outputs are below
 with matching plot directories. All earlier notebook outputs and notebooks 08–11
 are preserved. This study retains the scalar observable's fixed reference mu=1;
 MLE-based reference selection and coverage calibration are separate tests.
+
+**Section 9: per-toy unbinned-MLE reference** tests the first of those follow-ups.
+In a fresh runtime with updated source, run the first two setup/import code
+cells and jump directly to section 9. Keep the completed run and section 6
+tags; no earlier section needs to be rerun. The default new
+`REFERENCE_TAG="mle_reference"` keeps its cache and fits separate.
+
+For each saved toy and bank, fit the analytical unbinned likelihood and replace
+the observable's reference mu=1 by that analytical MLE. Freeze the resulting
+mapping throughout the subsequent unconstrained binned fit, searching both
+branches and explicitly including the analytical MLE as a candidate. Compare
+fixed and MLE references using the same 12/36-bin edges, power and original-bank
+density normalizers. Defaults use both replicas at their largest completed
+prefix, with the same random controls and flagged examples. A changed reference
+is not a substitute for the free binned fit; both mappings are freely fitted.
+
+The new event-level cache replays the original integration streams once,
+authenticating counts, RNG states, rates and fixed-reference moments. It stores
+importance-weighted analytical component fields for rebinning at arbitrary
+references, requiring additional disk space. No new integration stream or
+ratio-network inference on new points is introduced. Cache construction and
+complete toys resume. To include the previous bank prefix, set
+`REFERENCE_LARGEST_PREFIXES=2` and choose a new reference tag.
+
+The exact decomposition is `delta_q = delta_pair + refit_gain`, where
+`delta_pair = D_bin(eta) - D_bin(mu_hat_analytic) - q_analytic`, and
+`refit_gain = D_bin(mu_hat_analytic) - D_bin(mu_hat_bin) >= 0`.
+The pair statistic remains signed. Exact eta=reference cases map to 0.5 and
+are reported separately, with a one-bin yield-only closure check; their free
+fit can still give positive q. Reference separation, occupied observed bins,
+positive predicted bins, unsupported observations, branch changes and selected
+full scans diagnose remaining discrepancies. No reference jitter, prediction
+floors or forced zero-q values are applied.
+
+The MLE reference is computed separately in each bank, so bank contrasts include
+both changes in yield predictions and movement of the reference. Data-dependent
+partitions define a test-statistic algorithm: any future calibration must repeat
+the complete unbinned fit, mapping, histogramming and free binned fit for every
+toy. This diagnostic does not establish coverage. Outputs are below
+`results/12_toy_diagnostics/<OUTPUT_TAG>/convergence/<CONVERGENCE_TAG>/mle_reference/<REFERENCE_TAG>`
+with matching plot directories. Earlier executed cells and notebooks 08–11 are
+preserved; no model or run tag changes are needed.

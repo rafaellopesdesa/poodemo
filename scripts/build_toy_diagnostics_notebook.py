@@ -1149,6 +1149,266 @@ def family_cells():
     return cells
 
 
+MLE_REFERENCE_MARKER = "mle-reference-control-v1"
+
+MLE_REFERENCE_SETUP = r'''
+# Run the first two notebook setup/import cells, then jump directly here.
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import mplhep as hep
+from IPython.display import display
+
+from poodemo.toy_diagnostic_context import prepare_toy_diagnostic_context
+from poodemo.toy_mle_reference_banks import prepare_mle_reference_banks
+from poodemo.toy_mle_reference import run_mle_reference_diagnostics
+from poodemo.toy_mle_reference_plots import plot_mle_reference_diagnostics
+
+hep.style.use("ATLAS")  # Typography and ticks only; no experiment label.
+plt.rcParams.update({"axes.grid": False, "figure.dpi": 110})
+
+SOURCE_TAG = "toy_study_direct"
+OUTPUT_TAG = "toy_diagnostics"
+CONVERGENCE_TAG = "bank_convergence"  # Completed section 6.
+REFERENCE_TAG = "mle_reference"  # New checkpoints; keep unchanged to resume.
+REFERENCE_LARGEST_PREFIXES = 1  # Both replicas at their largest completed bank.
+REFERENCE_GRID_SIZE = 129
+REFERENCE_N_SCANS = 3
+REFERENCE_PROGRESS_EVERY = 10
+
+reference_context = prepare_toy_diagnostic_context(
+    run, source_tag=SOURCE_TAG, output_tag=OUTPUT_TAG,
+)
+reference_figure_dir = (
+    Path(ROOT) / "plots" / "12_toy_diagnostics" / OUTPUT_TAG
+    / "convergence" / CONVERGENCE_TAG / "mle_reference" / REFERENCE_TAG
+)
+print("Completed source:", CONVERGENCE_TAG, "| New diagnostic:", REFERENCE_TAG)
+print("The saved 12/36-bin edges, power and original normalization rates stay fixed.")
+print("Each toy/bank gets its own analytical MLE reference and a free binned fit.")
+'''
+
+MLE_REFERENCE_BANKS = r'''
+reference_banks = prepare_mle_reference_banks(
+    reference_context,
+    convergence_tag=CONVERGENCE_TAG,
+    reference_tag=REFERENCE_TAG,
+    largest_prefixes=REFERENCE_LARGEST_PREFIXES,
+    progress_every=REFERENCE_PROGRESS_EVERY,
+)
+print("Reproduction of saved integration streams and fixed-reference predictions:")
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    display(reference_banks["closure"])
+print("Banks used:", sorted(reference_banks["banks"]))
+print("Selected cached events:", {
+    key: bank["fields"].shape[1] for key, bank in reference_banks["banks"].items()
+})
+'''
+
+MLE_REFERENCE_FITS = r'''
+reference_study = run_mle_reference_diagnostics(
+    reference_context, reference_banks,
+    convergence_tag=CONVERGENCE_TAG,
+    reference_tag=REFERENCE_TAG,
+    grid_size=REFERENCE_GRID_SIZE,
+    n_scans=REFERENCE_N_SCANS,
+    progress_every=REFERENCE_PROGRESS_EVERY,
+)
+reference_records = reference_study["records"]
+reference_reproduction_failures = reference_records.loc[
+    reference_records["saved_fit_available"].astype(bool)
+    & ~reference_records["saved_fit_reproduced"].astype(bool)
+]
+if len(reference_reproduction_failures):
+    display(reference_reproduction_failures)
+    raise RuntimeError("Saved analytical/fixed-reference fits did not reproduce; inspect these rows before interpreting the new reference.")
+print("Maximum saved-q reproduction difference:", reference_records["saved_q_error"].abs().max())
+print("Maximum pair/refit identity difference:", reference_study["paired"]["decomposition_error"].abs().max())
+print("Maximum exact-degenerate yield-only difference:", reference_records["yield_only_q_error"].abs().max())
+print("Population summaries use the saved random controls only.")
+print("Failed fits remain explicit; numerical summaries condition on valid pairs.")
+reference_summary = reference_study["summary"]
+reference_summary = reference_summary.loc[reference_summary["n_random"] > 0]
+reference_keys = ["mu_test", "replica", "generated_per_source", "model", "stratum"]
+with pd.option_context("display.max_rows", None, "display.max_columns", None):
+    print("Fit support and branch choice; strata use eta == analytical MLE for every model:")
+    display(reference_summary[reference_keys + [
+        "n_random", "n_valid", "n_failed", "n_empty_support", "n_branch_ambiguous",
+        "high_branch_fraction", "high_branch_se", "mean_q", "mean_q_se",
+    ]])
+    for statistic in ("mean", "rms"):
+        print(f"{statistic}: delta_q = delta_pair + refit_gain (signed pair; free denominator)")
+        columns = [f"{statistic}_{term}{suffix}"
+                   for term in ("delta_pair", "refit_gain", "delta_q")
+                   for suffix in ("", "_se")]
+        display(reference_summary.loc[reference_summary["model"] != "analytic",
+            reference_keys + ["n_paired_valid", "n_paired_failed"] + columns])
+    print("Exact/near degeneracy and occupied bins:")
+    display(reference_summary.loc[reference_summary["model"] != "analytic",
+        reference_keys + ["n_random", "n_exact_degenerate",
+            "mean_reference_separation_kappa", "mean_occupied_toy_bins", "mean_occupied_mc_bins"]])
+    print("Paired changes between integration banks:")
+    display(reference_study["changes"])
+    print("Selection of representative scans (not population frequencies):")
+    display(reference_study["scan_selection"])
+failed_reference_fits = reference_study["records"].loc[
+    ~reference_study["records"]["valid"].astype(bool)
+]
+print("Failed diagnostic fits:", len(failed_reference_fits))
+if len(failed_reference_fits):
+    display(failed_reference_fits.head(30))
+print("All per-toy records:", reference_study["metadata"]["output_dir"])
+'''
+
+MLE_REFERENCE_PLOTS = r'''
+reference_figures = plot_mle_reference_diagnostics(
+    reference_study, output=reference_figure_dir,
+)
+for name, figure in reference_figures.items():
+    print(name)
+    display(figure)
+    plt.close(figure)
+print("New figures:", reference_figure_dir)
+'''
+
+
+def mle_reference_cells():
+    cells = [
+        md(r"""
+        ### 9. Use each toy's unbinned MLE as the observable reference
+
+        **In a fresh runtime with updated source, run the first two setup/import
+        code cells and then this section.** Keep the completed run configuration
+        and section 6 tags. Sections 1–8 and notebooks 01–11 do not need to be
+        rerun; this section reads the completed section 6 inputs directly.
+
+        Both the previous calculation and this test perform an unconstrained
+        binned fit for every toy and tested hypothesis. The change here is the
+        **reference defining the observable**, not removal or addition of a fit.
+        First fit the analytical unbinned likelihood to this toy and integration
+        bank, obtaining \(\hat\mu_A\). Then compare
+        \[
+        t_{\eta,1}(x)=F_a\!\left(\frac{p(x;\eta)}{p(x;1)}\right),\qquad
+        t_{\eta,\hat\mu_A}(x)=F_a\!\left(
+          \frac{p(x;\eta)}{p(x;\hat\mu_A)}\right),\qquad
+        F_a(R)=\frac{R^a}{1+R^a}.
+        \]
+        For each choice we use matched 12/36-bin predictions from the same MC
+        events, histogram the same physical toy, and freely fit both branches.
+        The fixed-reference predictions are reused and checked; the new
+        reference requires fresh bin sums on those saved events.
+        **The chosen reference and mapping stay frozen throughout that fit.**
+        The analytical MLE is explicitly included among the fit candidates.
+
+        The bin boundaries, power \(a\), and original-bank normalizers defining
+        the densities stay unchanged, isolating the effect of the reference.
+        The analytical reference is determined separately for each toy and bank;
+        comparisons between banks consequently include changes in both the
+        predicted yields and the chosen reference. This is an analytical-ratio
+        control; it does not add NN training or test learned-ratio calibration.
+        """),
+        code(MLE_REFERENCE_SETUP),
+        md(r"""
+        #### Cache the original MC events for the new, toy-dependent partitions
+
+        Saved fixed-bin sums cannot be rebinned for arbitrary references. This
+        stage replays the completed integration streams once, through the frozen
+        preselection, and saves event-level importance-weighted analytical
+        component fields in a new cache. Seed, chunk and prefix boundaries must
+        reproduce the saved counts, RNG states, rates and fixed-reference
+        moments. No integration bank is extended, and no ratio NN is evaluated
+        on replayed points. The initial context load authenticates the saved
+        networks and original bank as in the earlier sections.
+
+        Defaults use the **largest completed bank in each replica** and all the
+        previously selected toys (200 random controls per hypothesis plus the
+        flagged examples in the production run). Caching requires extra disk
+        space and a one-time replay; new templates then require rebinning for
+        each distinct reference. This section is heavier than evaluating saved
+        bin sums. Cache construction and completed toys resume from checkpoints.
+        Setting `REFERENCE_LARGEST_PREFIXES=2` also tests the previous prefix;
+        use a new `REFERENCE_TAG` if changing the study settings.
+        """),
+        code(MLE_REFERENCE_BANKS),
+        md(r"""
+        #### Separate the intended comparison from the gain of the free fit
+
+        For either binned mapping \(B\), let
+        \(D_B(\mu)=-2\log[L_B(\mu)/L_B(1)]\). With the same analytical
+        best fit \(\hat\mu_A\), calculate
+        \[
+        q_{\mathrm{pair},B}=D_B(\eta)-D_B(\hat\mu_A),\qquad
+        g_B=D_B(\hat\mu_A)-D_B(\hat\mu_B)\geq0,
+        \]
+        \[
+        q_B-q_A=
+        \underbrace{q_{\mathrm{pair},B}-q_A}_{\delta_{\mathrm{pair}}}
+        +\underbrace{g_B}_{\text{additional gain from the free binned fit}}.
+        \]
+        The signed pair statistic is **not truncated at zero**. A small pair
+        error but large gain means the intended comparison is reproduced while
+        the compressed likelihood still finds a more favorable denominator.
+        Fits retain the physical bounds and both branches of section 6.
+
+        **Exact degeneracy is part of the test.** If
+        \(\eta=\hat\mu_A\), every event maps to exactly \(0.5\), inside a
+        bin rather than on an edge. The mapping is then yield-only. Its pair
+        statistic vanishes, but its free-fit gain need not vanish. We keep these
+        toys, compare their fits with an independent one-bin yield likelihood,
+        and report them separately from the nondegenerate population. We do
+        not move the reference, jitter the observable, or force \(q_B=0\).
+
+        Near equality can also compress events into very few bins at the
+        existing power. The records include reference separation and both
+        occupied observed bins and positive predicted bins. One occupied toy
+        bin alone does not imply a yield-only model: other predicted bins can
+        carry information through their zero observed counts. Unsupported
+        observations and numerical failures remain explicit, with no yield
+        floors or pseudocounts.
+        """),
+        code(MLE_REFERENCE_FITS),
+        md(r"""
+        #### Compare the fitted statistic, branch choice and reference collapse
+
+        Inspect the pair error and free-fit gain together, for both references
+        and both bin counts. The mean and RMS distinguish a systematic change
+        from toy-to-toy scatter. Reference-separation and occupancy plots expose
+        exact and near degeneracy. Selected scans illustrate how the competing
+        minimum changes; their selection is enriched and does not estimate
+        population frequencies. Population summaries use only random controls;
+        their errors condition on the integration banks and valid fits.
+        """),
+        code(MLE_REFERENCE_PLOTS),
+        md(r"""
+        #### How to interpret this test
+
+        - Smaller pair errors would show that the MLE reference improves the
+          intended \(\eta\)-versus-\(\hat\mu_A\) comparison at this binning.
+        - A remaining free-fit gain would show that preserving this comparison
+          does not force the compressed likelihood maximum to remain at
+          \(\hat\mu_A\). Inspect its branch and full scan.
+        - Separate exact-degenerate, nearly degenerate and well-separated
+          references before attributing changes to the choice of reference.
+        - Agreement between banks supports stability of the comparison but
+          does not establish absolute MC convergence or frequentist coverage.
+
+        The mapping depends on the observed dataset through its unbinned MLE.
+        This therefore defines a complete **test-statistic algorithm**; choosing
+        the partition from the data does not make the conditional counts an
+        ordinary fixed-partition Poisson experiment. Any later calibration must
+        repeat the whole unbinned fit → mapping → histogram → free binned fit
+        for every toy. This section performs that construction on the saved
+        diagnostic selection; it is not a new coverage calibration.
+
+        Earlier results and notebooks 08–11 remain available for comparison.
+        No model or run tag change is needed.
+        """),
+    ]
+    cells[0].metadata["poodemo_append_section"] = MLE_REFERENCE_MARKER
+    return cells
+
+
 def append_section_cells(destination, marker, factory, id_prefix):
     """Append only new cells, preserving the original notebook text verbatim."""
     original = destination.read_text()
@@ -1198,8 +1458,9 @@ def build_toy_diagnostics_notebook(*, clean=False):
         append_convergence_cells(destination)
         append_section_cells(destination, DECOMPOSITION_MARKER, decomposition_cells, "decomposition")
         append_section_cells(destination, FAMILY_MARKER, family_cells, "family")
+        append_section_cells(destination, MLE_REFERENCE_MARKER, mle_reference_cells, "mle-reference")
     else:
-        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells() + family_cells())
+        write(destination.name, diagnostic_cells() + convergence_cells() + decomposition_cells() + family_cells() + mle_reference_cells())
 
 
 if __name__ == "__main__":
