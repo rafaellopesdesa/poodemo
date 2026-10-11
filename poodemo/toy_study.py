@@ -1,7 +1,8 @@
-"""Paired frequentist toys for the analytical, learned and 12-bin models.
+"""Paired frequentist toys for the analytical, learned and binned models.
 
-The observable anchor eta is fixed at the tested hypothesis throughout each
-fit. Simulator event toys are shared by all three likelihood descriptions;
+The nominal anchor eta is fixed at the tested hypothesis throughout each
+fit; the observable numerator uses max(eta, reference_eta_floor). Simulator
+event toys are shared by all three likelihood descriptions;
 histogramming a Poisson point process already gives independent Poisson bin
 counts, so these counts are never fluctuated a second time.
 """
@@ -19,7 +20,7 @@ from scipy.special import expit
 
 from .data import PROCESSES, file_digest, save_json
 from .inference import component_coefficients, histogram_components
-from .pipeline import observable_bin_edges, prepare_quadrature
+from .pipeline import observable_bin_edges, prepare_quadrature, reference_ratio_eta
 from .toy_likelihood import StatOnlyLikelihood
 
 CASES = {
@@ -32,6 +33,20 @@ CASES = {
 _SELF_CASE = {"analytic_simulator": "analytic_simulator",
               "learned_simulator": "learned_model", "learned_model": "learned_model",
               "binned_simulator": "binned_model", "binned_model": "binned_model"}
+
+
+def _case_labels(n_bins=12):
+    """Keep stable case IDs while displaying the actual histogram size."""
+    return {**CASES, "binned_simulator": f"{n_bins}-bin / simulator toys",
+            "binned_model": f"{n_bins}-bin / binned-model toys"}
+
+
+def _result_label(case, group, labels=None):
+    if "label" in group:
+        saved_labels = group.label.dropna().unique()
+        if len(saved_labels) == 1:
+            return saved_labels[0]
+    return (CASES if labels is None else labels)[case]
 
 
 def _array_digest(array):
@@ -50,18 +65,21 @@ def _rng(seed, mu, toy_id, stream):
         [seed, mu_bits & 0xffffffff, mu_bits >> 32, int(toy_id), int(stream)]))
 
 
-def reference_observable(fields, rates, eta, power):
+def reference_observable(fields, rates, eta, power, reference_eta_floor=0.):
     """Apply the analytic observable with frozen selected-rate normalizers.
 
     Rates MUST come from the original integration bank, not the toy events.
     The returned coordinates agree with notebook 08's reference-ratio bins.
+    The floor changes only the numerator endpoint of the observable; physical
+    generation and likelihood parameters remain unmodified.
     """
     fields, rates = np.asarray(fields, float), np.asarray(rates, float)
     if not np.isfinite(eta) or eta < 0 or not np.isfinite(power) or power <= 0:
         raise ValueError("eta must be nonnegative and power must be positive")
     if fields.ndim != 2 or fields.shape[0] != 4 or rates.shape != (4,):
         raise ValueError("fields and frozen rates must have shapes (4,N) and (4,)")
-    tested = component_coefficients(eta)
+    effective_eta = reference_ratio_eta(eta, eta_floor=reference_eta_floor)
+    tested = component_coefficients(effective_eta)
     reference = component_coefficients(1.)
     density, base = tested @ fields, reference @ fields
     total, base_total = float(tested @ rates), float(reference @ rates)
@@ -69,14 +87,14 @@ def reference_observable(fields, rates, eta, power):
             or np.any(~np.isfinite(base)) or np.any(base <= 0)
             or not np.isfinite(total + base_total) or total <= 0 or base_total <= 0):
         raise ValueError("Reference observable requires positive physical rates and reference density")
-    if eta == 1.:
+    if effective_eta == 1.:
         return np.full(fields.shape[1], .5)
     with np.errstate(divide="ignore", over="ignore"):
         return expit(power * (np.log(density) - np.log(total)
                               - np.log(base) + np.log(base_total)))
 
 
-def _direct_templates(quad, mus, n_bins, power):
+def _direct_templates(quad, mus, n_bins, power, reference_eta_floor=0.):
     """Integrate process yields directly in the frozen observable bins.
 
     Each eta gets its own histogram of the original analytical quadrature,
@@ -89,14 +107,18 @@ def _direct_templates(quad, mus, n_bins, power):
     templates, rows, provenance = {}, [], {}
     source = "direct analytical quadrature histogram (notebook 08 method)"
     for mu in mus:
-        z = reference_observable(quad["nominal"], rates, mu, power)
+        z = reference_observable(quad["nominal"], rates, mu, power,
+                                 reference_eta_floor=reference_eta_floor)
         yields = histogram_components(z, quad["nominal"], quad["weights"], edges)
         templates[mu] = yields
         provenance[str(mu)] = source
         for j, process in enumerate(PROCESSES):
             for bi in range(n_bins):
-                rows.append(dict(mu_test=mu, eta=mu, process=process, bin=bi,
-                                 expected_yield=yields[j, bi], template_source=source))
+                row = dict(mu_test=mu, eta=mu, process=process, bin=bi,
+                           expected_yield=yields[j, bi], template_source=source)
+                if reference_eta_floor:
+                    row["eta_effective"] = reference_ratio_eta(mu, eta_floor=reference_eta_floor)
+                rows.append(row)
     return templates, edges, pd.DataFrame(rows), {
         "template_method": "direct_quadrature", "template_sources": provenance,
     }
@@ -135,7 +157,8 @@ def summarize_toys(results, levels=(.68, .90, .95, .99)):
         return pd.DataFrame(), pd.DataFrame()
     for (mu, case), group in results.groupby(["mu_test", "case"], sort=False):
         good = group.loc[group.valid.astype(bool) & np.isfinite(group.q)]
-        row = dict(mu_test=mu, case=case, label=CASES[case], n_toys=len(group),
+        label = _result_label(case, group)
+        row = dict(mu_test=mu, case=case, label=label, n_toys=len(group),
                    n_valid=len(good), n_failed=len(group) - len(good),
                    failure_fraction=1. - len(good) / len(group),
                    mean_q=float(good.q.mean()), mean_mu_hat=float(good.mu_hat.mean()),
@@ -158,7 +181,7 @@ def summarize_toys(results, levels=(.68, .90, .95, .99)):
             accepted = int(np.sum(evaluation_good.q <= critical)) if np.isfinite(critical) else 0
             n_eval, n_attempt = len(evaluation_good), len(evaluation)
             fraction = accepted / n_eval if n_eval and np.isfinite(critical) else np.nan
-            coverage.append(dict(mu_test=mu, case=case, label=CASES[case], nominal=level,
+            coverage.append(dict(mu_test=mu, case=case, label=label, nominal=level,
                                  calibration_case=calibration_case, critical_q=critical,
                                  n_calibration=len(calibration_good),
                                  n_calibration_failed=len(calibration)-len(calibration_good),
@@ -171,7 +194,7 @@ def summarize_toys(results, levels=(.68, .90, .95, .99)):
 
 
 def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
-                  reference_power=100., exposure=1., seed=None, mu_bounds=(0., 2.),
+                  reference_power=100., reference_eta_floor=0., exposure=1., seed=None, mu_bounds=(0., 2.),
                   grid_size=65, output_tag="toy_study_direct", progress_every=10):
     """Run/resume five stat-only ensembles with paired simulator event toys.
 
@@ -182,6 +205,8 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
     persisted. The learned-bank source is a finite quadrature approximation,
     whose effective sample size is recorded rather than hidden. Binned process
     yields are direct quadrature histograms at each fixed eta, without interpolation.
+    ``reference_eta_floor`` clips only the observable numerator endpoint. It
+    never clips toy truth, the tested hypothesis, or the free-fit parameter.
     """
     from .toy_sources import (QuadraturePoissonSource, load_frozen_selector,
                               make_frozen_workspace, sample_simulator_poisson)
@@ -189,8 +214,6 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                                  (grid_size, "grid_size", 5), (progress_every, "progress_every", 1)):
         if isinstance(value, (bool, np.bool_)) or int(value) != value or value < minimum:
             raise ValueError(f"{name} must be an integer >= {minimum}")
-    if n_bins != 12:
-        raise ValueError("This comparison uses direct reference-ratio histograms with exactly 12 bins")
     bounds = np.asarray(mu_bounds, float)
     mus = tuple(float(mu) for mu in mu_values)
     if (bounds.shape != (2,) or np.any(~np.isfinite(bounds)) or bounds[0] != 0
@@ -199,13 +222,16 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
         raise ValueError("Use unique finite mu values within fit bounds starting at exact zero")
     if not np.isfinite(exposure) or exposure <= 0 or not np.isfinite(reference_power) or reference_power <= 0:
         raise ValueError("exposure and reference_power must be finite and positive")
+    reference_ratio_eta(0., eta_floor=reference_eta_floor)
     seed = int(run.config["seed"]) + 110000 if seed is None else seed
     if isinstance(seed, (bool, np.bool_)) or not isinstance(seed, (int, np.integer)) or seed < 0:
         raise ValueError("seed must be a nonnegative integer")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", output_tag):
         raise ValueError("output_tag must contain only letters, digits, underscores or hyphens")
     quad = prepare_quadrature(run)
-    templates, edges, bin_yields, template_metadata = _direct_templates(quad, mus, n_bins, reference_power)
+    templates, edges, bin_yields, template_metadata = _direct_templates(
+        quad, mus, n_bins, reference_power, reference_eta_floor=reference_eta_floor)
+    labels = _case_labels(n_bins)
     selector, threshold, selection_provenance = load_frozen_selector(run)
     workspace = make_frozen_workspace(run, quad)
     learned = np.asarray(workspace.learned_quadrature[0])
@@ -237,6 +263,10 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                          selection=selection_provenance, model_artifacts=dependencies,
                          bank_hashes={key: _array_digest(quad[key]) for key in ("x", "weights", "nominal")},
                          learned_bank_sha256=_array_digest(learned), **template_metadata)
+    # The zero-floor configuration is intentionally byte-for-byte compatible
+    # with historical notebook-11 fingerprints used by notebook 12.
+    if reference_eta_floor:
+        configuration["reference_eta_floor"] = float(reference_eta_floor)
     fingerprint = hashlib.sha256(json.dumps(configuration, sort_keys=True, allow_nan=False).encode()).hexdigest()
     config_path = run.path("results", f"{output_tag}_config.json")
     result_path = run.path("results", f"{output_tag}_results.csv")
@@ -255,6 +285,16 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                     fit_note="All minima resolved by a grid in sqrt(mu), their local refinements, and exact bounds are compared; eta remains fixed at mu_test.",
                     coverage_note="Even self-model toy IDs calibrate critical values; odd IDs evaluate coverage. Errors are binomial conditional on estimated critical values, excluding finite calibration uncertainty. Invalid fits are retained and coverage bounds include them. Atoms/ties may make coverage conservative.",
                     validity_note="Learned intensities are checked on the quadrature and each observed sample; finite-bank checks do not establish positivity everywhere.")
+    if reference_eta_floor:
+        metadata["fit_note"] = (
+            "All minima resolved by a grid in sqrt(mu), their local refinements, "
+            "and exact bounds are compared; eta=mu_test and the observable "
+            "endpoint eta_effective=max(mu_test, reference_eta_floor) remain "
+            "fixed throughout the free fit.")
+        metadata["observable_note"] = (
+            "The numerator uses eta_effective=max(mu_test, reference_eta_floor); "
+            "the denominator remains mu=1. Physical generation, q_mu and the "
+            "free-fit parameter retain their unfloored values.")
     save_json(config_path, metadata)
     records = pd.read_csv(result_path).to_dict("records") if result_path.exists() else []
     keys = [(float(row["mu_test"]), int(row["toy_id"]), row["case"]) for row in records]
@@ -294,7 +334,8 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                             likelihood = StatOnlyLikelihood(workspace.evaluate(x)[0], learned_rates,
                                                             exposure=exposure, validity_intervals=learned_guard.negative_intervals)
                         else:
-                            z = reference_observable(analytic_events, rates, mu, reference_power)
+                            z = reference_observable(analytic_events, rates, mu, reference_power,
+                                                     reference_eta_floor=reference_eta_floor)
                             counts = np.histogram(z, edges)[0]
                             likelihood = StatOnlyLikelihood.from_binned(bin_fields, counts, exposure=exposure)
                     elif case == "learned_model":
@@ -313,11 +354,14 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                     result = _fit(likelihood, mu, bounds, grid_size)
                 except (ValueError, FloatingPointError, RuntimeError) as error:
                     result = _failure(f"{type(error).__name__}: {error}")
-                records.append(dict(mu_true=mu, mu_test=mu, eta=mu, toy_id=toy_id, case=case,
-                                    label=CASES[case], source_stream=source_stream,
-                                    n_observed=n_observed, exposure_multiplier=exposure,
-                                    template_source=template_metadata["template_sources"][str(mu)] if case.startswith("binned") else "unbinned",
-                                    **result))
+                row = dict(mu_true=mu, mu_test=mu, eta=mu, toy_id=toy_id, case=case,
+                           label=labels[case], source_stream=source_stream,
+                           n_observed=n_observed, exposure_multiplier=exposure,
+                           template_source=template_metadata["template_sources"][str(mu)] if case.startswith("binned") else "unbinned",
+                           **result)
+                if reference_eta_floor:
+                    row["eta_effective"] = reference_ratio_eta(mu, eta_floor=reference_eta_floor)
+                records.append(row)
                 completed.add((mu, toy_id, case))
             _atomic_csv(pd.DataFrame(records), result_path)
             if (toy_id + 1) % progress_every == 0 or toy_id + 1 == n_toys:
@@ -342,6 +386,9 @@ def plot_toy_study(study, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     results, coverage = study["results"], study["coverage"]
+    labels = _case_labels(study["metadata"]["configuration"].get("n_bins", 12))
+    labels = {case: _result_label(case, results.loc[results.case == case], labels)
+              for case in CASES}
     mus = sorted(results.mu_test.unique())
     colors = dict(zip(CASES, ("black", "#d55e00", "#009e73", "#0072b2", "#cc79a7")))
     figures = {}
@@ -358,7 +405,7 @@ def plot_toy_study(study, output):
                 else:
                     top = max(5., float(finite.q.max()) * 1.02) if len(finite) else 5.
                     edges = np.linspace(0., top, 31)
-                for case, label in CASES.items():
+                for case, label in labels.items():
                     group = finite.loc[finite.case == case]
                     if group.empty:
                         continue
@@ -404,7 +451,7 @@ def plot_toy_study(study, output):
             figures[name] = fig
         fig, axes = plt.subplots(1, len(mus), figsize=(7 * len(mus), 5.5), squeeze=False)
         for ax, mu in zip(axes[0], mus):
-            for i, (case, label) in enumerate(CASES.items()):
+            for i, (case, label) in enumerate(labels.items()):
                 group = coverage.loc[(coverage.mu_test == mu) & (coverage.case == case)]
                 ax.errorbar(group.nominal + (i - 2) * .0015, group.coverage, yerr=group.binomial_se,
                             marker="o", linestyle="none", color=colors[case], label=label, markersize=4)

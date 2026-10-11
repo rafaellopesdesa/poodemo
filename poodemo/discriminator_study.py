@@ -147,11 +147,13 @@ def _analytic_scan(run, parent, grid, systematics):
 
 def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
                             ratio_source="analytic", systematics=(False, True),
-                            scan_grid=None, morph_order="after"):
-    """Compare 12, 12² and 12³ fixed cells with 12 moving-ratio bins.
+                            scan_grid=None, morph_order="after", reference_eta_floor=0.,
+                            output_tag="10_discriminator_study"):
+    """Compare n, n² and n³ fixed cells with n moving-ratio bins.
 
-    At each tested mu the reference-ratio anchor eta equals mu; its histogram
-    is frozen before the numerator and denominator fits, as in notebooks 08/09.
+    At tested mu, the reference-ratio numerator is max(mu, reference_eta_floor).
+    Its histogram is frozen before both likelihood fits, as in notebooks 08/09.
+    The floor changes only the partition, never the physical mu in the yields.
     All fixed-axis histograms remain frozen throughout the complete scan.
     Local information is measured at the Asimov truth for every compression.
 
@@ -168,7 +170,11 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
     modes = tuple(dict.fromkeys(systematics))
     if not modes or any(not isinstance(mode, (bool, np.bool_)) for mode in modes):
         raise ValueError("systematics must be a nonempty sequence of booleans")
-    config = {**run.config, "reference_ratio_power": reference_power}
+    if (not isinstance(output_tag, str) or not output_tag or output_tag in (".", "..")
+            or Path(output_tag).name != output_tag):
+        raise ValueError("output_tag must be a nonempty directory name")
+    config = {**run.config, "reference_ratio_power": reference_power,
+              "reference_ratio_eta_floor": reference_eta_floor}
     current = Run(run.root, config, run.model)
     settings = pipeline.observable_configuration(current, "reference_ratio")
     truth = float(run.config["asimov_mu"])
@@ -231,11 +237,13 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
                                                           total_cells=n_bins**dimension))
             print(f"Fixed {label}: {n_bins**dimension} cells, {'profiled' if syst else 'stat only'} fitted", flush=True)
         for mu in grid:
+            endpoint = pipeline.reference_ratio_eta(mu, settings["reference_ratio_eta_floor"])
             z = pipeline.observable_values(current, axis_quad, mu, "reference_ratio")
             histogram = parent.binned(z, edges, morph_order=morph_order, eta=mu)
             result = pipeline._fit_test(current, histogram, mu, syst)
             scans.append(pipeline._record_scan_result(result, mu=mu, model=REFERENCE_LABEL,
                                                       systematics=syst, eta=mu, dimension=1,
+                                                      eta_effective=endpoint, eta_reference=1.,
                                                       n_bins=n_bins, total_cells=n_bins))
             information.append(_information(histogram, label=REFERENCE_LABEL, truth=truth,
                                              systematics=syst, baseline=baseline, eta=mu))
@@ -244,6 +252,9 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
         print(f"Moving reference ratio: {len(grid)} anchors, {'profiled' if syst else 'stat only'} fitted", flush=True)
     result_config = dict(n_bins=int(n_bins), powers=powers, ratio_source=ratio_source,
                          reference_ratio_power=settings["reference_ratio_power"],
+                         reference_ratio_eta_floor=settings["reference_ratio_eta_floor"],
+                         reference_ratio_eta_policy=settings["reference_ratio_eta_policy"],
+                         output_tag=output_tag,
                          binning_policy=settings["binning_policy"], bin_edges=edges.tolist(),
                          asimov_mu=truth, scan_grid=grid.tolist(), systematics=list(map(bool, modes)),
                          morph_order=morph_order, likelihood_source="analytic", asimov_source="analytic",
@@ -253,7 +264,10 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
                   occupancy=pd.DataFrame(occupancy), axis_summary=pd.DataFrame(summaries),
                   axis_histograms=pd.DataFrame(marginal_rows), joint_histograms=joints,
                   config=result_config)
-    output = run.path("results", "10_discriminator_study")
+    for key in ("information", "occupancy"):
+        frame = result[key]
+        frame["eta_effective"] = np.maximum(frame["eta"], settings["reference_ratio_eta_floor"])
+    output = run.path("results", output_tag)
     output.mkdir(parents=True, exist_ok=True)
     save_json(output / "config.json", result_config)
     for key in ("scans", "information", "occupancy", "axis_summary", "axis_histograms"):

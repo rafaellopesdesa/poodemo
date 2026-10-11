@@ -339,6 +339,26 @@ def observable_metadata(observable="score"):
                 spline_label=f"spline {observable} histogram")
 
 
+def reference_ratio_eta(eta, eta_floor=0.):
+    """Numerator endpoint for the reference ratio, never the physical fit POI.
+
+    The default reproduces historical observables, including notebook 12's
+    saved diagnostic studies. A positive floor freezes only the partition
+    below that endpoint; yields and likelihood fits still use physical mu.
+    Floors must lie below the fixed reference hypothesis at mu=1.
+    """
+    try:
+        floor = float(eta_floor)
+    except (TypeError, ValueError):
+        raise ValueError("reference_ratio_eta_floor must be finite and satisfy 0 <= floor < 1") from None
+    if isinstance(eta_floor, (bool, np.bool_)) or not np.isfinite(floor) or not 0. <= floor < 1.:
+        raise ValueError("reference_ratio_eta_floor must be finite and satisfy 0 <= floor < 1")
+    eta = float(eta)
+    if not np.isfinite(eta) or eta < 0.:
+        raise ValueError("eta must be finite and nonnegative")
+    return max(eta, floor)
+
+
 def observable_configuration(run, observable="score"):
     """Reproducible compression settings, independent of the saved physics run."""
     observable_metadata(observable)
@@ -351,9 +371,19 @@ def observable_configuration(run, observable="score"):
             raise ValueError("reference_ratio_power must be finite and strictly positive") from None
         if not np.isfinite(power) or power <= 0:
             raise ValueError("reference_ratio_power must be finite and strictly positive")
+        floor = reference_ratio_eta(0., run.config.get("reference_ratio_eta_floor", 0.))
         settings.update(reference_ratio_power=power,
+                        reference_ratio_eta_floor=floor,
+                        reference_ratio_eta_policy="lower_floor_v1",
                         binning_policy="reference_halfstep_interior_v1")
     return settings
+
+
+def _annotate_observable_endpoints(frame, settings):
+    """Keep nominal eta and the actual numerator endpoint explicit in tables."""
+    if settings["observable"] == "reference_ratio" and "eta" in frame:
+        frame["eta_effective"] = np.maximum(frame["eta"], settings["reference_ratio_eta_floor"])
+        frame["eta_reference"] = 1.
 
 
 def observable_bin_edges(n_bins, observable="score"):
@@ -391,16 +421,26 @@ def _validate_reference_binning_configuration(run, observable, fisher):
         return
     path = run.path("results", "reference_ratio_binning_config.json")
     message = ("The saved reference-ratio binning study is missing or has incompatible "
-               "compression settings. Rerun notebook 08 with the same REFERENCE_RATIO_A "
+               "compression settings. Rerun notebook 08 with the same REFERENCE_RATIO_A, "
+               "REFERENCE_RATIO_ETA_MIN, and requested bin count "
                "before notebook 09.")
     if not path.exists():
         raise ValueError(message)
     saved = json.loads(path.read_text())
+    # Products predating the floor used eta itself. They remain compatible
+    # only with floor=0; missing metadata must never imply the new floor=.1.
+    legacy = {"reference_ratio_eta_floor": 0.,
+              "reference_ratio_eta_policy": "lower_floor_v1"}
+    saved = {**legacy, **saved}
     if any(saved.get(key) != value for key, value in expected.items()):
         raise ValueError(message)
     for key, value in expected.items():
+        if key not in fisher and key in legacy and value == legacy[key]:
+            continue
         if key not in fisher or not (fisher[key] == value).all():
             raise ValueError(message)
+    if set(saved.get("bin_counts", [])) != set(fisher.n_bins.unique()):
+        raise ValueError(message)
     for count in fisher.n_bins.unique():
         if (not isinstance(count, (int, np.integer))
                 or saved.get("bin_edges", {}).get(str(count))
@@ -415,10 +455,12 @@ def observable_values(run, quad, eta, observable="score"):
     is r/(1+r), with r = p_selected(x; eta, alpha_NI=0) / p_selected_S(x).
     Both densities in that ratio are normalized on the same final quadrature;
     its value is independent of exposure and of the score's logistic scale.
-    ``reference_ratio`` uses R = r_eta/r_1 = p_selected(x; eta, 0) /
+    ``reference_ratio`` uses R = r_eta_eff/r_1 = p_selected(x; eta_eff, 0) /
     p_selected(x; 1, 0), followed by expit(a log R), with positive finite
-    ``run.config['reference_ratio_power']`` (default 1). Its denominator stays
-    fixed when fitting mu or NI. Ratio distribution plots allow eta=0;
+    ``run.config['reference_ratio_power']`` (default 1). The numerator endpoint
+    is eta_eff=max(eta, reference_ratio_eta_floor), with legacy default floor=0.
+    Both endpoints stay fixed when fitting physical mu or NI; the floor never
+    changes the physical yields, generating truth, or fit bounds. Ratio plots allow eta=0;
     the score and the common Fisher-information study require positive eta.
     """
     settings = observable_configuration(run, observable)
@@ -431,7 +473,9 @@ def observable_values(run, quad, eta, observable="score"):
 
     from .inference import component_coefficients
     nominal, weights = quad["nominal"], quad["weights"]
-    density = component_coefficients(eta) @ nominal
+    endpoint = (reference_ratio_eta(eta, settings["reference_ratio_eta_floor"])
+                if observable == "reference_ratio" else eta)
+    density = component_coefficients(endpoint) @ nominal
     signal = (component_coefficients(1.) @ nominal
               if observable == "reference_ratio" else nominal[0])
     total_rate, signal_rate = float(density @ weights), float(signal @ weights)
@@ -442,7 +486,7 @@ def observable_values(run, quad, eta, observable="score"):
         raise ValueError("The ratio observable needs a positive finite reference density")
     if np.any(~np.isfinite(density)) or np.any(density < 0):
         raise ValueError("The ratio observable needs a finite nonnegative physical intensity")
-    if observable == "reference_ratio" and eta == 1.:
+    if observable == "reference_ratio" and endpoint == 1.:
         # Exact cancellation is essential: roundoff on a bin edge at 1/2
         # would otherwise split a mathematically constant observable.
         return np.full_like(density, .5, dtype=float)
@@ -544,6 +588,8 @@ def run_binning_study(run, *, observable="score"):
     for key, value in settings.items():
         scans[key] = value
         fidelity[key] = value
+    for frame in (scans, fidelity):
+        _annotate_observable_endpoints(frame, settings)
     scans.to_csv(run.path("results", options["prefix"] + "binning_scans.csv"), index=False)
     fidelity.to_csv(run.path("results", options["prefix"] + "binning_fisher.csv"), index=False)
     save_json(run.path("results", options["prefix"] + "binning_config.json"),
@@ -627,12 +673,24 @@ def run_spline_study(run, n_bins=None, *, observable="score"):
     quad = prepare_quadrature(run)
     edges = observable_bin_edges(nbins, observable)
     etas = spline_eta_grid(run, quad)
-    if observable == "reference_ratio" and etas[0] <= 1. <= etas[-1]:
-        etas = np.unique(np.r_[etas, 1.])
+    if observable == "reference_ratio":
+        # Resolve both the floor's transition and the exact reference collapse.
+        # Existing midpoint closure then checks both sides of the floor knot.
+        floor = settings["reference_ratio_eta_floor"]
+        endpoints = [1.] if etas[0] <= 1. <= etas[-1] else []
+        if floor > 0.:
+            # The ratio itself is valid at eta=0, although its Fisher study
+            # uses positive physical mu. Explicit anchors make the plateau
+            # available down to zero without extrapolation or changing fits.
+            endpoints.extend([0., floor])
+        etas = np.unique(np.r_[etas, endpoints])
     anchor_values = np.stack([_histogram_anchors(quad, observable_values(run, quad, eta, observable), edges) for eta in etas])
     spline = YieldFractionSpline(etas, anchor_values)
+    endpoint_metadata = (dict(etas_effective=np.maximum(etas, settings["reference_ratio_eta_floor"]),
+                              eta_reference=1.) if observable == "reference_ratio" else {})
     np.savez_compressed(run.path("results", options["prefix"] + "spline_templates.npz"), etas=etas,
-                        edges=edges, bin_yields=anchor_values, totals=spline.totals, **settings)
+                        edges=edges, bin_yields=anchor_values, totals=spline.totals,
+                        **settings, **endpoint_metadata)
     save_json(run.path("results", options["prefix"] + "spline_choice.json"),
               dict(**settings, n_bins=nbins, choice_mode=choice_mode, bin_edges=edges.tolist(),
                    worst_information_fraction=float(worst.loc[nbins]),
@@ -704,6 +762,7 @@ def run_spline_study(run, n_bins=None, *, observable="score"):
                             ("morph_order_diagnostic", morph), ("spline_likelihood_validation", comparison)):
         for key, value in settings.items():
             frame[key] = value
+        _annotate_observable_endpoints(frame, settings)
         frame.to_csv(run.path("results", options["prefix"] + filename + ".csv"), index=False)
     return dict(scans=scans, yields=yields, validation=validation, physical_yields=physical,
                 morph_comparison=morph, comparison=comparison, n_bins=nbins, spline=spline)

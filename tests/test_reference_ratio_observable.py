@@ -46,7 +46,7 @@ def test_ratio_plots_allow_zero_eta(selected_quadrature, observable):
         pipeline.observable_values(run, quad, 0., "score")
 
 
-@pytest.mark.parametrize("n_bins", [1, 2, 3, 4, 20, 31, 60, 100, 1024])
+@pytest.mark.parametrize("n_bins", [1, 2, 3, 4, 20, 31, 36, 60, 100, 1024])
 def test_reference_edges_keep_half_and_roundoff_in_one_bin(n_bins):
     edges = pipeline.observable_bin_edges(n_bins, 'reference_ratio')
     assert len(edges) == n_bins + 1 and edges[0] == 0 and edges[-1] == 1
@@ -162,3 +162,103 @@ def test_reference_workflows_include_collapse_and_isolate_artifacts(tmp_path, mo
     config_path.write_text(json.dumps(incompatible))
     with pytest.raises(ValueError, match='Rerun notebook 08'):
         pipeline.run_spline_study(run, n_bins=20, observable='reference_ratio')
+
+
+def test_floor_changes_only_the_low_eta_partition(selected_quadrature):
+    run, quad = selected_quadrature
+    etas = [0., .03, .08, .1, .4, 1., 1.4]
+    original = {eta: pipeline.observable_values(run, quad, eta, 'reference_ratio') for eta in etas}
+    ratio = pipeline.observable_values(run, quad, .03, 'ratio')
+    score = pipeline.observable_values(run, quad, .03, 'score')
+    original_fields = quad['nominal'].copy()
+    run.config['reference_ratio_eta_floor'] = .1
+    for eta in etas:
+        actual = pipeline.observable_values(run, quad, eta, 'reference_ratio')
+        np.testing.assert_array_equal(actual, original[max(eta, .1)])
+        assert pipeline.reference_ratio_eta(eta, .1) == max(eta, .1)
+    np.testing.assert_array_equal(pipeline.observable_values(run, quad, 1., 'reference_ratio'), .5)
+    np.testing.assert_array_equal(pipeline.observable_values(run, quad, .03, 'ratio'), ratio)
+    np.testing.assert_array_equal(pipeline.observable_values(run, quad, .03, 'score'), score)
+    np.testing.assert_array_equal(quad['nominal'], original_fields)
+
+    # Identical partitions below the floor do not identify the physical
+    # hypotheses: their event rates, likelihoods, and free-fit domain differ.
+    z = pipeline.observable_values(run, quad, 0., 'reference_ratio')
+    edges = pipeline.observable_bin_edges(36, 'reference_ratio')
+    frozen = pipeline._template_likelihood(quad, systematics=False).binned(z, edges, eta=0.)
+    for mu in (0., .03, .1, 1.4):
+        expected = np.histogram(z, edges, weights=quad['weights'] *
+                                (component_coefficients(mu) @ quad['nominal']))[0]
+        np.testing.assert_allclose(frozen.intensity(mu), expected, rtol=1e-11, atol=1e-10)
+        assert np.isfinite(frozen.nll(mu))
+    assert not np.allclose(frozen.intensity(0.), frozen.intensity(.1))
+
+
+@pytest.mark.parametrize('floor', [-.1, 1., 1.1, np.nan, np.inf, None, 'invalid', True])
+def test_reference_floor_rejects_invalid_values(selected_quadrature, floor):
+    run, quad = selected_quadrature
+    run.config['reference_ratio_eta_floor'] = floor
+    with pytest.raises(ValueError, match='reference_ratio_eta_floor'):
+        pipeline.observable_values(run, quad, 0., 'reference_ratio')
+
+
+@pytest.mark.parametrize('eta', [-.1, np.nan, np.inf])
+def test_reference_floor_helper_rejects_invalid_eta(eta):
+    with pytest.raises(ValueError, match='eta'):
+        pipeline.reference_ratio_eta(eta, .1)
+
+
+def test_legacy_binning_metadata_means_zero_floor(tmp_path):
+    run = Run(tmp_path, {}, None)
+    run.path('results').mkdir()
+    old_settings = dict(observable='reference_ratio', reference_ratio_power=1.,
+                        binning_policy='reference_halfstep_interior_v1')
+    fisher = pd.DataFrame([dict(n_bins=36, information_fraction=.99, **old_settings)])
+    saved = dict(**old_settings, bin_counts=[36],
+                 bin_edges={'36': pipeline.observable_bin_edges(36, 'reference_ratio').tolist()})
+    path = run.path('results', 'reference_ratio_binning_config.json')
+    path.write_text(json.dumps(saved))
+    pipeline._validate_reference_binning_configuration(run, 'reference_ratio', fisher)
+    run.config['reference_ratio_eta_floor'] = .1
+    with pytest.raises(ValueError, match='Rerun notebook 08'):
+        pipeline._validate_reference_binning_configuration(run, 'reference_ratio', fisher)
+
+
+def test_floor_spline_plateau_metadata_and_explicit_estimator_bins(tmp_path, monkeypatch):
+    run = Run(tmp_path, dict(asimov_mu=1., mu_min=.03, mu_max=1.5, mu_points=4,
+                            mu_fit_bounds=[0., 2.], nuisance_bounds=[-2., 2.],
+                            bin_counts=[12, 36, 128], score_scale=.15, reference_ratio_power=10.,
+                            reference_ratio_eta_floor=.1, spline_anchors=4,
+                            spline_focus_anchors=0, spline_focus_halfwidth=.1), None)
+    run.path('results').mkdir()
+    monkeypatch.setattr(pipeline, 'prepare_quadrature', lambda current: _categorical_quadrature())
+    monkeypatch.setattr(pipeline, '_saved_unbinned', lambda *a, **k: pd.DataFrame())
+    bins = pipeline.run_binning_study(run, observable='reference_ratio')
+    spline = pipeline.run_spline_study(run, n_bins=36, observable='reference_ratio')
+    estimators = run_estimator_study(run, observable='reference_ratio', n_bins=36)
+    assert spline['n_bins'] == 36
+    assert 0. in spline['spline'].etas and .1 in spline['spline'].etas and 1. in spline['spline'].etas
+    for eta in [0., .03, .05, .08, .1]:
+        np.testing.assert_array_equal(spline['spline'](eta), spline['spline'](.1))
+    plateau_validation = spline['validation'].query('eta < .1')
+    assert len(plateau_validation)
+    np.testing.assert_allclose(plateau_validation.max_fraction_error, 0., atol=1e-14)
+    assert set(estimators.loc[estimators.model != 'analytic unbinned', 'n_bins']) == {36}
+    for frame in (bins['fidelity'], bins['scans'], spline['scans'], spline['yields'], estimators):
+        assert (frame.reference_ratio_eta_floor == .1).all()
+        np.testing.assert_array_equal(frame.eta_effective, np.maximum(frame.eta, .1))
+    with np.load(run.path('results', 'reference_ratio_spline_templates.npz')) as archive:
+        assert len(archive['edges']) == 37 and archive['reference_ratio_eta_floor'] == .1
+        np.testing.assert_array_equal(archive['etas_effective'], np.maximum(archive['etas'], .1))
+    run.config['reference_ratio_eta_floor'] = .05
+    with pytest.raises(ValueError, match='REFERENCE_RATIO_ETA_MIN'):
+        pipeline.run_spline_study(run, n_bins=36, observable='reference_ratio')
+
+
+@pytest.mark.parametrize('n_bins', [True, 0, 1, 36., '36'])
+def test_estimator_rejects_invalid_bin_override_before_loading_data(tmp_path, monkeypatch, n_bins):
+    def no_data(run):
+        pytest.fail('Reject the invalid bin override before loading data')
+    monkeypatch.setattr(pipeline, 'prepare_quadrature', no_data)
+    with pytest.raises(ValueError, match='n_bins'):
+        run_estimator_study(Run(tmp_path, {}, None), observable='reference_ratio', n_bins=n_bins)

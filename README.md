@@ -14,16 +14,17 @@ to lie between zero and one while S has a visibly distinct shape.
 | [01_generate_amplitudes.ipynb](notebooks/01_generate_amplitudes.ipynb) | Generate coherent S/B amplitudes, SBI and NI samples, and nuisance variations | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/01_generate_amplitudes.ipynb) |
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
-| [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Repeat notebook 6 with the bounded physical ratio p(x;eta)/p(x;1) | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
-| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Repeat notebook 7 with physical-reference ratio templates and profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
-| [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 1D/2D/3D process-ratio histograms with the moving 12-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
+| [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Study the floored reference ratio with 36-bin displays and a resolution sweep | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
+| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Interpolate 36-bin reference-ratio templates and compare profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
+| [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
 
 ## Run in Colab
 
 1. The physical-reference workflow is **01–03 → 08**, followed by the studies
-   in 09, 10 and 11, then 12 to investigate the saved toy results. Notebook 11
+   in 09, 10 and 11. Notebook 12 retains its historical diagnostic inputs;
+   its source is not automatically switched to the new floored ensemble. Notebook 11
    builds its own direct bin yields and does not require 09's splines.
    Notebooks 04–07 are retired; their earlier studies remain in the history.
    For a private repository, authorize GitHub access in Colab's notebook browser. If the link
@@ -555,111 +556,122 @@ The full 165-million-event generation and production ratio training are separate
 
 ## Physical-reference ratio comparison (08–09)
 
-Run 08 then 09 in fresh runtimes using the same completed `RUN_NAME`. No new
-samples or training are required. Notebook 08 mirrors 06's current binning and
-plot controls; 09 exposes `SPLINE_BINS` (currently 12). Results have the `reference_ratio_` prefix and
-figures use `08_`/`09_`, leaving score and S-reference studies intact.
+Run **08, then 09** in fresh runtimes using the same completed
+`RUN_NAME="paper-distinct-s-v4"`. No new samples, trained networks, or physics
+run tag are required. The principal histograms and estimator diagnostics use
+**36 bins**, and notebook 09 defaults to `SPLINE_BINS=36`. Notebook 08 retains
+its bin-count sweep for studying coarsening; 36 must be among those counts.
+Results have the `reference_ratio_` prefix and figures use `08_`/`09_`.
 
-The analytical observable is `sigmoid(a * log(R)) = R**a/(1+R**a)`, where
-`R = r(x;eta)/r(x;1) = p_selected(x;eta,0)/p_selected(x;1,0)`.
-Set `REFERENCE_RATIO_A` in the configuration cell of both notebooks (default
-100); `a=1` reproduces the original transform. A larger positive power spreads
-values away from 0.5 while retaining the range [0,1] and event ordering. The
-power is fixed across eta and likelihood fits. Notebook 08 displays distributions
-at eta = 0.0, 0.3, 0.6, 1.0 and 1.5. Eta=0 is a plotting anchor; the score/Fisher
-scan continues to use positive values.
+The analytical observable is `sigmoid(a * log(R)) = R**a/(1+R**a)`, with
 
-It preserves the continuous pairwise comparison with truth 1 at fixed NI.
-Finite binning and NI profiling have no corresponding optimality
-guarantee. At eta=1 it is exactly 1/2: the frozen experiment retains only rate
-information for every finite positive a. All reference-ratio histograms use
-`observable_bin_edges`, placing 0.5 strictly inside a bin. Odd counts retain
-uniform edges; for even counts the internal edges shift left by half a nominal
-bin width, preserving the requested count and [0,1] endpoints. Central bins
-keep equal widths with 0.5 at a bin center (for at least four bins); only the
-endpoint widths differ. Plots show expected events per bin.
+```text
+eta_effective = max(eta, REFERENCE_RATIO_ETA_MIN)
+R = r(x; eta_effective) / r(x; 1)
+REFERENCE_RATIO_ETA_MIN = 0.1
+REFERENCE_RATIO_A = 100.0
+```
 
-Notebook 08 explicitly diagnoses the collapse. Notebook 09 uses the same edges
-for its direct and PCHIP templates. A finite-bin rate-only plateau can remain
-close to eta=1, and stretching can demand more interpolation anchors outside
-that plateau; inspect off-anchor errors. Saved 08 study metadata must match
-the power and bin-edge policy in 09, otherwise it requests a fresh 08 study.
+Use identical floor and power settings in notebooks 08–11. This is a floor on
+**the compression endpoint only**. Physical hypotheses, generating densities,
+process coefficients, and the parameter varied in each likelihood fit retain
+their original definitions. Below the floor, hypotheses share one observable
+and bin partition but have different expected yields. At and above the floor,
+the original reference-ratio observable is recovered exactly. This is not an
+additive `eta+0.1` shift or a lower bound on the measured parameter.
 
-For this observable update, refresh the source checkout/restart the runtime
-and rerun **08, then 09**, using the same `paper-distinct-s-v4` run. Notebooks
-01–07 and the trained networks need no rerun. Changing `REFERENCE_RATIO_A`
-also requires rerunning 08 and 09 with the same value; no new run name is needed.
+Both densities are normalized on the same selected integration bank. The
+continuous ratio preserves its endpoint-pair comparison; below the floor that
+pair is `(eta_effective,1)`, not `(eta,1)`. No full-family, finite-binning or
+nuisance-profiling sufficiency is assumed. At eta=1 the observable remains
+exactly 0.5 and the frozen histogram retains only the total rate. The shared
+`observable_bin_edges` keeps 0.5 strictly inside a bin. Even counts use the
+existing half-bin shift of internal edges, with endpoints at 0 and 1. Plots
+show event yields per bin using mplhep typography without an ATLAS label.
 
-Rebuild only these new notebooks with `python scripts/build_reference_notebooks.py`.
-The builder reads the current 06/07 cell sources and clears outputs in 08/09;
-it does not rewrite 01–07.
+Notebook 08 displays the low-end saturation and the separate collapse at 1;
+its Fisher/score scan still uses positive physical eta. Notebook 09 includes
+an explicit knot at the floor transition, as well as at eta=1, and validates
+intermediate template predictions. Data are refilled directly at physical
+eta using the same floored map. Saved notebook-08 metadata must match the
+floor, power, bin-edge policy and requested bin count before notebook 09 can
+reuse it. Changing the compression settings requires rerunning 08 then 09.
+The piecewise-constant low-end partition does not remove physical mu dependence
+from the interpolated likelihood's yields.
+
+The builders preserve current study and plotting controls while refreshing
+these notebooks and clearing their stale outputs. Use
+`python scripts/build_reference_notebooks.py` to rebuild only 08–09.
+Notebooks 01–07 and their outputs are not rewritten.
 
 ## Process discriminators and sampling calibration (10–11)
 
-Use the existing completed v4 run. Notebook 10 reuses the selected integration
-bank and analytical baseline; notebook 11 additionally requires the trained
-ratios. It builds **12-bin, a=100** yields directly from the integration bank,
-as in notebook 08; no notebook-09 products are required. No new run name,
-training, or execution of 04–07 is needed. Build just these notebooks with
-`python scripts/build_comparison_notebooks.py`.
+Rerun **10 and 11** with the updated source and the same completed v4 run.
+Notebook 10 uses the selected integration bank and analytical baseline;
+notebook 11 also uses the trained ratios. Notebook 11 builds **36-bin, a=100**
+yields directly from the integration bank, using the same endpoint floor as
+08–10. It does not use spline predictions or require notebook-09 products.
+Neither notebook requires retraining or new sample generation. Build these
+notebooks with `python scripts/build_comparison_notebooks.py`.
 
-Notebook 10 compares fixed process ratios `r_j=p_j/p_S` in one, two, and three
-dimensions: NI; NI × SBI; NI × SBI × B. Each coordinate has 12 bins and uses
-`sigmoid(a_j*log(r_j))`, with editable defaults `a_NI=1`, `a_SBI=a_B=2`. It
-compares their Asimov scans to the moving 12-bin physical-reference ratio and
-analytical unbinned likelihood, with NI fixed and profiled. Distribution plots,
-bin occupancy/effective statistics, and local information accompany the scans.
-Default analytical axes isolate compression loss; optional learned axes apply
-the saved networks to both the fixed and moving observables. The continuous
-three-ratio vector and event count contain the nominal mu-family information;
-finite multidimensional bins and nuisance profiling require separate checks.
-Similarity of SBI and B does not make their interference-bearing difference
-automatically irrelevant. Products are in `results/10_discriminator_study`.
+Notebook 10 compares fixed process ratios `r_j=p_j/p_S` in one, two and three
+dimensions: NI; NI × SBI; NI × SBI × B. Each coordinate has **36 bins**, giving
+36, 1,296 and 46,656 cells. Process axes keep their original transformation
+`sigmoid(a_j*log(r_j))`, with `a_NI=1` and `a_SBI=a_B=2`; the endpoint floor
+applies only to the moving physical-reference ratio, which also has 36 bins.
+The comparison includes analytical unbinned scans, fixed/profiled NI,
+occupancy/effective-statistics tables and local information. Optional learned
+axes apply the saved networks to both fixed and moving observables. The
+larger Cartesian grids require more integration statistics: sparse cells
+remain explicit and are not filled with artificial counts.
+The default products are in `results/10_discriminator_study_36_floor01`.
 
 Notebook 11 measures the **two-sided stat-only** statistic
 `q_mu = -2 log[L(mu)/L(mu_hat)]`, with `mu_true=mu_test` at 0 and 1.4.
-The fit searches all grid-resolved minima in `sqrt(mu)` over `[0,2]`, including
-exactly zero; the observable stays frozen at `eta=mu_test` throughout each fit.
-Its five comparisons are:
+Its updated fit uses 129 points in `sqrt(mu)`, local refinement of candidate
+minima, and physical bounds **[0,3]**, matching the wider domain investigated
+in notebook 12. The observable is frozen at the tested eta throughout each
+fit, with numerator endpoint `max(eta,0.1)` and denominator endpoint 1.
+The five comparisons are:
 
 | Likelihood | Toy source |
 |---|---|
 | Analytical unbinned | Fresh physical simulator Poisson experiments |
 | Learned unbinned | Those same simulator experiments |
 | Learned unbinned | Poisson resampling of the frozen learned intensity on its integration bank |
-| 12-bin model | Those same simulator experiments histogrammed once |
-| 12-bin model | Independent Poisson counts from the fitted bin means |
+| 36-bin model | Those same simulator experiments histogrammed once |
+| 36-bin model | Independent Poisson counts from its direct bin means |
 
-The simulator uses exact Gaussian-amplitude Poisson thinning and the frozen
+The simulator uses exact Gaussian-amplitude Poisson thinning and frozen
 preselection. Histogrammed simulator counts already fluctuate as Poisson
-counts; no second fluctuation is applied. Learned-model toys are conditional
-on a finite quadrature approximation, with effective bank size recorded.
-Analytical selected-rate integrals also carry numerical integration error.
-At both eta=0 and eta=1.4, the process bin yields are integrated directly on
-the selected bank using notebook 08's observable and bin edges. The bins and
-process yields remain frozen during each fit; their physical mu dependence
-comes from the exact S/SBI/B/NI coefficients. These same direct predictions
-define the binned model's own Poisson toys. No spline interpolation is used.
+counts; no second fluctuation is applied. Learned-model toys remain conditional
+on the finite integration bank. All selected-rate integrals and observable
+normalizers stay frozen to the saved bank, retaining its numerical integration
+uncertainty. Direct S/SBI/B/NI templates remain fixed during each fit while
+their physical mu coefficients vary. The floor is never applied to those
+coefficients or to the physical generating hypothesis.
 
-Rerun only notebook 11 in a fresh runtime after this update. Its default
-`OUTPUT_TAG="toy_study_direct"` keeps the new direct-yield study separate from
-earlier spline-based results. The default is 5,000 toys per hypothesis and five
-fit/source combinations (12 toys in smoke mode). Each complete toy ID is checkpointed. Increasing
-`N_TOYS` resumes and extends the same deterministic streams; changed models,
-banks, powers, exposure or fit settings require a new `OUTPUT_TAG`. Large event
-arrays are not saved. Results include failures, fitted boundaries, test-statistic
-histograms and survival curves, quantiles, fitted-mu distributions, and empirical
-cross-calibration. Even self-model toy IDs set critical values; odd IDs evaluate
-acceptance. Binomial errors are conditional on those estimated critical values;
-tail precision and finite calibration-sample uncertainty need larger ensembles.
-Test-statistic histograms and survival curves use logarithmic vertical axes
-to display their tails; the horizontal q axis remains linear and includes zero.
-Empty bins are not assigned artificial positive contents. Asymptotic curves
-are illustrative references, not imposed calibration laws. Increasing an
-existing direct-yield run from 500 to 5,000 toys reuses its completed rows;
-keep the same `OUTPUT_TAG`, seed and scientific settings.
-Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON manifest,
-including the directly integrated process yields in `<OUTPUT_TAG>_bin_yields.csv`.
+The new default **`OUTPUT_TAG="toy_study_direct_36_floor01"`** isolates this
+study from the old `toy_study_direct` results used by notebook 12. Old rows
+cannot be reused as results of the new binning/floor/domain. The default is
+5,000 toys per hypothesis and five fit/source combinations (12 toys in smoke
+mode). With unchanged settings, increasing `N_TOYS` resumes the new study's
+deterministic streams; changed banks, floors, binning, powers, exposure or fit
+settings reject stale checkpoints and require a new output tag. Model and run
+tags remain unchanged. Large event arrays are not saved.
+
+Results include fit failures, boundaries, q distributions and survival curves,
+fitted-mu distributions and empirical cross-calibration. Even self-model toy
+IDs set critical values; odd IDs evaluate acceptance. Reported binomial errors
+condition on the estimated critical values. Test-statistic histograms and
+survival curves keep logarithmic vertical axes, with zero included on the
+linear horizontal q axis. Asymptotic curves are illustrative references.
+Toy tables are saved as `results/<OUTPUT_TAG>_*.csv` with a matching JSON
+manifest, including directly integrated `<OUTPUT_TAG>_bin_yields.csv`.
+
+Notebook 12 and its historical diagnostic inputs are preserved. Its current
+sections retain the old source tag and reference prescription; they should
+not be pointed at the new 36-bin source without a separate diagnostic update.
 
 ## Investigating toy discrepancies (12)
 

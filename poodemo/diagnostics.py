@@ -192,10 +192,11 @@ def _unbinned_baselines(run, parent, information):
     return results
 
 
-def run_estimator_study(run, *, observable="score"):
+def run_estimator_study(run, *, observable="score", n_bins=None):
     """Save/return mu_hat(eta) and local sigma_mu(eta) for one Asimov truth.
 
-    Uses the finest configured ``bin_counts`` and the existing eta scan grid.
+    Uses ``n_bins`` when specified, otherwise the finest configured
+    ``bin_counts``, and the existing eta scan grid.
     At each eta the observable and observed Asimov histogram are frozen before
     either fit. Stat-only and NI-profiled results share those same data.
     ``observable`` selects the local score or the density-ratio observable;
@@ -212,11 +213,17 @@ def run_estimator_study(run, *, observable="score"):
     The Fisher width is not a global interval across possible secondary minima.
     """
     from .pipeline import (prepare_quadrature, observable_metadata, observable_values,
-                           observable_configuration, observable_bin_edges, _positive_study_grid)
+                           observable_configuration, observable_bin_edges, _positive_study_grid,
+                           _annotate_observable_endpoints)
     from .data import save_json
 
     options = observable_metadata(observable)
     settings = observable_configuration(run, observable)
+    if n_bins is not None and (
+            isinstance(n_bins, (bool, np.bool_))
+            or not isinstance(n_bins, (int, np.integer)) or n_bins < 2):
+        raise ValueError("n_bins must be an integer >= 2, or None for the finest configured binning")
+    n_bins = int(max(run.config["bin_counts"]) if n_bins is None else n_bins)
     etas = _positive_study_grid(run)
     quad = prepare_quadrature(run)
     parent = TemplateLikelihood(quad["nominal"], quad["down"], quad["up"],
@@ -226,7 +233,6 @@ def run_estimator_study(run, *, observable="score"):
         raise ValueError("A local Asimov width requires truth inside the mu fit bounds")
     if parent.n_nuisance != 1:
         raise ValueError("This study expects the single NI nuisance")
-    n_bins = max(run.config["bin_counts"])
     edges = observable_bin_edges(n_bins, observable)
     full_information = local_asimov_information(parent, truth)
     baselines = _unbinned_baselines(run, parent, full_information)
@@ -244,6 +250,7 @@ def run_estimator_study(run, *, observable="score"):
     result = pd.DataFrame(rows)
     for key, value in settings.items():
         result[key] = value
+    _annotate_observable_endpoints(result, settings)
     filename = f"{options['prefix']}estimator_eta.csv"
     path = run.path("results", filename)
     path.parent.mkdir(parents=True, exist_ok=True)

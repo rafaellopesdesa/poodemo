@@ -1,46 +1,51 @@
-"""Build 08/09 from the current 06/07 notebooks, preserving their study settings.
+"""Update notebooks 08/09 in place, retaining user-edited study/plot settings.
 
-Only new notebooks are written; source notebooks and saved outputs are untouched.
+The checked-in notebooks are the source for their cells. Unlike the original
+bootstrap from 06/07, this migration preserves later edits to the reference
+studies. Only 08/09 are written, and stale execution outputs are cleared.
 """
-import copy
+import re
+
 import nbformat
-from build_notebooks import REPO, md, code, write
+from build_notebooks import REPO
 
 DEFINITION = r"""
 ### Ratio to the fixed physical reference
 
 At nominal NI nuisance, use the analytical **selected, normalized** densities:
 \[
-R_\eta(x)=\frac{r(x;\eta)}{r(x;1)}
-=\frac{p(x;\eta,0)}{p(x;1,0)}
-=\frac{D_\eta(x)/\Lambda_\eta}{D_1(x)/\Lambda_1},
+\eta_{\mathrm{eff}}=\max(\eta,\eta_{\min}),\qquad
+R_\eta(x)=\frac{r(x;\eta_{\mathrm{eff}})}{r(x;1)}
+=\frac{p(x;\eta_{\mathrm{eff}},0)}{p(x;1,0)},
 \qquad z_\eta(x)=\frac{R_\eta(x)^a}{1+R_\eta(x)^a}
 =\operatorname{sigmoid}\!\left(a\log R_\eta(x)\right).
 \]
 The S reference cancels. Both normalizations use the same final quadrature;
 this observable is analytical, not learned. The denominator is always at
 **mu=1 and alpha_NI=0**, independent of the fit, anchor and Asimov truth settings.
-The physical component coefficients, selected yields and Gaussian NI constraint
-are unchanged. The event count retains the Poisson rate information.
+The event count retains the Poisson rate information.
 
-Set **`REFERENCE_RATIO_A`** in the configuration cell; the default is **100**.
-Any finite positive value preserves the ordering and the range [0,1]. Values
-above 1 spread ratios close to 1 over more of the range; **a=1** recovers the
-original transformation. Use the same value in 08 and 09. This is an observable
-setting, so changing it requires rerunning 08–09, without retraining or changing
-the saved physics run. It stays fixed across all eta values and likelihood fits.
+Use **36 bins**, **`REFERENCE_RATIO_ETA_MIN = 0.1`** and
+**`REFERENCE_RATIO_A = 100`** throughout notebooks 08–11. The floor changes only
+which observable partitions the events. **Physical test points, generated truth,
+component coefficients and the unrestricted physical-mu fit are not floored.**
+All eta below the floor share a partition; their physical bin yields still vary
+with mu. Above the floor the original observable is unchanged. These settings
+require rerunning the downstream studies, without sample generation, retraining
+or changing the saved physics run. The power stays fixed throughout every fit.
 
-For fixed NI and Asimov truth 1, the continuous ratio retains the full comparison
-between eta and 1 at any separation. Finite bins can still lose
-information. This pairwise statement does not imply sufficiency for all fitted
-mu values or for NI profiling. Compare to **analytical unbinned**; the learned
-references retain their separate closure interpretations.
+For fixed NI, the continuous ratio retains the comparison between
+**eta_eff and 1**. Below the floor this is not the pairwise-optimal ratio for
+physical eta versus 1: the deliberate change targets the competing-minimum
+problem seen in notebook 12. Even above the floor, pairwise sufficiency does
+not imply sufficiency for every freely fitted mu or for NI profiling. Compare
+to **analytical unbinned**; learned references have separate closure meanings.
 
-At **eta=1**, R=1 and z=1/2 exactly for every event, for every allowed a.
-The code preserves this collapse without jitter or score substitution.
-That frozen histogram measures only the total rate. Its local shape information
-vanishes, even though the Asimov test statistic for testing 1 is correctly zero.
-Near 1 the distribution still contracts for any finite a.
+At **eta=1**, R=1 and z=1/2 exactly for every event. The separate equality
+collapse remains: no jitter, shifted high-eta endpoint or score substitution is
+introduced. That frozen histogram measures only the total rate. Near 1 the
+distribution still contracts for any finite positive a. Larger a spreads ratios
+near 1 across more of [0,1]; a=1 gives the original R/(1+R) transformation.
 
 Every histogram uses `observable_bin_edges`: **0.5 is strictly inside a bin**.
 Odd bin counts use uniform edges. For even counts, the internal edges shift
@@ -50,241 +55,243 @@ left by half a nominal bin width, so the central bins keep equal widths and
 The same edges are used in plots, direct fits, estimator diagnostics and splines.
 These are event-yield plots per bin, not densities divided by bin width.
 """
-SPLINE_WARNING = r"""
-### Interpolation at the collapsed anchor
 
-Use the editable **`SPLINE_BINS`** setting (default 12), with the same power
-`REFERENCE_RATIO_A` as notebook 08. The saved 08 study is checked for a matching
-power and bin-edge policy; rerun 08 first if either has changed. The PCHIP
-method and anchor settings are retained. The grid additionally includes eta=1, even if a
-changed Asimov truth differs from 1. No process yields or data are modified.
+SPLINE_WARNING = r"""
+### Interpolation at the floor and collapsed anchor
+
+Use **`SPLINE_BINS = 36`**, with the same power and floor as notebook 08.
+The saved 08 study is checked for matching observable settings and bin edges;
+rerun 08 first after changing them. PCHIP interpolation includes explicit knots
+at eta_min and eta=1, independently of the Asimov truth. No physical process
+yields or data are replaced by a floored physical hypothesis.
+
+Below eta_min, every nominal and NI-varied process histogram has the same
+partition. Identical template anchors at eta=0 and eta_min reproduce the **exact
+plateau** under PCHIP interpolation. The floor is an explicit knot, so the
+interpolation never spans its kink in one interval. The physical mu coefficients still vary throughout the fit. Inspect
+off-anchor validation immediately above the floor as well as near eta=1.
 
 The shared bin edges place 1/2 strictly inside a bin, avoiding a numerical split
-of the degenerate eta=1 events. For a finite bank, sufficiently nearby anchors
-also occupy that bin: a local rate-only plateau is a real finite-binning effect.
-Stretching can sharpen the template changes outside this plateau. Smooth
-interpolation of finite-bank histograms can still need additional eta knots.
-Data are always refilled directly at each eta.
+of the eta=1 events. For a finite bank, sufficiently nearby anchors also occupy
+that bin: a local rate-only plateau is a real finite-binning effect. Stretching
+can sharpen template changes outside it. Finite-bank histograms can require
+additional eta knots. Data are always refilled directly at each physical eta
+with the floored observable prescription.
 
-Inspect the midpoint template errors and off-anchor delta_q values, especially
-near 1. Agreement at eta=1 itself only verifies reproduction of a stored anchor.
-Spline discrepancies here are interpolation errors, not evidence against the
-pairwise optimality of the continuous ratio. A spline fit need not have its
-minimum at the generating value when its templates differ from the exact data.
+Agreement at a stored anchor tests reproduction of that anchor, not accuracy
+between knots. Spline discrepancies are interpolation errors. Independently,
+the floored ratio below eta_min is no longer the pairwise-optimal ratio for the
+physical tested eta versus 1. A spline fit can shift its minimum if its templates
+differ from the directly filled data.
 """
 
 REFERENCE_SETUP = '''
-# Observable-only setting: keep this identical in notebooks 08 and 09.
-# a=1 reproduces R/(1+R); a>1 spreads values away from 0.5.
+# Observable-only settings: keep these identical in notebooks 08–11.
+# The floor changes the observable, never the physical mu or its fit bounds.
+N_BINS = 36
+REFERENCE_RATIO_ETA_MIN = 0.1
 REFERENCE_RATIO_A = 100.0
 from dataclasses import replace
 if not np.isfinite(REFERENCE_RATIO_A) or REFERENCE_RATIO_A <= 0:
     raise ValueError("REFERENCE_RATIO_A must be finite and positive")
-run = replace(run, config={**run.config, "reference_ratio_power": float(REFERENCE_RATIO_A)})
-print(f"Reference-ratio power a={REFERENCE_RATIO_A:g}; 0.5 is inside a bin")
+if not np.isfinite(REFERENCE_RATIO_ETA_MIN) or not 0 <= REFERENCE_RATIO_ETA_MIN < 1:
+    raise ValueError("REFERENCE_RATIO_ETA_MIN must lie in [0, 1)")
+run = replace(run, config={
+    **run.config,
+    "reference_ratio_power": float(REFERENCE_RATIO_A),
+    "reference_ratio_eta_floor": float(REFERENCE_RATIO_ETA_MIN),
+})
+print(f"Reference ratio: {N_BINS} bins, eta floor={REFERENCE_RATIO_ETA_MIN:g}, "
+      f"a={REFERENCE_RATIO_A:g}; 0.5 is inside a bin")
 '''
 
 COLLAPSE_CODE = '''
 from poodemo.pipeline import observable_values, prepare_quadrature, observable_bin_edges
 quad = prepare_quadrature(run)
-COLLAPSE_BINS = 20
+COLLAPSE_BINS = N_BINS
 collapse_edges = observable_bin_edges(COLLAPSE_BINS, "reference_ratio")
 central_bin = np.searchsorted(collapse_edges, .5, side="right") - 1
 assert collapse_edges[central_bin] < .5 < collapse_edges[central_bin + 1]
 collapse_rows = []
-for eta in [0.99, 0.999, 1.0, 1.001, 1.01]:
+check_etas = sorted(set([0., REFERENCE_RATIO_ETA_MIN / 2, REFERENCE_RATIO_ETA_MIN,
+                         0.99, 0.999, 1.0, 1.001, 1.01]))
+for eta in check_etas:
     z = observable_values(run, quad, eta, "reference_ratio")
     occupied = np.count_nonzero(np.histogram(z, collapse_edges)[0])
-    collapse_rows.append(dict(eta=eta, a=REFERENCE_RATIO_A, n_bins=COLLAPSE_BINS,
+    collapse_rows.append(dict(eta=eta, eta_effective=max(eta, REFERENCE_RATIO_ETA_MIN),
+                              a=REFERENCE_RATIO_A, n_bins=COLLAPSE_BINS,
                               z_min=z.min(), z_max=z.max(), occupied_bins=occupied,
                               central_low=collapse_edges[central_bin],
                               central_high=collapse_edges[central_bin + 1]))
 collapse = pd.DataFrame(collapse_rows)
 display(collapse)
+np.testing.assert_array_equal(
+    observable_values(run, quad, 0., "reference_ratio"),
+    observable_values(run, quad, REFERENCE_RATIO_ETA_MIN, "reference_ratio"))
 assert np.all(observable_values(run, quad, 1., "reference_ratio") == .5)
 assert collapse.loc[collapse.eta.eq(1.), "occupied_bins"].item() == 1
 collapse.to_csv(ROOT / "results" / "reference_ratio_collapse.csv", index=False)
 '''
 
+SPLINE_CHECKS = '''
+# Check both special construction points, independently of the physical fit.
+print("Largest off-anchor bin-fraction errors (inspect eta near the floor and 1):")
+display(splines["validation"].nlargest(12, "max_fraction_error"))
+print("Direct-versus-spline likelihood checks near the floor or eta=1:")
+comparison = splines["comparison"]
+near_special_anchor = ((abs(comparison["mu"] - REFERENCE_RATIO_ETA_MIN) < .05)
+                       | (abs(comparison["mu"] - 1.) < .05))
+display(comparison.loc[near_special_anchor])
+if REFERENCE_RATIO_ETA_MIN > 0:
+    assert np.any(np.isclose(splines["spline"].etas, REFERENCE_RATIO_ETA_MIN))
+    plateau = splines["spline"](np.array([0., REFERENCE_RATIO_ETA_MIN / 2,
+                                        REFERENCE_RATIO_ETA_MIN]))
+    np.testing.assert_allclose(plateau[0], plateau[-1], rtol=0., atol=1e-12)
+    np.testing.assert_allclose(plateau[1], plateau[-1], rtol=0., atol=1e-12)
+    print("All nominal and NI-varied process templates are constant below the floor.")
+else:
+    print("No positive floor: the legacy spline grid has no low-eta plateau to check.")
+'''
 
-def configure_reference_cells(cells):
-    """Apply shared 08/09 controls while retaining user-edited plot settings."""
+RUNTIME_NOTE = '''
+For the 36-bin/floored-observable update, keep the completed v4 run and rerun
+**08, then 09**, followed by **10 and 11**. Keep `REFERENCE_RATIO_A` and
+`REFERENCE_RATIO_ETA_MIN` identical throughout. No sample generation,
+retraining, or new physics run name is required. Old notebook outputs are
+cleared because they used a different observable or resolution.
+'''
+
+
+def configure_reference_cells(cells, number):
+    """Migrate only relevant controls/text; retain custom axes and bin sweeps."""
     for cell in cells:
         source = cell.source
-        if cell.cell_type == 'code':
-            if 'run = create_run(ROOT, mode=MODE, overrides=CONFIG_OVERRIDES)' in source:
-                line = 'run = create_run(ROOT, mode=MODE, overrides=CONFIG_OVERRIDES)'
-                if 'REFERENCE_RATIO_A =' not in source:
-                    source = source.replace(line, line + '\n' + REFERENCE_SETUP.strip())
-            if 'OBSERVABLE_LABEL =' in source:
-                source = '\n'.join(
-                    r'OBSERVABLE_LABEL = rf"$z_\eta=R_\eta^a/(1+R_\eta^a),\quad a={REFERENCE_RATIO_A:g}$"'
-                    if line.startswith('OBSERVABLE_LABEL =') else line
-                    for line in source.splitlines())
-                source = source.replace('from poodemo.pipeline import prepare_quadrature, observable_values\n',
-                                        'from poodemo.pipeline import prepare_quadrature, observable_values, observable_bin_edges\n')
-                begin = source.find('selected_s, selected_sbi, selected_b, _ =')
-                end = source.find('HIST_BINS =', begin)
-                if begin >= 0 and end > begin:
-                    source = source[:begin] + 'ETA_VALUES = [0.0, 0.3, 0.6, 1.0, 1.5]\n' + source[end:]
-                source = source.replace('edges = np.linspace(0., 1., HIST_BINS + 1)',
-                                        'edges = observable_bin_edges(HIST_BINS, OBSERVABLE)')
-            if 'collapse_rows = []' in source:
+        if cell.cell_type == "code":
+            if "run = create_run(ROOT, mode=MODE, overrides=CONFIG_OVERRIDES)" in source:
+                # Keep user-edited numeric controls when regenerating again.
+                setup = REFERENCE_SETUP.strip()
+                for name in ("N_BINS", "REFERENCE_RATIO_ETA_MIN", "REFERENCE_RATIO_A"):
+                    match = re.search(rf"^{name} = (.+)$", source, flags=re.M)
+                    if match:
+                        setup = re.sub(rf"^{name} = .+$", f"{name} = {match.group(1)}",
+                                       setup, flags=re.M)
+                line = "run = create_run(ROOT, mode=MODE, overrides=CONFIG_OVERRIDES)"
+                begin = source.index(line) + len(line)
+                end = source.index("plt.rcParams.update", begin)
+                source = source[:begin] + "\n" + setup + "\n" + source[end:]
+            if "HIST_BINS =" in source:
+                source = re.sub(r"^HIST_BINS = .+$", "HIST_BINS = N_BINS", source, flags=re.M)
+                source = source.replace(
+                    '"eta": eta, "coherent_SBI_yield"',
+                    '"eta": eta, "eta_effective": max(eta, REFERENCE_RATIO_ETA_MIN), "coherent_SBI_yield"')
+                source = source.replace(
+                    "    z_eta = observable_values", "    # The observable is floored; the physical coherent coefficients below are not.\n    z_eta = observable_values"
+                ) if "# The observable is floored" not in source else source
+            if "collapse_rows = []" in source:
                 source = COLLAPSE_CODE.strip()
-            if 'splines = run_spline_study(run, n_bins=' in source:
-                import re
-                match = re.search(r'n_bins=(\d+)', source)
-                if match and 'SPLINE_BINS =' not in source:
-                    source = source.replace('splines = run_spline_study',
-                                            'SPLINE_BINS = 12  # Must appear in notebook 08 BIN_COUNTS.\n'
-                                            'splines = run_spline_study')
-                    source = source.replace(f'n_bins={match.group(1)}', 'n_bins=SPLINE_BINS')
+            if "run_estimator_study(run," in source:
+                source = source.replace('max(run.config["bin_counts"])', "N_BINS")
+                source = source.replace('run_estimator_study(run, observable="reference_ratio")',
+                                        'run_estimator_study(run, observable="reference_ratio", n_bins=N_BINS)')
+            if "splines = run_spline_study" in source:
+                source = re.sub(r"^SPLINE_BINS = 12.*$",
+                                "SPLINE_BINS = 36  # Must appear in notebook 08 BIN_COUNTS.",
+                                source, flags=re.M)
+            if "# Explicitly surface the singular-anchor" in source or "near_special_anchor =" in source:
+                source = SPLINE_CHECKS.strip()
             cell.outputs = []
             cell.execution_count = None
-        elif source.startswith('### Ratio to the fixed physical reference'):
+            cell.metadata.pop("execution", None)
+        elif source.startswith("# 8."):
+            source = r'''# 8. Floored reference-ratio histograms
+
+Use R_eta=r(x;max(eta,0.1))/r(x;1), with power a=100 and a primary
+resolution of **36 bins**. The binning sweep remains available to compare
+coarsening. Physical mu, Asimov truth and free fits retain their full domains.
+Reuse the completed run from notebooks 01–03; no generation or training is
+needed. Results use `reference_ratio_` and figures `08_`.'''
+        elif source.startswith("# 9."):
+            source = r'''# 9. Floored reference-ratio splines and profiled fits
+
+Interpolate **36-bin** templates for R_eta=r(x;max(eta,0.1))/r(x;1), with
+the same power a=100 as notebook 08. The observable floor leaves the physical
+model and NI constraint unchanged. Run 08 first with the same completed run.
+Tables use `reference_ratio_` and figures `09_`.'''
+        elif source.startswith("### Ratio to the fixed physical reference"):
             source = DEFINITION.strip()
-        elif source.startswith('### Interpolation at the collapsed anchor'):
+        elif source.startswith(("### Interpolation at the collapsed anchor",
+                                "### Interpolation at the floor and collapsed anchor")):
             source = SPLINE_WARNING.strip()
-        elif source.startswith('### Runtime and persistent run'):
+        elif source.startswith("### Runtime and persistent run"):
+            for marker in ("For the reference-ratio stretch/bin-edge update alone",
+                           "For the 36-bin/floored-observable update"):
+                if marker in source:
+                    source = source[:source.index(marker)].rstrip()
+            source += "\n\n" + RUNTIME_NOTE.strip()
+        elif source.startswith("### How the observable changes with eta"):
+            source = source.replace("observable constructed at \\(\\eta\\)",
+                                    "observable constructed at \\(\\eta_{\\mathrm{eff}}=\\max(\\eta,0.1)\\)")
+            source = source.replace("Edit `ETA_VALUES` and `HIST_BINS` below", "Edit `ETA_VALUES` and `N_BINS` below")
+        elif source.startswith("### Freeze the observable inside each fit"):
+            source = r'''### Freeze the observable inside each fit
+
+For a physical test mu_0, set eta=mu_0 and construct z using
+eta_eff=max(eta,eta_min), at nominal NI. Freeze event assignments, edges and
+Asimov counts while fitting physical mu and, where enabled, NI. The physical
+mu coefficients and fit bounds are never floored. The density denominator
+stays at (1,0), independently of the best fit. The binning study fixes NI.
+Below eta_min, infinitely fine bins need not recover the physical eta-versus-1
+unbinned comparison: the numerator endpoint is deliberately eta_min. Above
+the floor the original pairwise argument applies, with no guarantee of full
+local Fisher information or of preserving every freely fitted alternative.'''
+        elif source.startswith("### Finite-separation fidelity versus local information"):
+            source = r'''### Finite-separation fidelity versus local information
+
+The likelihood scan tests physical eta against Asimov truth 1. Above the floor,
+the continuous nominal ratio is sufficient for that pair. Below the floor it
+uses the eta_min-versus-1 ratio instead. The Fisher table evaluates local
+information at physical mu=eta; no change of the physical parameter is made.
+The frozen eta=1 observable has zero shape information and one occupied bin,
+while the extended information still includes the total rate.
+
+Non-nested bin counts need not improve monotonically. Near eta=1, finite
+binning can obscure the continuous-ratio advantage. Compare with `analytic
+unbinned`, separately from the learned closure references.'''
+        elif source.startswith(("Keep the same estimator resolution", "Use the primary 36-bin estimator resolution")):
+            source = '''Use the primary 36-bin estimator resolution, explicitly passed as `N_BINS`.
+The independent `BIN_COUNTS` sweep does not change this estimator setting.
+The truth stays fixed while eta changes; below the floor the partition is
+constant. At eta=1 this is a rate-only measurement: multiple physical mu values
+can have equal rates. A different fitted branch need not indicate optimizer
+failure. Local widths do not describe global ambiguity; invalid widths are
+reported rather than floored.'''
+        elif source.startswith("### Read the comparisons separately"):
             source = source.replace(
-                'For the enlarged NI bank and wider ratio classifiers, use the new default\n'
-                '`RUN_NAME = "paper-distinct-s-v4"`. Rerun notebooks 01–03; then rerun 04–09',
-                'When migrating from a pre-v4 run to the enlarged NI bank and wider ratio\n'
-                'classifiers, use `RUN_NAME = "paper-distinct-s-v4"` and rerun 01–03, then 04–09')
-            note = ('\n\nFor the reference-ratio stretch/bin-edge update alone, keep your completed\n'
-                    'v4 run and rerun **08, then 09** with the same `REFERENCE_RATIO_A`.\n'
-                    'No sample generation, retraining or new run name is required.')
-            if 'For the reference-ratio stretch/bin-edge update alone' not in source:
-                source += note
-        elif source.startswith('### How the observable changes with eta'):
-            source = source.replace(
-                'The default anchors include the generating value, the nominal total-rate\n'
-                'turnover, and the other equal-rate solution when those lie in the scan range.\n'
-                'These rate landmarks need not coincide with full-likelihood extrema.',
-                'The displayed anchors are **0.0, 0.3, 0.6, 1.0 and 1.5**, including\n'
-                'the background-only coherent limit and a point above the reference.\n'
-                'Eta=0 is supported for these distributions; score/Fisher scans stay above zero.')
+                "At truth 1 the continuous nominal ratio preserves the fixed-NI pairwise test.",
+                "At truth 1 and eta >= eta_min, the continuous nominal ratio preserves\n"
+                "the fixed-NI pairwise test. Below eta_min this guarantee no longer applies\n"
+                "to the physical eta-versus-1 comparison.")
+        elif source.startswith("### Interpretation") and number == 9:
+            source = '''### Interpretation
+
+Compare the 36-bin direct and spline scans, including the exact floor plateau,
+the transition just above eta_min, and the separate rate-only collapse at eta=1.
+The floor only targets the low-eta compression problem diagnosed in notebook 12;
+it does not imply full-family sufficiency or guarantee coverage. Notebook 11
+uses direct yields and pseudo-experiments, independently of spline precision.'''
         cell.source = source
     return cells
 
 
-def transformed_cells(name, old_prefix, new_prefix):
-    cells = copy.deepcopy(nbformat.read(REPO / 'notebooks' / name, as_version=4).cells)
-    for cell in cells:
-        cell.source = (cell.source.replace('"ratio"', '"reference_ratio"')
-                       .replace("'ratio'", "'reference_ratio'")
-                       .replace('direct ratio histogram', 'direct reference_ratio histogram')
-                       .replace('fixed ratio histogram', 'fixed reference_ratio histogram')
-                       .replace('spline ratio histogram', 'spline reference_ratio histogram')
-                       .replace('ratio_', 'reference_ratio_')
-                       .replace('reference_reference_ratio', 'reference_ratio')
-                       .replace(old_prefix + '_', new_prefix + '_')
-                       .replace("'" + old_prefix + "'", "'" + new_prefix + "'")
-                       .replace('"' + old_prefix + '"', '"' + new_prefix + '"')
-                       .replace('r_\\eta/(1+r_\\eta)', 'R_\\eta/(1+R_\\eta)'))
-        if cell.cell_type == 'code':
-            if 'OBSERVABLE_LABEL =' in cell.source:
-                cell.source = '\n'.join(
-                    'OBSERVABLE_LABEL = ' + repr(r'Physical-reference ratio $z_\eta=R_\eta/(1+R_\eta)$')
-                    if line.startswith('OBSERVABLE_LABEL =') else line
-                    for line in cell.source.splitlines())
-            cell.outputs = []
-            cell.execution_count = None
-    return [c for c in cells if c.source.strip()]
-
-
 def build_reference_notebooks():
-    cells = transformed_cells('06_ratio_histograms.ipynb', '06', '08')
-    replacements = {
-        '# 6.': r'''# 8. Histograms of the ratio to mu=1
-
-Repeat notebook 6 with R=r_eta/r_1 and z=R^a/(1+R^a), retaining its bin counts,
-scan curves, axis controls, distributions and estimator diagnostics. Reuse the
-completed run from notebooks 1–3: no regeneration or training is needed.
-Results use `reference_ratio_` and figures `08_`, preserving studies 04–07.''',
-        '### The ratio of normalized': DEFINITION,
-        '### Freeze the observable': r'''### Freeze the observable inside each fit
-
-For a test of mu_0, construct z at eta=mu_0 and nominal NI, then freeze event
-assignments, edges and Asimov counts while fitting mu and, where enabled, NI.
-The denominator density stays at (1,0); it is never replaced by the best fit.
-The binning study fixes NI, as in notebook 6. At Asimov truth 1, infinitely fine
-ratio bins recover the pairwise unbinned test, but not necessarily local Fisher
-information at the tested eta. The two diagnostics answer different questions.''',
-        '### Distinguish ratio compression': r'''### Finite-separation fidelity versus local information
-
-The likelihood scan tests eta against the fixed Asimov truth 1. Its continuous
-nominal ratio is sufficient for that pair. The Fisher table instead evaluates
-local information at mu=eta: pairwise sufficiency does not guarantee retaining
-that derivative. In particular, the frozen eta=1 observable has zero shape
-information and one occupied bin. The extended information still includes rate.
-
-Non-nested bin counts need not improve monotonically. Near eta=1,
-finite binning can obscure the continuous-ratio advantage. Compare the scan
-with `analytic unbinned`, separately from the learned references.''',
-        'This estimator study': r'''Keep the same estimator resolution as notebook 6: the finest bin count in
-the saved run configuration. The BIN_COUNTS override only affects the coarsening
-study. The truth remains fixed while eta changes. At eta=1 this is a rate-only
-measurement; multiple mu values may have equal rates, so a different fitted
-branch need not indicate a failed fit. Local widths do not describe that global
-ambiguity. Invalid widths are reported rather than floored.''',
-        'Next:': 'Next: **09_reference_ratio_spline_templates.ipynb**. Earlier outputs remain intact.',
-    }
-    for cell in cells:
-        if cell.cell_type == 'markdown':
-            for key, value in replacements.items():
-                if cell.source.startswith(key): cell.source = md(value).source; break
-    # A diagnostic of the exact collapse and finite-bin occupation, not a
-    # substitute observable. Runs independently of the fits after setup.
-    cells.insert(7, code(COLLAPSE_CODE))
-    write('08_reference_ratio_histograms.ipynb', configure_reference_cells(cells))
-
-    cells = transformed_cells('07_ratio_spline_templates.ipynb', '07', '09')
-    replacements = {
-        '# 7.': r'''# 9. Physical-reference ratio splines and profiled fits
-
-Repeat notebook 7 with R=r_eta/r_1 and z=R^a/(1+R^a), using editable binning and the same
-nominal NI construction, physical model and Gaussian constraint. Run notebook
-8 first using the same completed Drive run. Tables use `reference_ratio_` and
-figures `09_`; earlier studies are preserved.''',
-        'Here the frozen scalar': DEFINITION,
-        '### Hold the spline': SPLINE_WARNING,
-        '### Read the comparisons': r'''### Read the comparisons separately
-
-- Direct versus spline tests template interpolation, including the collapse.
-- Coarse versus fine direct histograms tests finite binning.
-- NI fixed versus profiled tests nuisance effects; the nominal scalar is not
-  guaranteed sufficient for profiling. The Gaussian auxiliary term remains.
-- The morph-order diagnostic separates bin-level nuisance interpolation from
-  integrating the unbinned nuisance morph.
-- Analytical unbinned is the physical reference; the two learned curves test
-  external closure and internal model-Asimov consistency separately.
-
-At truth 1 the continuous nominal ratio preserves the fixed-NI pairwise test.
-It does not guarantee full local Fisher information at every eta or sufficient
-information for all nuisance alternatives. The physical-yield plot at frozen
-eta=1 contains only one occupied bin: it shows the rate-only experiment.''',
-        '### Further experiments': r'''### Interpretation
-
-Compare notebooks 06–09 at matching resolutions. In particular, inspect the
-contracting distributions, rate-only local width at eta=1, and spline errors
-near that anchor. These are consequences of using a physical reference that
-coincides with one construction point. Coverage still requires calibrated
-pseudo-experiments beyond the Asimov comparisons.''',
-    }
-    for cell in cells:
-        if cell.cell_type == 'markdown':
-            for key, value in replacements.items():
-                if cell.source.startswith(key): cell.source = md(value).source; break
-    cells.insert(8, code('''
-# Explicitly surface the singular-anchor interpolation diagnostic.
-print("Largest off-anchor bin-fraction errors (inspect eta near 1):")
-display(splines["validation"].nlargest(12, "max_fraction_error"))
-print("Direct-versus-spline likelihood checks near eta=1:")
-display(splines["comparison"].loc[abs(splines["comparison"]["mu"] - 1.) < .05])
-'''))
-    write('09_reference_ratio_spline_templates.ipynb', configure_reference_cells(cells))
+    for number, name in ((8, "08_reference_ratio_histograms.ipynb"),
+                         (9, "09_reference_ratio_spline_templates.ipynb")):
+        path = REPO / "notebooks" / name
+        notebook = nbformat.read(path, as_version=4)
+        notebook.cells = configure_reference_cells(notebook.cells, number)
+        nbformat.write(notebook, path)
+        print(path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     build_reference_notebooks()

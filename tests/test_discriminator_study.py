@@ -36,7 +36,8 @@ def test_invalid_discriminator_powers_are_rejected(powers):
 
 
 @pytest.mark.parametrize("dimension", [1, 2, 3])
-def test_nd_histograms_match_numpy_and_preserve_the_same_assignment(selected_quadrature, dimension):
+@pytest.mark.parametrize("n_bins", [12, 36])
+def test_nd_histograms_match_numpy_and_preserve_the_same_assignment(selected_quadrature, dimension, n_bins):
     _, quad = selected_quadrature
     parent = pipeline._template_likelihood(quad, systematics=True)
     axes = study_module.process_ratio_values(quad)
@@ -45,9 +46,11 @@ def test_nd_histograms_match_numpy_and_preserve_the_same_assignment(selected_qua
     coordinates[0] = 0.
     coordinates[1] = 1.
     coordinates[2] = .5
-    edges = pipeline.observable_bin_edges(12, "reference_ratio")
+    edges = pipeline.observable_bin_edges(n_bins, "reference_ratio")
     histogram = study_module.multidimensional_histogram(parent, coordinates, edges)
-    assert histogram.nominal.shape == (4, 12**dimension)
+    assert histogram.nominal.shape == (4, n_bins**dimension)
+    assert histogram.histogram_shape == (n_bins,) * dimension
+    assert .5 not in edges
     original = histogram._index.copy()
     for mu in (.02, .6, 1., 1.4):
         expected = np.histogramdd(coordinates, bins=[edges]*dimension,
@@ -124,4 +127,43 @@ def test_learned_axes_keep_analytical_templates_and_asimov(tmp_path, monkeypatch
     assert called == [True]
     assert result["config"]["likelihood_source"] == "analytic"
     assert result["config"]["asimov_source"] == "analytic"
+    np.testing.assert_allclose(result["occupancy"].expected_events, quad["truth"] @ quad["weights"])
+
+
+def test_floor_changes_only_moving_partition_and_saves_effective_endpoints(tmp_path, monkeypatch):
+    quad = _categorical_quadrature()
+    run = Run(tmp_path, dict(asimov_mu=1., mu_min=0., mu_max=1.4, mu_points=3,
+                            mu_fit_bounds=[0., 2.], nuisance_bounds=[-2., 2.]), None)
+    run.path("results").mkdir()
+    old_output = run.path("results", "10_discriminator_study")
+    old_output.mkdir()
+    sentinel = old_output / "config.json"
+    sentinel.write_text('{"historical": true}')
+    monkeypatch.setattr(pipeline, "prepare_quadrature", lambda run: quad)
+    original_values = pipeline.observable_values
+    recorded_values = {}
+    def capture_values(current, bank, eta, observable):
+        values = original_values(current, bank, eta, observable)
+        recorded_values[eta] = values.copy()
+        return values
+    monkeypatch.setattr(pipeline, "observable_values", capture_values)
+    result = study_module.run_discriminator_study(
+        run, scan_grid=[0., .05, .1, 1.4], n_bins=4, systematics=(False,),
+        reference_eta_floor=.1, output_tag="10_discriminator_study_floor_test")
+    for eta in (0., .05):
+        np.testing.assert_array_equal(recorded_values[eta], recorded_values[.1])
+    np.testing.assert_array_equal(recorded_values[1.4], original_values(
+        Run(run.root, {**run.config, "reference_ratio_power": 100.}, run.model),
+        quad, 1.4, "reference_ratio"))
+    moving = result["scans"].loc[result["scans"].model == study_module.REFERENCE_LABEL].set_index("mu")
+    assert moving.loc[0., "eta"] == 0.
+    assert moving.loc[0., "eta_effective"] == .1
+    assert moving.loc[1.4, "eta_effective"] == 1.4
+    assert moving.loc[0., "q"] != pytest.approx(moving.loc[.05, "q"])
+    assert result["scans"].valid.all()
+    assert "reference_ratio_eta_floor" not in run.config
+    saved = json.loads(run.path("results", "10_discriminator_study_floor_test", "config.json").read_text())
+    assert saved["reference_ratio_eta_floor"] == .1
+    assert saved["reference_ratio_eta_policy"] == "lower_floor_v1"
+    assert sentinel.read_text() == '{"historical": true}'
     np.testing.assert_allclose(result["occupancy"].expected_events, quad["truth"] @ quad["weights"])

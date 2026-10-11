@@ -60,6 +60,48 @@ def test_reference_coordinates_use_frozen_rates_and_exact_collapse():
     np.testing.assert_array_equal(reference_observable(replicated, rates, 1., 100.), .5)
 
 
+def test_floor_changes_only_low_observable_endpoints():
+    fields = DiscretePhysics.fields
+    rates = fields.sum(axis=1)
+    at_floor = reference_observable(fields, rates, .1, 100.)
+    for eta in (0., .03, .1):
+        np.testing.assert_array_equal(reference_observable(
+            fields, rates, eta, 100., reference_eta_floor=.1), at_floor)
+    for eta in (.2, .9, 1., 1.4, 3.):
+        np.testing.assert_array_equal(reference_observable(
+            fields, rates, eta, 100., reference_eta_floor=.1),
+            reference_observable(fields, rates, eta, 100.))
+    np.testing.assert_array_equal(reference_observable(
+        fields, rates, 1., 100., reference_eta_floor=.1), .5)
+    assert not np.array_equal(at_floor, reference_observable(fields, rates, 0., 100.))
+    for bad_floor in (-.1, 1., np.inf, np.nan):
+        with pytest.raises(ValueError):
+            reference_observable(fields, rates, 0., 100., reference_eta_floor=bad_floor)
+
+
+def test_floored_templates_preserve_physical_yield_dependence(workspace):
+    _, quad, _ = workspace
+    mus = (0., .05, .1, 1.4)
+    templates, edges, rows, _ = _direct_templates(
+        quad, mus, 36, 100., reference_eta_floor=.1)
+    assert len(edges) == 37 and not np.any(edges == .5)
+    for mu in mus:
+        assert templates[mu].shape == (4, 36)
+        np.testing.assert_allclose(templates[mu].sum(axis=1), quad["nominal"].sum(axis=1))
+        assert rows.loc[rows.mu_test == mu].eta_effective.eq(max(mu, .1)).all()
+    np.testing.assert_array_equal(templates[0.], templates[.05])
+    np.testing.assert_array_equal(templates[0.], templates[.1])
+    # Shared bins below the floor still describe distinct physical hypotheses.
+    counts0 = component_coefficients(0.) @ templates[0.]
+    counts05 = component_coefficients(.05) @ templates[.05]
+    assert not np.allclose(counts0, counts05)
+    z = reference_observable(quad["nominal"], quad["nominal"].sum(axis=1), .1, 100.)
+    for physical_mu in (0., .05, .1, .8, 1.4, 3.):
+        expected = np.histogram(z, edges, weights=quad["weights"] *
+                                (component_coefficients(physical_mu) @ quad["nominal"]))[0]
+        np.testing.assert_allclose(component_coefficients(physical_mu) @ templates[0.], expected)
+
+
 def test_both_hypotheses_use_direct_fixed_eta_templates_without_notebook09(workspace):
     run, quad, _ = workspace
     assert not run.path("results", "reference_ratio_spline_templates.npz").exists()
@@ -97,10 +139,11 @@ def test_existing_or_malformed_notebook09_files_are_ignored(workspace):
     assert run.path("results", "toy_study_direct_bin_yields.csv").exists()
 
 
-def test_binned_toy_means_and_fit_templates_use_the_same_direct_yields(workspace, monkeypatch):
+@pytest.mark.parametrize("n_bins, floor", [(12, 0.), (36, .1)])
+def test_binned_toy_means_and_fit_templates_use_the_same_direct_yields(workspace, monkeypatch, n_bins, floor):
     import poodemo.toy_study as module
     run, quad, _ = workspace
-    expected, _, _, _ = _direct_templates(quad, (0., 1.4), 12, 100.)
+    expected, _, _, _ = _direct_templates(quad, (0., 1.4), n_bins, 100., reference_eta_floor=floor)
     original_rng = module._rng
     original_binned = module.StatOnlyLikelihood.from_binned
     means, fitted_fields = [], []
@@ -120,7 +163,7 @@ def test_binned_toy_means_and_fit_templates_use_the_same_direct_yields(workspace
 
     monkeypatch.setattr(module, "_rng", record_rng)
     monkeypatch.setattr(module.StatOnlyLikelihood, "from_binned", record_binned)
-    run_toy_study(run, n_toys=2, grid_size=9, exposure=3.)
+    run_toy_study(run, n_toys=2, grid_size=9, exposure=3., n_bins=n_bins, reference_eta_floor=floor)
     for mu, values in means:
         np.testing.assert_allclose(values, 3. * (component_coefficients(mu) @ expected[mu]))
     assert len(means) == 4 and len(fitted_fields) == 8
@@ -170,6 +213,51 @@ def test_five_cases_share_simulator_and_resume_deterministically(workspace):
     quad["nominal"][3, 0] += .1
     with pytest.raises(ValueError, match="differ"):
         run_toy_study(run, n_toys=6, grid_size=9)
+
+
+def test_floor36_physical_hypotheses_labels_and_resumption(workspace, monkeypatch):
+    import poodemo.toy_study as module
+    run, _, calls = workspace
+    original = module.StatOnlyLikelihood.test_statistic
+    tested = []
+
+    def record_physical_test(self, mu, **kwargs):
+        tested.append(mu)
+        return original(self, mu, **kwargs)
+
+    monkeypatch.setattr(module.StatOnlyLikelihood, "test_statistic", record_physical_test)
+    settings = dict(n_toys=2, mu_values=(0., .05, 1.4), n_bins=36, reference_eta_floor=.1,
+                    grid_size=9, mu_bounds=(0., 3.), output_tag="floor36")
+    first = run_toy_study(run, **settings)
+    assert len(first["results"]) == 30 and first["results"].valid.all()
+    assert set(mu for mu, _ in calls) == {0., .05, 1.4}
+    assert set(tested) == {0., .05, 1.4}
+    assert first["results"].mu_true.eq(first["results"].mu_test).all()
+    assert first["results"].eta.eq(first["results"].mu_test).all()
+    np.testing.assert_array_equal(first["results"].eta_effective,
+                                  np.maximum(first["results"].mu_test, .1))
+    for frame in (first["results"], first["summary"], first["coverage"]):
+        assert frame.loc[frame.case.str.startswith("binned")].label.str.startswith("36-bin").all()
+    assert first["metadata"]["configuration"]["reference_eta_floor"] == .1
+    assert len(calls) == 6 and len(tested) == 30
+    same = run_toy_study(run, **settings)
+    assert len(calls) == 6 and len(tested) == 30
+    pd.testing.assert_frame_equal(first["results"], same["results"], check_dtype=False, atol=1e-12)
+    with pytest.raises(ValueError, match="differ"):
+        run_toy_study(run, **{**settings, "reference_eta_floor": .05})
+
+
+def test_explicit_zero_floor_keeps_historical_configuration_and_resume(workspace):
+    run, _, calls = workspace
+    legacy = run_toy_study(run, n_toys=1, grid_size=9)
+    assert "reference_eta_floor" not in legacy["metadata"]["configuration"]
+    assert "eta_effective" not in legacy["results"].columns
+    explicit = run_toy_study(run, n_toys=1, grid_size=9, reference_eta_floor=0.)
+    assert len(calls) == 2
+    assert explicit["metadata"]["fingerprint"] == legacy["metadata"]["fingerprint"]
+    pd.testing.assert_frame_equal(legacy["results"], explicit["results"], check_dtype=False)
+    with pytest.raises(ValueError, match="differ"):
+        run_toy_study(run, n_toys=1, grid_size=9, n_bins=36)
 
 
 def test_fit_failures_stay_in_rows_and_denominators(workspace, monkeypatch):
