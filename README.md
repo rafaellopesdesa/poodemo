@@ -19,6 +19,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
+| [13_learned_ratio_compression.ipynb](notebooks/13_learned_ratio_compression.ipynb) | Compare learned and analytical compression with independent simulator-derived 36-bin yields | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/13_learned_ratio_compression.ipynb) |
 
 ## Run in Colab
 
@@ -682,6 +683,55 @@ manifest, including directly integrated `<OUTPUT_TAG>_bin_yields.csv`.
 Notebook 12 and its historical diagnostic inputs are preserved. Its current
 sections retain the old source tag and reference prescription; they should
 not be pointed at the new 36-bin source without a separate diagnostic update.
+
+## Learned compression with simulator-derived yields (13)
+
+Run **only notebook 13** in a fresh runtime with the completed v4 `RUN_NAME`,
+`MODE`, and `CONFIG_OVERRIDES` from 01–03. It reuses the saved selector and
+ratio networks without training. It does not require completed 08–12 outputs.
+A GPU accelerates network evaluation; numerical likelihood fits run on CPU.
+Build this notebook alone with `python scripts/build_learned_compression_notebook.py`.
+
+The study repeats the principal reference-ratio comparison with two maps:
+analytical ratios and the deployed learned ratios. Both use **36 bins**,
+**`REFERENCE_RATIO_ETA_MIN=0.2`**, **`REFERENCE_RATIO_A=100`**, denominator mu=1,
+and the existing edges that put 0.5 inside a bin. The original notebook-03
+workspace fixes the learned normalizations and the selected-rate constants
+used in both maps. They are never refitted on the new simulation banks.
+Learned fields determine bin assignments only; every nominal and NI-varied
+bin prediction comes from physical simulator intensities.
+
+Two independently generated banks use the frozen preselection, with equal
+numbers of generated S/B/NI proposal events before selection. Importance
+weights account for rejected events and retain the simulated absolute yields.
+The main **matched-bank** Asimov comparison uses bank A for both predictions
+and observations, isolating compression and finite binning. A second
+**independent-bank** comparison keeps those predictions and maps fixed while
+using bank B for the weighted Asimov observations. It tests finite-MC template
+closure; its counts are not rescaled to force the generating value to fit.
+Neither comparison is a pseudo-experiment or a coverage measurement.
+
+The three likelihood descriptions are analytical unbinned, analytical-map
+histograms, and learned-map histograms. Each hypothesis freezes its observable
+before the conditional and unrestricted fits. The physical mu scan, component
+coefficients, truth, and fit bounds are unchanged by the observable floor.
+Analytical unbinned references are recomputed on these banks rather than
+reusing notebook-03 curves from a different integration sample. NI-profiled
+histograms morph the integrated nuisance anchors, as in notebook 09, so their
+comparison with unbinned profiling also includes that interpolation convention.
+
+Inspect scan overlays and differences, local-information diagnostics, and
+independent-bank bin-yield closure. Negative or nonfinite learned physical
+intensities are reported as invalid maps rather than silently clipped or
+removed. Unsupported bins in the independent closure likewise remain visible;
+no artificial counts are inserted. Simulation errors describe the fixed
+trained maps and banks, not network-training uncertainty.
+
+New products use `results/13_learned_compression_36_floor02` and corresponding
+`plots/13_learned_compression_36_floor02` figures. Cached banks carry provenance
+for their physics, selection, networks, frozen normalizers, seeds and generated
+counts. Changing those dependencies requires a new output tag. Earlier
+notebooks, their execution outputs, and their study products are preserved.
 
 ## Investigating toy discrepancies (12)
 
