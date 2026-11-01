@@ -71,6 +71,7 @@ jobs:
           +        md("Next: **08_reference_ratio_histograms.ipynb**."),
                ]
                write("03_unbinned_nsbi.ipynb", cells)
+           
           PATCH
           python3 - <<'PY'
           from pathlib import Path
