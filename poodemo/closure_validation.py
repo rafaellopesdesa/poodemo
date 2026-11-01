@@ -469,7 +469,7 @@ def plot_expectation_convergence(frame, output):
                             marker="o", markersize=4, color=color, label=label)
             ax.axhline(1., color="black", linestyle="--", linewidth=1)
             ax.set(xscale="log", xlabel="Selected denominator events", ylabel=r"$\widehat{E}_{\rm den}[r]$",
-                   title=ratio)
+                   title=ratio, ylim=(0.95, 1.05))
             ax.legend(fontsize=11)
         axes.flat[-1].axis("off")
         axes.flat[-1].text(.02, .95,
