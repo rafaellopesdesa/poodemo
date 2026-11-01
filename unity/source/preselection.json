@@ -1,0 +1,20 @@
+{
+  "threshold": 0.28696612960213425,
+  "target_ratio": 0.1,
+  "achieved_ratio": 0.10037422749693634,
+  "efficiencies": {
+    "S": 0.914084,
+    "NI": 0.0910676
+  },
+  "selected_counts": {
+    "S": 228521,
+    "NI": 227669
+  },
+  "calibration_counts": {
+    "S": 250000,
+    "NI": 2500000
+  },
+  "rule": "signal_softmax >= threshold",
+  "signal_class_index": 0,
+  "heldout_s_over_ni": 0.100578365351471
+}

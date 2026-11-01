@@ -1,0 +1,24 @@
+{
+  "name": "paper-distinct-s-v4-unity100",
+  "members": 100,
+  "seed": 20261101,
+  "selected_counts": {"train": 5000000, "validation": 500000, "calibration": 1000000},
+  "generation_chunk": 250000,
+  "generation_max_proposals": 2000000000,
+  "prediction_batch_size": 8192,
+  "training": {
+    "epochs": 100,
+    "batch_size": 1024,
+    "width": 1024,
+    "depth": 3,
+    "learning_rate": 0.001,
+    "min_learning_rate": 1e-9,
+    "lr_decay_fraction": 0.9,
+    "ratio_early_stopping": false,
+    "max_train_per_class": null,
+    "max_validation_per_class": null,
+    "precision": "32-true",
+    "accelerator": "gpu",
+    "progress_bar": false
+  }
+}

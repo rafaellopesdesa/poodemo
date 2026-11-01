@@ -1,0 +1,171 @@
+{
+  "config": {
+    "schema_version": 7,
+    "mode": "production",
+    "seed": 20261006,
+    "physics_overrides": {},
+    "toolkit_commit": "fc09848fc6540fd32310faebbe9db6eea7ecd17b",
+    "n_per_sample": 5000000,
+    "ni_sample_multiplier": 10,
+    "generation_chunk": 250000,
+    "preselection_train_cap": 1000000,
+    "ratio_train_cap": 2000000,
+    "epochs": 100,
+    "patience": 20,
+    "preselection_epochs": 100,
+    "batch_size": 1024,
+    "n_hidden": 3,
+    "n_neurons": 1024,
+    "preselection_batch_size": 8192,
+    "preselection_n_neurons": 128,
+    "ratio_learning_rate": 0.001,
+    "ratio_min_learning_rate": 1e-09,
+    "ratio_lr_decay_fraction": 0.9,
+    "ensemble_size": 3,
+    "quadrature_per_process": 250000,
+    "asimov_mu": 1.0,
+    "target_s_over_ni": 0.1,
+    "score_scale": 0.04,
+    "mu_min": 0.02,
+    "mu_max": 1.4,
+    "mu_points": 82,
+    "bin_counts": [
+      8,
+      16,
+      32,
+      64,
+      128,
+      256,
+      512
+    ],
+    "spline_anchors": 2401,
+    "spline_focus_anchors": 1201,
+    "spline_focus_halfwidth": 0.1,
+    "nuisance_bounds": [
+      -3.0,
+      3.0
+    ],
+    "mu_fit_bounds": [
+      0.001,
+      2.0
+    ]
+  },
+  "physics": {
+    "lambda_s": 100.0,
+    "lambda_b": 1000.0,
+    "lambda_ni": 10000.0,
+    "exposure": 50.0,
+    "phase_cos": -0.24,
+    "mean_s": [
+      1.5,
+      1.1,
+      0.7
+    ],
+    "mean_b": [
+      1.2225921266211124,
+      0.9018515190650804,
+      0.6207406075560321
+    ],
+    "mean_ni": [
+      -0.6,
+      -0.4,
+      0.1
+    ],
+    "cov_s": [
+      [
+        0.72,
+        0.18,
+        0.06
+      ],
+      [
+        0.18,
+        0.64,
+        0.1
+      ],
+      [
+        0.06,
+        0.1,
+        0.81
+      ]
+    ],
+    "cov_b": [
+      [
+        0.9,
+        0.225,
+        0.075
+      ],
+      [
+        0.225,
+        0.8,
+        0.125
+      ],
+      [
+        0.075,
+        0.125,
+        1.0125
+      ]
+    ],
+    "cov_ni": [
+      [
+        1.35,
+        -0.15,
+        0.12
+      ],
+      [
+        -0.15,
+        1.1,
+        0.22
+      ],
+      [
+        0.12,
+        0.22,
+        1.25
+      ]
+    ],
+    "shift_fraction_ni": 0.3,
+    "nuisance_seed": 314159,
+    "direction_ni": [
+      0.7925939239396786,
+      0.5661385169569133,
+      0.22645540698276534
+    ]
+  },
+  "sample_sizes": {
+    "S": 5000000,
+    "SBI": 5000000,
+    "B": 5000000,
+    "NI": 50000000,
+    "NI_up": 50000000,
+    "NI_down": 50000000
+  },
+  "splits": {
+    "preselection_train": [
+      0.0,
+      0.2
+    ],
+    "preselection_validation": [
+      0.2,
+      0.25
+    ],
+    "selection_calibration": [
+      0.25,
+      0.3
+    ],
+    "train": [
+      0.3,
+      0.7
+    ],
+    "validation": [
+      0.7,
+      0.8
+    ],
+    "calibration": [
+      0.8,
+      0.85
+    ],
+    "integration": [
+      0.85,
+      1.0
+    ]
+  }
+}

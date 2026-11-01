@@ -15,3 +15,7 @@ plots/
 *.pt
 *.ckpt
 *.log
+# Frozen selector is small; inference bundles use Git LFS.
+!unity/source/preselection/model.pt
+!unity/ensembles/**/model.pt
+unity/ensembles/*.partial/

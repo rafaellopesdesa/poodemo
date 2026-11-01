@@ -33,7 +33,7 @@ inference = ["jax>=0.5.2,<0.6", "iminuit>=2.30,<3"]
 dev = ["pytest>=8,<9", "nbclient>=0.10,<1"]
 
 [tool.setuptools.packages.find]
-include = ["poodemo*"]
+include = ["poodemo*", "unity*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
