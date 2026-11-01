@@ -1478,7 +1478,7 @@ def build():
         they do not count as successful learned-model closure. Inspect fit
         validity and ratio diagnostics before increasing the training budget.
         """),
-        md("Next: **04_score_histograms.ipynb**."),
+        md("Next: **08_reference_ratio_histograms.ipynb**."),
     ]
     write("03_unbinned_nsbi.ipynb", cells)
 
