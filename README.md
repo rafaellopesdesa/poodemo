@@ -944,3 +944,11 @@ Outputs are below
 `results/12_toy_diagnostics/<OUTPUT_TAG>/convergence/<CONVERGENCE_TAG>/shifted_reference/<SHIFT_TAG>`
 with matching plot directories. Earlier executed notebook cells and the model
 and run tags are preserved.
+
+### Large ensembles on UMass Unity
+
+See [unity/README.md](unity/README.md) for frozen Drive inputs, selected-event
+sample generation, 100-member GPU Slurm arrays for all five ratio tasks,
+resumable training, Git LFS model publication, and notebook 03 evaluation on the
+existing Drive samples. Only inference models and metadata return from Unity;
+Colab computes the event weights again.

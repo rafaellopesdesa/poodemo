@@ -1,0 +1,197 @@
+{
+  "signature": "27f3ee397701a974b11f80d393fea3f37dfde2f4d44958f28952c59763a52020",
+  "complete": true,
+  "kind": "preselection",
+  "labels": [
+    "S",
+    "B",
+    "NI"
+  ],
+  "config": {
+    "epochs": 100,
+    "patience": 20,
+    "batch_size": 8192,
+    "width": 128,
+    "depth": 3,
+    "learning_rate": 0.001,
+    "lr_factor": 0.5,
+    "lr_patience": 15,
+    "min_learning_rate": 1e-09,
+    "lr_decay_fraction": 0.9,
+    "ratio_early_stopping": false,
+    "max_train_per_class": 1000000,
+    "max_validation_per_class": 200000,
+    "scaler_per_class": 100000,
+    "ensemble_size": 1,
+    "seed": 20261006,
+    "accelerator": "auto",
+    "progress_bar": true,
+    "precision": "32-true"
+  },
+  "class_prior": [
+    0.3333333333333333,
+    0.3333333333333333,
+    0.3333333333333333
+  ],
+  "training_counts": [
+    1000000,
+    1000000,
+    10000000
+  ],
+  "validation_counts": [
+    250000,
+    250000,
+    2500000
+  ],
+  "toolkit_revision": "fc09848fc6540fd32310faebbe9db6eea7ecd17b",
+  "architecture_metadata_version": 2,
+  "architecture": {
+    "model_class": "nsbi_common_utils.lightning_tools.multiclass_model.MultiClassLightning",
+    "type": "fully connected feed-forward multilayer perceptron",
+    "input_features": 3,
+    "layers": [
+      {
+        "name": "mlp.0",
+        "type": "Linear",
+        "input_features": 3,
+        "output_features": 128,
+        "bias": true
+      },
+      {
+        "name": "mlp.1",
+        "type": "SiLU",
+        "function": "x * sigmoid(x) (Swish / SiLU)"
+      },
+      {
+        "name": "mlp.2",
+        "type": "Linear",
+        "input_features": 128,
+        "output_features": 128,
+        "bias": true
+      },
+      {
+        "name": "mlp.3",
+        "type": "SiLU",
+        "function": "x * sigmoid(x) (Swish / SiLU)"
+      },
+      {
+        "name": "mlp.4",
+        "type": "Linear",
+        "input_features": 128,
+        "output_features": 128,
+        "bias": true
+      },
+      {
+        "name": "mlp.5",
+        "type": "SiLU",
+        "function": "x * sigmoid(x) (Swish / SiLU)"
+      },
+      {
+        "name": "out",
+        "type": "Linear",
+        "input_features": 128,
+        "output_features": 3,
+        "bias": true
+      }
+    ],
+    "hidden_layers": 3,
+    "hidden_width": 128,
+    "hidden_activation": "swish",
+    "output_activation": "linear (class logits)",
+    "probability_transform": "softmax(class logits)",
+    "logit_access": "forward",
+    "raw_ratio_transform": null,
+    "trainable_parameters": 33923,
+    "total_parameters": 33923,
+    "dropout_layers": [],
+    "batch_normalization": false
+  },
+  "loss": {
+    "name": "multiclass cross entropy",
+    "implementation": "torch.nn.functional.cross_entropy",
+    "reduction": "arithmetic mean over the minibatch (all event weights are one)",
+    "label_order": [
+      "S",
+      "B",
+      "NI"
+    ],
+    "class_prior": [
+      0.3333333333333333,
+      0.3333333333333333,
+      0.3333333333333333
+    ],
+    "label_smoothing": 0.0,
+    "input": "class logits"
+  },
+  "optimizer": {
+    "type": "NAdam",
+    "defaults": {
+      "lr": 0.001,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": 1e-08,
+      "weight_decay": 0,
+      "momentum_decay": 0.004,
+      "decoupled_weight_decay": false,
+      "maximize": false,
+      "foreach": null,
+      "capturable": false,
+      "differentiable": false
+    },
+    "parameter_group_weight_decay": [
+      0.0
+    ]
+  },
+  "scheduler": {
+    "type": "ReduceLROnPlateau",
+    "interval": "epoch",
+    "frequency": 1,
+    "monitor": "val_loss",
+    "mode": "min",
+    "factor": 0.5,
+    "patience": 15,
+    "min_lr": [
+      1e-09
+    ]
+  },
+  "regularization": {
+    "dropout": false,
+    "batch_normalization": false,
+    "weight_decay": [
+      0.0
+    ],
+    "explicit_loss_penalties": "none (no L1 or L2 penalty)"
+  },
+  "checkpoint_selection": {
+    "monitor": "val_loss",
+    "mode": "min",
+    "restore": "best validation checkpoint",
+    "learning_rate_summary": "describes completed training; the restored best-validation checkpoint may come from an earlier epoch",
+    "early_stopping_enabled": true,
+    "early_stopping_patience": 20,
+    "earliest_stopping_epoch": null,
+    "max_epochs": 100
+  },
+  "preprocessing": {
+    "type": "featurewise standardization: (x - mean) / scale",
+    "fit_partition": "training only, equal mixture of classes",
+    "mean": [
+      0.7100959420204163,
+      0.5332727432250977,
+      0.4745391607284546
+    ],
+    "scale": [
+      1.3639936447143555,
+      1.1369249820709229,
+      1.043883204460144
+    ]
+  },
+  "sampling": "equal class minibatches, training draws with replacement",
+  "best_validation_loss": 0.6935399770736694,
+  "best_checkpoint": "checkpoints/best.ckpt",
+  "epochs_completed": 76,
+  "lowest_learning_rate_used": 6.25e-05,
+  "final_learning_rate_used": 6.25e-05
+}

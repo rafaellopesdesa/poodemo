@@ -1,0 +1,51 @@
+{
+  "drive_run": "paper-distinct-s-v4",
+  "files": {
+    "preselection/training.json": {
+      "path": "preselection/training.json",
+      "id": "1hnzH2PoLluMLkO6IyAnjMAQfLvEMlYZ4",
+      "url": "https://drive.google.com/file/d/1hnzH2PoLluMLkO6IyAnjMAQfLvEMlYZ4/view?usp=drivesdk",
+      "modified_time": "2026-10-08T09:57:52.915Z",
+      "sha256": "b7a09a1bc39c7ab76a774a9ca78153cdcc3d08027377c6c1f4b1f2c4c3ee1777"
+    },
+    "preselection/selection.json": {
+      "path": "preselection/selection.json",
+      "id": "1OQUacQB2pVYsJfTzPGe9lQqWNypsVXRk",
+      "url": "https://drive.google.com/file/d/1OQUacQB2pVYsJfTzPGe9lQqWNypsVXRk/view?usp=drivesdk",
+      "modified_time": "2026-10-08T09:57:40.586Z",
+      "sha256": "a957ac104695668ef029796d43267bf3a70b73e39384301f3a0aae45e0f03137"
+    },
+    "preselection/model.pt": {
+      "path": "preselection/model.pt",
+      "id": "13ByEk3P93cNXMnAlYNanfglEpeURB7ar",
+      "url": "https://drive.google.com/file/d/13ByEk3P93cNXMnAlYNanfglEpeURB7ar/view?usp=drivesdk",
+      "modified_time": "2026-10-08T09:57:40.123Z",
+      "sha256": "0ea74ff3792b816bf667139847f2519b43bda05bcba9aa5178ce27b3a7508463"
+    },
+    "preselection/history.json": {
+      "path": "preselection/history.json",
+      "id": "14P2jfpadyu0B_HgO-s9u10RTjMPBQChV",
+      "url": "https://drive.google.com/file/d/14P2jfpadyu0B_HgO-s9u10RTjMPBQChV/view?usp=drivesdk",
+      "modified_time": "2026-10-08T09:57:39.987Z",
+      "sha256": "c4335b512b732e0f708f8197ed1b33d7768a19626f065d0b2a0b3c8fc7b00529"
+    },
+    "preselection.json": {
+      "path": "preselection.json",
+      "id": "1avDp7RR7BGBcLZ-7qo31bBJdp9-SSxtC",
+      "url": "https://drive.google.com/file/d/1avDp7RR7BGBcLZ-7qo31bBJdp9-SSxtC/view?usp=drivesdk",
+      "modified_time": "2026-10-08T09:58:43.226Z",
+      "sha256": "a1bf2b67f403d6539c6c45c50a1fc7887400fb5ebdbf621e967600b6dbbe8c6a"
+    },
+    "selection_state.json": {
+      "path": "selection_state.json",
+      "id": "1l_Z096BKSU_ITmJM6ikzSu3c7FfxwcCm",
+      "url": "https://drive.google.com/file/d/1l_Z096BKSU_ITmJM6ikzSu3c7FfxwcCm/view?usp=drivesdk",
+      "modified_time": "2026-10-08T09:57:40.928Z",
+      "sha256": "01961b7339b3127205deecc4a572db717a59624a7ea2628dc2b33ba3fa7fd9e3"
+    },
+    "run.json": {
+      "id": "1xx2yUUBRJaQK6SQ4GzjyAWGeFqX8OZcO",
+      "sha256": "9946ec2b517275565cf594af9634b76c7669d6b39f344d8cfd754ef334f95e18"
+    }
+  }
+}

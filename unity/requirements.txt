@@ -1,0 +1,5 @@
+# Install a CUDA-compatible torch wheel on Unity before this file if needed.
+# This matches the tested CPU smoke-test version and supports the saved selector.
+torch==2.5.1
+pytorch-lightning==2.5.5
+nsbi-common-utils @ git+https://github.com/iris-hep/nsbi-lhc-toolkit.git@fc09848fc6540fd32310faebbe9db6eea7ecd17b

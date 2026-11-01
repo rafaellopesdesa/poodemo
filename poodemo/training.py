@@ -223,6 +223,11 @@ def training_metadata(predictor, *, persist=True):
     signature, completion state, checkpoint, calibration, or model weights.
     Ensemble reports include each member and the ratio-averaging convention.
     """
+    if isinstance(predictor, StreamingRatioEnsemble):
+        return {"kind": "ratio ensemble", "ensemble_size": len(predictor.member_paths),
+                "aggregation": "arithmetic mean of member density ratios, not logits",
+                "members": [json.loads((p / "training.json").read_text())
+                            for p in predictor.member_paths]}
     if isinstance(predictor, RatioEnsemble):
         return {"kind": "ratio ensemble", "ensemble_size": len(predictor.members),
                 "aggregation": "arithmetic mean of member density ratios, not logits",
@@ -447,8 +452,63 @@ class RatioEnsemble:
                    directory, p["log_normalization"])
 
 
+class StreamingRatioEnsemble(RatioEnsemble):
+    """Persisted ensemble evaluated with one live network and O(N) output memory.
+
+    The outer loop is over members: each checkpoint is read once per prediction,
+    and each member internally batches its events. No (members, events) stack is
+    allocated. This has exactly the existing arithmetic-ratio averaging semantics.
+    """
+    def __init__(self, directory, device="auto"):
+        self.output_dir = Path(directory).resolve()
+        payload = json.loads((self.output_dir / "ensemble.json").read_text())
+        self.member_paths = [self.output_dir / p for p in payload["members"]]
+        if not self.member_paths:
+            raise ValueError("An ensemble needs at least one member")
+        self.log_normalization = float(payload["log_normalization"])
+        self.device, self.kind = device, "ratio"
+        self.labels = tuple(payload["labels"])
+
+    def _mean_log_ratio(self, x, batch_size, raw):
+        result = np.full(len(x), -np.inf, dtype=np.float64)
+        for path in self.member_paths:
+            member = Predictor.load(path, self.device)
+            method = member.predict_raw_log_ratio if raw else member.predict_log_ratio
+            np.logaddexp(result, method(x, batch_size), out=result)
+            del member
+        return result - math.log(len(self.member_paths))
+
+    def predict_raw_log_ratio(self, x, batch_size=8192):
+        return self._mean_log_ratio(x, batch_size, raw=True)
+
+    def predict_log_ratio(self, x, batch_size=8192, normalized=True):
+        result = self._mean_log_ratio(x, batch_size, raw=False)
+        return result - self.log_normalization if normalized else result
+
+    def predict_raw_ratio(self, x, batch_size=8192):
+        return super().predict_raw_ratio(x, batch_size)
+
+    def predict_ratio(self, x, batch_size=8192, normalized=True):
+        return super().predict_ratio(x, batch_size, normalized)
+
+    predict = predict_ratio
+    __call__ = predict_ratio
+
+    def save(self, output_dir=None):
+        if output_dir is not None and Path(output_dir).resolve() != self.output_dir:
+            raise ValueError("Use the collector to relocate a persisted ensemble")
+        path = self.output_dir / "ensemble.json"
+        payload = json.loads(path.read_text())
+        payload["log_normalization"] = self.log_normalization
+        _json_write(path, payload)
+        return self.output_dir
+
+
 def load_predictor(directory, device="auto"):
     directory = Path(directory).resolve()
+    ensemble_file = directory / "ensemble.json"
+    if ensemble_file.exists() and json.loads(ensemble_file.read_text()).get("streaming"):
+        return StreamingRatioEnsemble(directory, device)
     return (RatioEnsemble.load(directory, device) if (directory / "ensemble.json").exists()
             else Predictor.load(directory, device))
 
@@ -534,6 +594,8 @@ def _fit(train_arrays, validation_arrays, output_dir, config, kind, labels, forc
             # Lightning can step an epoch scheduler before validation. Record
             # the rate at training start so history describes optimizer updates.
             self.training_learning_rate = float(trainer.optimizers[0].param_groups[0]["lr"])
+            # Resumed jobs must not replay epoch-zero minibatch streams.
+            trainer.train_dataloader.dataset.epoch = trainer.current_epoch
         def on_validation_epoch_end(self, trainer, module):
             if trainer.sanity_checking:
                 return

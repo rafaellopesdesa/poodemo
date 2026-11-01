@@ -718,7 +718,9 @@ Preselection retains its separate original network settings.
 
 The table below reads the actual loaded layers, activations and parameter
 counts; smoke/custom runs can differ from these production dimensions.
-The three production members are combined by averaging ratios, not logits.
+The original three-member ensembles and optional Unity ensembles are combined
+by averaging ratios, not logits. Unity uses all five million training events per
+class as its epoch sampling budget; the table records the actual configuration.
 Mean normalization on separate calibration events is a later operation, not
 a loss penalty or a guarantee of shape closure.
 
@@ -773,6 +775,54 @@ print(json.dumps({key: example[key] for key in
                  ("optimizer", "scheduler", "preprocessing", "checkpoint_selection")}, indent=2))
 '''
 
+UNITY_SOURCE_INTRO = r"""
+### Optional: load the Unity ensembles
+
+Leave `RATIO_SOURCE = "drive"` to keep the original three-member workflow.
+After training on Unity, set it to `"unity"`, enter the bundle name and the
+**full publication commit SHA** printed by `unity.publish`, and rerun this
+notebook. Install Git LFS once in Colab if needed: `!apt-get -qq install git-lfs`.
+
+Only inference models and metadata are downloaded. Event weights are computed
+here from the models on the existing Drive samples. The physics, preselection
+checkpoint and threshold must match exactly. Unity mode skips training and
+retains the Unity ensemble's independent mean-normalization constant; it does
+not fit anything to the diagnostic bank. The original Drive quadrature and
+cached diagnostic/Poisson events are reused. New plots, workspaces and results
+are saved in a separate `evaluations/<bundle>/<campaign>/` directory.
+
+The default Unity campaign has 100 members per ratio task, five million
+**selected training events per source**, 500,000 validation events and one
+million normalization events. All members use the same training bank with
+independent initialization/minibatch seeds. Ensemble averaging reduces training
+variability; shared sample/model/optimization bias need not disappear.
+`VALIDATE_UNITY_MEMBERS` also enables every member's diagnostic plots; by default
+only the complete ensembles are plotted. Saved outputs below still describe
+the earlier run until you execute the notebook again.
+"""
+
+UNITY_SOURCE_CODE = r'''
+from poodemo.ensemble_bundle import fetch_bundle, use_bundle, BundleEvaluationRun
+
+RATIO_SOURCE = "drive"  # "drive" or "unity"
+UNITY_BUNDLE = "paper-distinct-s-v4-unity100"
+UNITY_REF = ""  # Full 40-character commit SHA printed by unity.publish.
+UNITY_CACHE = Path("/content/poodemo-unity-models") if IN_COLAB else Path.home() / ".cache/poodemo-unity-models"
+VALIDATE_UNITY_MEMBERS = False
+
+source_run = run.base_run if isinstance(run, BundleEvaluationRun) else run
+if RATIO_SOURCE == "unity":
+    unity_bundle = fetch_bundle(UNITY_BUNDLE, UNITY_REF, UNITY_CACHE)
+    run = use_bundle(source_run, unity_bundle)
+    ROOT = run.evaluation_root  # Plot cells use ROOT; event reads use run.path().
+    print("Unity models:", unity_bundle)
+    print("Evaluation outputs:", ROOT)
+elif RATIO_SOURCE == "drive":
+    run, ROOT = source_run, source_run.root
+else:
+    raise ValueError("RATIO_SOURCE must be 'drive' or 'unity'")
+'''
+
 RATIO_VALIDATION_INTRO = r"""
 ### Independent density validation bank
 
@@ -796,7 +846,8 @@ Calibration figures compare the mean predicted score $s=r/(1+r)$ to the
 observed numerator fraction using an equal class prior, with residual
 $f_{\rm numerator}-\langle s\rangle$ underneath. Immediately after **each
 member** finishes, its raw reweighting and calibration plots are displayed,
-before training the next member. After each task, the final ratio is shown in
+before training the next member in Drive mode. Unity mode evaluates saved
+ensembles (and optionally their members) without training. The final ratio is shown in
 both raw and calibration-mean-normalized forms. Member checks do not alter
 the ensemble weights or fit any calibration map. Calibration
 here is a diagnostic: these cells do not fit a new calibration map. Error bars
@@ -832,12 +883,17 @@ def show_ratio_validation(report):
         display(report["reweighting"].groupby("stage", sort=False)[
             ["denominator_mean_ratio", "numerator_events", "denominator_events"]].first())
 
-ratio_diagnostics = train_ratios(
-    run, validation_samples=validation_bank["samples"],
-    on_validation=show_ratio_validation,
-    validation_options={"edges": DIAGNOSTIC_EDGES, "score_bins": CALIBRATION_BINS,
-                        "log": VALIDATION_LOG_SCALE},
-)
+validation_options = {"edges": DIAGNOSTIC_EDGES, "score_bins": CALIBRATION_BINS,
+                      "log": VALIDATION_LOG_SCALE}
+if RATIO_SOURCE == "unity":
+    from poodemo.ensemble_bundle import validate_bundle_ratios
+    ratio_diagnostics = validate_bundle_ratios(
+        run, validation_bank["samples"], on_validation=show_ratio_validation,
+        validation_options=validation_options, validate_members=VALIDATE_UNITY_MEMBERS)
+else:
+    ratio_diagnostics = train_ratios(
+        run, validation_samples=validation_bank["samples"],
+        on_validation=show_ratio_validation, validation_options=validation_options)
 display(ratio_diagnostics)
 print("Saved per-member and ensemble plots:", run.path("plots", "03_validation"))
 '''
@@ -892,6 +948,7 @@ CLOSURE_PROFILE_NI = True
 closure_validation = run_closure_validation(
     run, validation_bank, scan_points=CLOSURE_SCAN_POINTS,
     poisson_generated_events=POISSON_GENERATED_EVENTS, profile=CLOSURE_PROFILE_NI,
+    output_directory=run.path("results", "03_closure") if RATIO_SOURCE == "unity" else None,
 )
 display(closure_validation["convergence"])
 display(closure_validation["fits"])
@@ -1286,6 +1343,8 @@ def build():
         Gaussian amplitude away from its nominal and ±1 anchors.
         """),
         md(NN_METADATA_INTRO),
+        md(UNITY_SOURCE_INTRO),
+        code(UNITY_SOURCE_CODE),
         md(RATIO_VALIDATION_INTRO),
         code(RATIO_VALIDATION_CODE),
         code(TRAIN_RATIOS_WITH_VALIDATION_CODE),

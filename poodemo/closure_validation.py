@@ -522,7 +522,8 @@ def plot_mle_closure(scans, fits, output, *, zoom=False):
 
 
 def run_closure_validation(run, bank, *, predictors=None, scan_points=81,
-                           poisson_generated_events=10_000_000, profile=True):
+                           poisson_generated_events=10_000_000, profile=True,
+                           output_directory=None):
     """Run both nontrivial closure tests and save tables, provenance, and plots.
 
     The expected log likelihood retains the original physical exposure. The
@@ -538,8 +539,8 @@ def run_closure_validation(run, bank, *, predictors=None, scan_points=81,
     if predictors is None:
         predictors = {f"{a}_over_{b}": load_predictor(run.path("models", "ratios", f"{a}_over_{b}"))
                       for a, b in RATIO_TASKS}
-    output = Path(bank["directory"]) / "closure"
-    output.mkdir(exist_ok=True)
+    output = Path(output_directory) if output_directory is not None else Path(bank["directory"]) / "closure"
+    output.mkdir(parents=True, exist_ok=True)
     convergence = ratio_expectation_closure(bank, predictors)
     convergence.to_csv(output / "ratio_expectation_convergence.csv", index=False)
     figures = [plot_expectation_convergence(convergence, output)]
