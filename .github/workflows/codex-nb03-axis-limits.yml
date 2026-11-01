@@ -1,0 +1,91 @@
+name: Apply verified diagnostic plot formatting
+on:
+  push:
+    branches: [codex/nb03-plot-axis-limits]
+    paths: [.github/workflows/codex-nb03-axis-limits.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply checked source patch without executing notebooks
+        run: |
+          git apply <<'PATCH'
+          diff --git a/notebooks/03_unbinned_nsbi.ipynb b/notebooks/03_unbinned_nsbi.ipynb
+          index ee2bfcb..4d5c2c9 100644
+          --- a/notebooks/03_unbinned_nsbi.ipynb
+          +++ b/notebooks/03_unbinned_nsbi.ipynb
+          @@ -43831,7 +43831,7 @@
+                   "id": "cell-018"
+                 },
+                 "source": [
+          -        "Next: **04_score_histograms.ipynb**."
+          +        "Next: **08_reference_ratio_histograms.ipynb**."
+                 ]
+               },
+               {
+          diff --git a/poodemo/closure_validation.py b/poodemo/closure_validation.py
+          index 5c411de..bedd751 100644
+          --- a/poodemo/closure_validation.py
+          +++ b/poodemo/closure_validation.py
+          @@ -469,7 +469,7 @@ def plot_expectation_convergence(frame, output):
+                                       marker="o", markersize=4, color=color, label=label)
+                       ax.axhline(1., color="black", linestyle="--", linewidth=1)
+                       ax.set(xscale="log", xlabel="Selected denominator events", ylabel=r"$\widehat{E}_{\rm den}[r]$",
+          -                   title=ratio)
+          +                   title=ratio, ylim=(0.95, 1.05))
+                       ax.legend(fontsize=11)
+                   axes.flat[-1].axis("off")
+                   axes.flat[-1].text(.02, .95,
+          diff --git a/poodemo/ratio_validation.py b/poodemo/ratio_validation.py
+          index 85ee6c4..daa492b 100644
+          --- a/poodemo/ratio_validation.py
+          +++ b/poodemo/ratio_validation.py
+          @@ -214,6 +214,7 @@ def plot_reweighting(table, numerator, denominator, *, output=None, log=False, l
+                           ax.set_ylim(bottom=0)
+                       ax.legend(fontsize=10, frameon=False)
+                       ratio_ax.axhline(1., color="black", linewidth=1.)
+          +            ratio_ax.set_ylim(0.95, 1.05)
+                       ratio_ax.set_xlabel(fr"$x_{coordinate + 1}$")
+                       ratio_ax.set_ylabel("Reweighted\n/ target", fontsize=12)
+                       ratio_ax.tick_params(labelsize=11)
+          @@ -247,6 +248,7 @@ def plot_calibration(table, numerator, denominator, *, output=None, label=None):
+                   ax.set(ylabel="Empirical numerator fraction", xlim=(0, 1), ylim=(0, 1))
+                   ax.legend(fontsize=12, frameon=False)
+                   residual_ax.axhline(0., color="black", linewidth=1.)
+          +        residual_ax.set_ylim(-0.01, 0.01)
+                   residual_ax.set(xlabel=r"Mean predicted $r/(1+r)$", ylabel="Empirical\n− predicted")
+                   residual_ax.grid(axis="y", alpha=.2)
+                   heading = f"{numerator}/{denominator}" + (f" ({label})" if label else "")
+          diff --git a/scripts/build_notebooks.py b/scripts/build_notebooks.py
+          index 5202c28..9ae357b 100644
+          --- a/scripts/build_notebooks.py
+          +++ b/scripts/build_notebooks.py
+          @@ -1478,7 +1478,7 @@ def build():
+                   they do not count as successful learned-model closure. Inspect fit
+                   validity and ratio diagnostics before increasing the training budget.
+                   """),
+          -        md("Next: **04_score_histograms.ipynb**."),
+          +        md("Next: **08_reference_ratio_histograms.ipynb**."),
+               ]
+               write("03_unbinned_nsbi.ipynb", cells)
+          PATCH
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, ast
+          expected = {"notebooks/03_unbinned_nsbi.ipynb":"4d5c2c980cf915ccbafda569bf903c09dbd6f0ce","poodemo/closure_validation.py":"bedd7515bf6fd2cb64c95cc0296cfffc62ca8e39","poodemo/ratio_validation.py":"daa492bcc34ccf6575bc112aea82f01cac1230d2","scripts/build_notebooks.py":"9ae357ba10122f7a23a73801b0175394774ecb35"}
+          for name, sha in expected.items():
+              data = Path(name).read_bytes()
+              assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == sha, name
+              if name.endswith('.py'):
+                  ast.parse(data.decode())
+          print('Four files match the verified edits; no notebook execution.')
+          PY
+          git diff --check
+          git add notebooks/03_unbinned_nsbi.ipynb poodemo/closure_validation.py poodemo/ratio_validation.py scripts/build_notebooks.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Set diagnostic ratio and calibration residual axis ranges'
+          git push origin HEAD:codex/nb03-plot-axis-limits
