@@ -154,25 +154,25 @@ def cells():
         ## 1. Freeze the observable separately from the physical likelihood
 
         The two observable choices are
-        \[
+        $$
         t_\eta^{\rm ana}(x)=\operatorname{sigmoid}
         \left[a\log\frac{r(x;\eta_{\rm eff})}{r(x;1)}\right],\qquad
         t_\eta^{\rm NN}(x)=\operatorname{sigmoid}
         \left[a\log\frac{\widehat r(x;\eta_{\rm eff})}{\widehat r(x;1)}\right],
         \quad \eta_{\rm eff}=\max(\eta,0.2).
-        \]
+        $$
         The saved process-ratio networks and their original integration-bank
         normalizers are frozen before evaluating either new bank. Analytical
         and learned map normalizations use the same fixed selected physical
         rates. We do not recalibrate either map on bank B or tune it for closure.
 
-        At each tested physical \(\mu_0\), choose \(\eta=\mu_0\), fill the
+        At each tested physical $\mu_0$, choose $\eta=\mu_0$, fill the
         observed histogram, and freeze its partition for **both** the constrained
         and free fits. The denominator fit is repeated for each partition.
-        Only the observable numerator is floored; the physical \(\mu\), yield
+        Only the observable numerator is floored; the physical $\mu$, yield
         coefficients, and free-fit domain retain their original definitions.
         All hypotheses below the floor share a partition, while their predicted
-        yields remain different. At \(\eta=1\) both maps collapse to 0.5,
+        yields remain different. At $\eta=1$ both maps collapse to 0.5,
         contained inside a bin; event-count information remains.
 
         Change `MU_GRID` for the physical scan or the plotting limits below for
@@ -202,12 +202,12 @@ def cells():
         md(r"""
         ## 3. Construct direct templates and fit both Asimov comparisons
 
-        For map \(t_\eta\), the bin prediction is
-        \[
+        For map $t_\eta$, the bin prediction is
+        $$
         \Lambda_b(\mu,\alpha;\eta)=
         \int\mathbf{1}[t_\eta(x)\in B_b]\,
         \lambda(x;\mu,\alpha)\,dx.
-        \]
+        $$
         The simulation estimate of this integral uses physical component
         intensities. A neural approximation changes the partition, not the
         intensity used to predict its yield.
@@ -236,7 +236,7 @@ def cells():
 
         Compare the two binned curves against the analytical unbinned curve,
         and against each other. The residual panel shows
-        \(\Delta q_\mu=q_\mu^{\rm binned}-q_\mu^{\rm unbinned}\) for the
+        $\Delta q_\mu=q_\mu^{\rm binned}-q_\mu^{\rm unbinned}$ for the
         **same** Asimov comparison and nuisance treatment. Inspect matched and
         independent results separately. A binned curve need not differ from the
         unbinned curve with one sign at every point of a profiled scan.
@@ -256,7 +256,7 @@ def cells():
         ## 5. Fitted values and local information
 
         Every scan point has its own frozen compression and therefore its own
-        unrestricted fit. The fitted \(\widehat\mu\) values below are not
+        unrestricted fit. The fitted $\widehat\mu$ values below are not
         interchangeable with the minimum of the assembled moving-observable
         scan. Compare matched and independent fits at the same construction
         point to assess finite-bank sensitivity.
@@ -285,7 +285,7 @@ def cells():
         ## 6. Physical component shapes on the two maps
 
         Compare S, SBI, B, and NI on the analytical and learned axes for
-        \(\eta=0,0.3,0.6,1,1.5\). The plotted component histograms are
+        $\eta=0,0.3,0.6,1,1.5$. The plotted component histograms are
         normalized separately **for display only**; the fits retain absolute
         yields. All histograms use the same 36 edges as the likelihood, including
         the convention that places 0.5 inside a bin. Logarithmic axes expose tails.
