@@ -315,18 +315,18 @@ SCORE_DISTRIBUTIONS_INTRO = r'''
 ### How the observable changes with eta
 
 These panels show expected event yields after preselection, with both the
-observable constructed at \(\eta\) and the physical prediction evaluated at
-\(\mu=\eta\), at nominal \(\alpha_{NI}=0\). For each bin, the coherent layer is
-\[
+observable constructed at $\eta$ and the physical prediction evaluated at
+$\mu=\eta$, at nominal $\alpha_{NI}=0$. For each bin, the coherent layer is
+$$
 \nu_{\mathrm{SBI},i}^{(\eta)}
 =(\eta-\sqrt\eta)\nu_{S,i}(\eta)
 +\sqrt\eta\,\nu_{SBI,i}(\eta)
 +(1-\sqrt\eta)\nu_{B,i}(\eta).
-\]
-It is stacked above \(\nu_{NI,i}(\eta)\). Combine the three coherent terms
+$$
+It is stacked above $\nu_{NI,i}(\eta)$. Combine the three coherent terms
 **before stacking**: their individual coefficients can be negative, while
 their physical sum is nonnegative. The curves are not normalized to unit area.
-NI's total yield stays fixed even though its distribution in \(z_\eta\) changes.
+NI's total yield stays fixed even though its distribution in $z_\eta$ changes.
 
 The default anchors include the generating value, the nominal total-rate
 turnover, and the other equal-rate solution when those lie in the scan range.
@@ -614,27 +614,27 @@ else:
 ESTIMATOR_STUDY_INTRO = r'''
 ### Estimator and local uncertainty versus the frozen observable
 
-Now hold the generating experiment fixed at \((\mu_*,\alpha_{NI})=(\mu_*,0)\)
-and vary only the observable anchor \(\eta\). Each row refills the
+Now hold the generating experiment fixed at $(\mu_*,\alpha_{NI})=(\mu_*,0)$
+and vary only the observable anchor $\eta$. Each row refills the
 **same Asimov expectation**, freezes that histogram, and fits physical
-\(\mu\), with NI either fixed or profiled. For an identified, correctly
-modeled Asimov experiment, \(\hat\mu(\eta)\) should remain at the
+$\mu$, with NI either fixed or profiled. For an identified, correctly
+modeled Asimov experiment, $\hat\mu(\eta)$ should remain at the
 generating value. This is not a study of finite-sample fluctuations.
 
 The width is evaluated from the local Fisher information at the fixed
 truth, using the extended likelihood and the NI auxiliary constraint:
-\[
+$$
 \sigma_\mu^{\rm fixed}(\eta)=1/\sqrt{I_{\mu\mu}^{(\eta)}},\qquad
 \sigma_\mu^{\rm profiled}(\eta)
 =\sqrt{[(\mathbf I^{(\eta)})^{-1}]_{\mu\mu}}.
-\]
+$$
 This is the local Asimov curvature of **each frozen-observable fit**.
-It is neither the curvature of the scan that changes \(\eta=\mu_0\)
+It is neither the curvature of the scan that changes $\eta=\mu_0$
 at every point nor a global confidence interval. A second likelihood
 minimum can produce additional accepted parameter regions that a local
 width cannot describe.
 
-The full unbinned reference does not depend on \(\eta\). For the binned
+The full unbinned reference does not depend on $\eta$. For the binned
 comparison, profiled widths use nuisance morphing after binning, as in
 the spline notebook; its difference from integrating the unbinned morphing is a
 separate model effect. Inspect anomalous fitted values for optimizer
@@ -643,19 +643,19 @@ compression bias.
 '''
 
 SPLINE_COORDINATE_INTRO = r'''
-### The spline coordinate is the construction parameter \(\eta\)
+### The spline coordinate is the construction parameter $\eta$
 
-A process yield \(H_{jb}(\eta)\) in a fixed \(z\)-bin changes when
-\(\eta\) changes because the observable moves events between bins.
-The physical \(\mu\)-dependence still enters through the exact amplitude
+A process yield $H_{jb}(\eta)$ in a fixed $z$-bin changes when
+$\eta$ changes because the observable moves events between bins.
+The physical $\mu$-dependence still enters through the exact amplitude
 coefficients. These two roles must stay separate:
-\[
+$$
 \nu_b(\mu;\eta)=(\mu-\sqrt\mu)H_{Sb}(\eta)
 +\sqrt\mu H_{SBI,b}(\eta)+(1-\sqrt\mu)H_{Bb}(\eta)
 +H_{NI,b}(\eta).
-\]
+$$
 Since the selected phase space is fixed and bins are exhaustive,
-\(\sum_bH_{jb}(\eta)=\lambda_j\) is independent of \(\eta\).
+$\sum_bH_{jb}(\eta)=\lambda_j$ is independent of $\eta$.
 We interpolate bin fractions with positivity and normalization enforced,
 then restore the separate total yield. SBI interference enters through
 the coherent templates, not an independently generated signed sample.
@@ -665,31 +665,31 @@ SPLINE_NUISANCE_INTRO = r'''
 ### Vary the templates, then interpolate the nuisance
 
 Build nominal and ±1 templates for NI and nominal templates for S, B,
-and SBI. Fit their dependence on \(\eta\).
+and SBI. Fit their dependence on $\eta$.
 At any construction point, evaluate the splines first; then use the
-same exponential–polynomial rule to interpolate in \(\alpha_{NI}\).
+same exponential–polynomial rule to interpolate in $\alpha_{NI}$.
 Every profiled fit retains the Gaussian auxiliary constraint
-\(\exp(-\alpha_{NI}^2/2)\), or \(+\alpha_{NI}^2\) in \(-2\log L\).
+$\exp(-\alpha_{NI}^2/2)$, or $+\alpha_{NI}^2$ in $-2\log L$.
 
-The Asimov data histogram also depends on \(\eta\) and is refilled from
+The Asimov data histogram also depends on $\eta$ and is refilled from
 the integration events at each tested point, rather than interpolated.
-All nuisance fits keep \(\eta=\mu_0\) fixed
+All nuisance fits keep $\eta=\mu_0$ fixed
 in both numerator and denominator.
 
 Integration and nonlinear nuisance interpolation generally do not
 commute:
-\[
+$$
 \int_{B_b(\eta)}\!\mathrm{Interp}_{\alpha_{NI}}[D(x)]\,dx
 \ne \mathrm{Interp}_{\alpha_{NI}}\!\left[\int_{B_b(\eta)}D(x)\,dx\right].
-\]
+$$
 This difference is recorded separately from spline interpolation error.
 Agreement at nominal and ±1 templates alone does not establish equality
 between the continuously morphed unbinned and binned models.
 '''
 
 PHYSICAL_YIELD_INTRO = r'''
-For comparison, the next plot fixes \(\eta=\mu_*\) and varies the **physical**
-\(\mu\). This dependence comes from the signal/interference coefficients,
+For comparison, the next plot fixes $\eta=\mu_*$ and varies the **physical**
+$\mu$. This dependence comes from the signal/interference coefficients,
 not from the spline. The two plots answer different questions.
 '''
 
@@ -847,9 +847,9 @@ CLOSURE_VALIDATION_INTRO = r"""
 
 For a normalized target-to-reference density ratio, an independent denominator
 sample should satisfy
-\[
+$$
 \widehat{E_q[r]}_N=\frac{1}{N}\sum_{i=1}^{N}r(x_i)\longrightarrow 1.
-\]
+$$
 The convergence plot uses increasing, nested prefixes of the selected bank,
 with Monte Carlo standard errors and effective sample sizes saved in the
 table. Prefix estimates are correlated. Increasing statistics can reveal a
@@ -933,20 +933,20 @@ def build():
     expected event yields of the statistical experiment are separate quantities.
     This benchmark is designed to make interference and nuisance effects visible;
     it illustrates the method and is not a numerical reproduction of an ATLAS
-    measurement. The second branch remains below \(\mu=1\), while S now has a visibly
-    different shape from B. The generating signal strength is \(\mu_*=1\).
+    measurement. The second branch remains below $\mu=1$, while S now has a visibly
+    different shape from B. The generating signal strength is $\mu_*=1$.
     """)
     cells += [
         md(r"""
         ### Amplitudes, densities, and yields
 
-        Let \(\phi_j(x)=\mathcal N_3(x;m_j,\Sigma_j)\), normalized to one.
+        Let $\phi_j(x)=\mathcal N_3(x;m_j,\Sigma_j)$, normalized to one.
         Define amplitudes
-        \[
+        $$
         A_S(x)=\sqrt{\lambda_S\phi_S(x)},\qquad
         A_B(x)=e^{i\varphi}\sqrt{\lambda_B\phi_B(x)},
         \qquad A_{NI}(x)=\sqrt{\lambda_{NI}\phi_{NI}(x)}.
-        \]
+        $$
         Their square roots are Gaussian functions, so these are Gaussian
         wavefunctions. The configured phase gives destructive interference.
         The means, positive-definite covariance matrices, phase, and inclusive
@@ -964,21 +964,21 @@ def build():
         scale is 0.04, adapted to its broader distribution, so later comparisons
         do not saturate the old score transformation.
 
-        The coherent process at \(\mu=1\) is
-        \[
+        The coherent process at $\mu=1$ is
+        $$
         D_{SBI}=|A_S+A_B|^2=D_S+D_B+D_I,
         \quad D_I=2\cos\varphi\sqrt{D_SD_B}.
-        \]
-        The SBI density is \(p_{SBI}=D_{SBI}/\lambda_{SBI}\), with
-        \(\lambda_{SBI}=\int D_{SBI}\,dx\). It is **not** assigned an arbitrary
+        $$
+        The SBI density is $p_{SBI}=D_{SBI}/\lambda_{SBI}$, with
+        $\lambda_{SBI}=\int D_{SBI}\,dx$. It is **not** assigned an arbitrary
         yield: interference fixes its normalization. NI is added incoherently.
 
-        At any \(\mu\ge0\),
-        \[
+        At any $\mu\ge0$,
+        $$
         D(x;\mu)=|\sqrt\mu A_S+A_B|^2+D_{NI}
         = (\mu-\sqrt\mu)D_S+\sqrt\mu D_{SBI}
           +(1-\sqrt\mu)D_B+D_{NI}.
-        \]
+        $$
         The negative coefficients in this basis are physical algebra; the total
         amplitude model remains positive.
 
@@ -991,7 +991,7 @@ def build():
         md(r"""
         ### Shape uncertainties and statistically independent roles
 
-        The only nuisance is \(\alpha_{NI}\). Its ±1 anchors shift the NI
+        The only nuisance is $\alpha_{NI}$. Its ±1 anchors shift the NI
         amplitude mean along the configured direction with the configured
         magnitude. The actual shift vector is displayed below, so its strength
         remains explicit when the benchmark is changed.
@@ -1115,11 +1115,11 @@ def build():
         not the final likelihood ratio or optimal score. Class-balanced training
         avoids allowing the dominant NI yield alone to determine the classifier.
 
-        A threshold \(c\) is chosen on held-out calibration events to satisfy
-        \[
+        A threshold $c$ is chosen on held-out calibration events to satisfy
+        $$
         \frac{\lambda_S\epsilon_S(c)}
              {\lambda_{NI}\epsilon_{NI}(c)}\simeq\rho_{\rm target}.
-        \]
+        $$
         Within the available threshold choices, preserving signal efficiency
         matters. The target is approximate because efficiencies are estimated
         with finite samples. The same frozen cut is applied to every process,
@@ -1129,13 +1129,13 @@ def build():
         md(r"""
         ### Selection is part of the statistical experiment
 
-        A cut changes both rates and normalized shapes. For process \(j\),
-        \[
+        A cut changes both rates and normalized shapes. For process $j$,
+        $$
         \lambda_j^{\mathrm{sel}}=\lambda_j\epsilon_j,\qquad
         p_j^{\mathrm{sel}}(x)
         =\frac{\mathbf1_{C}(x)p_j(x)}{\epsilon_j}.
-        \]
-        Nuisance variations generally change \(\epsilon_j\). We retain those
+        $$
+        Nuisance variations generally change $\epsilon_j$. We retain those
         rate effects; renormalizing every selected variation to the nominal
         rate would define a different systematic model.
 
@@ -1256,31 +1256,31 @@ def build():
         md(r"""
         ### Density ratios and the physical model
 
-        For the fixed selected phase space, set \(q=p_S^{\rm sel}\), and learn
-        \(r_j=p_j^{\rm sel}/q\) for the other processes. Shape ratios and physical
-        yields are distinct. At the nominal nuisance value \(\alpha_{NI}=0\),
-        \[
+        For the fixed selected phase space, set $q=p_S^{\rm sel}$, and learn
+        $r_j=p_j^{\rm sel}/q$ for the other processes. Shape ratios and physical
+        yields are distinct. At the nominal nuisance value $\alpha_{NI}=0$,
+        $$
         \frac{D(x;\mu)}{q(x)}
         =(\mu-\sqrt\mu)\lambda_S
          +\sqrt\mu\lambda_{SBI}r_{SBI}(x)
          +(1-\sqrt\mu)\lambda_Br_B(x)
          +\lambda_{NI}r_{NI}(x),
-        \]
-        where every \(\lambda\) is now a **selected** yield.
+        $$
+        where every $\lambda$ is now a **selected** yield.
 
         We also train the NI up/down variation-to-nominal ratios. There are five
         ratio tasks: SBI/S, B/S, NI/S, NI_up/NI, and NI_down/NI. The production
         three-member ensembles therefore contain fifteen ratio networks, plus
         the separate preselection network. Only NI is morphed; S, B, and SBI
         retain their nominal templates. The workspace parameters are
-        \((\mu,\alpha_{NI})\).
+        $(\mu,\alpha_{NI})$.
 
         The nuisance interpolation is the toolkit's exponential–polynomial
         interpolation. A standard-normal auxiliary measurement supplies
-        \[
+        $$
         L_{\rm aux}(\alpha_{NI})\propto\exp(-\alpha_{NI}^2/2),
-        \]
-        so its contribution to \(-2\log L\) is \(+\alpha_{NI}^2\).
+        $$
+        so its contribution to $-2\log L$ is $+\alpha_{NI}^2$.
         This constraint is included in every profiled likelihood. The
         interpolated nuisance model need not equal a continuously shifted
         Gaussian amplitude away from its nominal and ±1 anchors.
@@ -1329,14 +1329,14 @@ def build():
         Poisson pseudo-experiments. The extended likelihood retains the total
         expected yield and includes the Gaussian NI auxiliary measurement.
 
-        At the configured generating point \((\mu_*,\alpha_{NI,*})=(\mu_*,0)\),
+        At the configured generating point $(\mu_*,\alpha_{NI,*})=(\mu_*,0)$,
         an exact intensity model gives
-        \[
+        $$
         t_A(\mu,\alpha_{NI})=2\int\!dx\,
         \left[D(x;\mu,\alpha_{NI})-D_*(x)
         -D_*(x)\log\frac{D(x;\mu,\alpha_{NI})}{D_*(x)}\right]
         +\alpha_{NI}^2,
-        \]
+        $$
         followed by profiling. Finite quadrature and learned-ratio errors are
         separate effects. The pipeline saves both analytical and learned
         reference curves so that later comparisons can identify their origin.
@@ -1349,20 +1349,20 @@ def build():
 
         At nominal NI nuisance and with the selection fixed, write the selected
         total yield as
-        \[
+        $$
         \Lambda_\mu=\lambda_S\mu+\lambda_I\sqrt\mu+\lambda_B+\lambda_{NI},
         \qquad \lambda_I=\lambda_{SBI}-\lambda_S-\lambda_B<0.
-        \]
+        $$
         Equating this yield to the generating yield gives
-        \[
+        $$
         \Lambda_\mu-\Lambda_{\mu_*}
         =(\sqrt\mu-\sqrt{\mu_*})
         [\lambda_S(\sqrt\mu+\sqrt{\mu_*})+\lambda_I]=0.
-        \]
-        Besides \(\mu=\mu_*\), there is an equal-rate solution
-        \[
+        $$
+        Besides $\mu=\mu_*$, there is an equal-rate solution
+        $$
         \mu_{\rm rate}=\left(-\lambda_I/\lambda_S-\sqrt{\mu_*}\right)^2
-        \]
+        $$
         when the expression in parentheses is nonnegative. This is an exact
         statement about the **total rate at nominal nuisance**, not an exact
         degeneracy of the full event distribution. Similar signal and
@@ -1372,9 +1372,9 @@ def build():
 
         The distinct-signal benchmark keeps the second basin below 1 rather
         than forcing it near 0.5. The selected-rate turnover is
-        \[
+        $$
         \mu_{\rm turnover}=\left(-\frac{\lambda_I}{2\lambda_S}\right)^2.
-        \]
+        $$
         Neither this turnover nor the equal-rate partner is generally a
         full-likelihood extremum. The analytical-selector validation gives
         secondary minima near 0.120 (NI fixed) and 0.069 (NI profiled);
@@ -1437,7 +1437,7 @@ def build():
         The split is made **within each proposal stratum before selection**;
         rejected events contribute zero to the uncertainty calculation.
         Error bars estimate Monte Carlo integration uncertainty, not statistical
-        confidence intervals on \(\mu\). Half-sample agreement and small
+        confidence intervals on $\mu$. Half-sample agreement and small
         estimated errors are checks on the numerical expectation; a precision
         study should also increase the integration budget in a separate run.
         """),
@@ -1464,14 +1464,14 @@ def build():
                 display(value)
         '''),
         md(r"""
-        The horizontal line at \(t=1\) is a visual likelihood-scale reference.
+        The horizontal line at $t=1$ is a visual likelihood-scale reference.
         These Asimov curves alone do not demonstrate interval coverage or
         establish Wilks' theorem at a boundary. The scan uses positive signal
-        strengths; the derivative of the \(\sqrt\mu\) model is singular at zero.
+        strengths; the derivative of the $\sqrt\mu$ model is singular at zero.
         The scan range and fit bounds are printed above from the run configuration.
         The positive lower fit bound is a numerical floor for
         this regular interior demonstration, not an implementation of a
-        discovery test at the physical boundary \(\mu=0\).
+        discovery test at the physical boundary $\mu=0$.
 
         Short smoke training may give visibly inaccurate learned curves or
         invalid learned intensities. Such points are flagged and appear as gaps;
@@ -1485,41 +1485,41 @@ def build():
     cells = start("4. Analytical scores and histogram coarsening", r"""
     Compute the analytical score at each tested signal strength, transform it to
     a bounded scalar, and compare increasingly fine Poisson histograms with the
-    unbinned likelihood. The construction parameter is called \(\eta\); the
-    fitted physical parameter remains \(\mu\). Run notebooks 1–3 first.
+    unbinned likelihood. The construction parameter is called $\eta$; the
+    fitted physical parameter remains $\mu$. Run notebooks 1–3 first.
     """)
     cells += [
         md(r"""
         ### The score, including the yield factors
 
-        In the selected phase space define normalized process densities \(p_j\)
-        and their selected yields \(\lambda_j\). At \(\alpha_{NI}=0\),
-        \[
+        In the selected phase space define normalized process densities $p_j$
+        and their selected yields $\lambda_j$. At $\alpha_{NI}=0$,
+        $$
         D_\mu(x)=(\mu-\sqrt\mu)\lambda_Sp_S(x)
         +\sqrt\mu\lambda_{SBI}p_{SBI}(x)
         +(1-\sqrt\mu)\lambda_Bp_B(x)+\lambda_{NI}p_{NI}(x),
-        \]
-        \[
+        $$
+        $$
         \Lambda_\mu=(\mu-\sqrt\mu)\lambda_S
         +\sqrt\mu\lambda_{SBI}+(1-\sqrt\mu)\lambda_B+\lambda_{NI},
         \qquad p(x;\mu)=D_\mu(x)/\Lambda_\mu.
-        \]
-        In particular, **there is no density factor in \(\Lambda_\mu\)**.
-        For \(\eta>0\),
-        \[
+        $$
+        In particular, **there is no density factor in $\Lambda_\mu$**.
+        For $\eta>0$,
+        $$
         D'_\eta(x)=\frac{(2\sqrt\eta-1)\lambda_Sp_S(x)
                +\lambda_{SBI}p_{SBI}(x)-\lambda_Bp_B(x)}{2\sqrt\eta},
-        \]
-        \[
+        $$
+        $$
         \boxed{o_\eta(x)=\left.\partial_\mu\log p(x;\mu)\right|_\eta
                  =\frac{D'_\eta(x)}{D_\eta(x)}
                   -\frac{\Lambda'_\eta}{\Lambda_\eta}.}
-        \]
+        $$
         The constant normalization term ensures zero mean under the selected
         normalized distribution. Keeping the event count separately preserves
         rate information. The bounded observable is
-        \(z_\eta=1/[1+\exp(-o_\eta/a)]\), with one fixed positive scale
-        \(a=\texttt{run.config['score\_scale']}\) for the run. This invertible
+        $z_\eta=1/[1+\exp(-o_\eta/a)]$, with one fixed positive scale
+        $a=\texttt{run.config['score\_scale']}$ for the run. This invertible
         transformation preserves the unbinned score information. Its scale
         affects how efficiently a finite uniform binning resolves the score.
         """),
@@ -1528,16 +1528,16 @@ def build():
         md(r"""
         ### Freeze the observable inside each likelihood fit
 
-        For the test of \(\mu_0\), construct \(z_{\eta=\mu_0}\) at nominal
-        \(\alpha_{NI}=0\), then keep its bin edges, event assignments, and Asimov data
-        fixed while fitting all physical alternatives \(\mu\). Thus,
-        \[
+        For the test of $\mu_0$, construct $z_{\eta=\mu_0}$ at nominal
+        $\alpha_{NI}=0$, then keep its bin edges, event assignments, and Asimov data
+        fixed while fitting all physical alternatives $\mu$. Thus,
+        $$
         t(\mu_0)=-2\log\frac{L(\mu_0;\eta=\mu_0)}
                                    {\max_\mu L(\mu;\eta=\mu_0)}.
-        \]
-        The Asimov data must also be re-histogrammed when \(\eta\) changes.
+        $$
+        The Asimov data must also be re-histogrammed when $\eta$ changes.
         The binned likelihood is an independent Poisson likelihood for disjoint
-        bins of a Poisson point process. This notebook fixes \(\alpha_{NI}=0\),
+        bins of a Poisson point process. This notebook fixes $\alpha_{NI}=0$,
         where the scalar score has its clean local guarantee.
         """),
         md(UNBINNED_ASIMOV_REFRESH_INTRO),
@@ -1550,10 +1550,10 @@ def build():
 
         Two information losses must be distinguished:
 
-        1. **Compression** from \(x\) to \(o_\eta\). Before binning, the exact
-           score retains the local Fisher information at \(\mu=\eta\).
+        1. **Compression** from $x$ to $o_\eta$. Before binning, the exact
+           score retains the local Fisher information at $\mu=\eta$.
         2. **Finite binning** of that score. At the anchor its shape-information
-           loss is \(E_\eta[\operatorname{Var}_\eta(o_\eta\mid\text{bin})]\).
+           loss is $E_\eta[\operatorname{Var}_\eta(o_\eta\mid\text{bin})]$.
 
         Finer nested bins reduce the second loss. They do not automatically
         restore global likelihood information removed by scalar compression.
@@ -1562,8 +1562,8 @@ def build():
         locally; exact equality over a broad interference scan is not guaranteed.
         The tables report deviations rather than assuming convergence to zero.
 
-        In a fixed generating Asimov experiment, \(\mu_*\) and the tested
-        \(\eta\) differ away from the minimum. This is precisely where local
+        In a fixed generating Asimov experiment, $\mu_*$ and the tested
+        $\eta$ differ away from the minimum. This is precisely where local
         optimality must not be mistaken for global sufficiency.
         """),
         code(fidelity_plot_code('04')),
@@ -1606,12 +1606,12 @@ def build():
         and varied templates keep their exact empty-bin support. No
         extrapolation beyond the anchor range is permitted.
 
-        The score can change rapidly as \(\eta\) crosses the interference
+        The score can change rapidly as $\eta$ crosses the interference
         turnover, moving expected yields between fixed bins. The spline grid
         therefore combines uniform anchors over the scan range with a focused
         grid around the turnover calculated from **expected nominal yields**.
         Production uses 2,401 uniform anchors and 1,201 focused anchors within
-        \(\pm0.1\) of that point; smoke mode uses 241 and 121. The generating
+        $\pm0.1$ of that point; smoke mode uses 241 and 121. The generating
         value is included, duplicates are removed, and the focused interval is
         clipped to the scan range. These settings are configurable through
         `spline_anchors`, `spline_focus_anchors`, and `spline_focus_halfwidth`.
@@ -1643,14 +1643,14 @@ def build():
           tests the distinction between two morphing prescriptions.
         - **Learned vs analytical unbinned:** tests ratio estimation.
         - **Score histograms vs the full unbinned model:** includes the effects
-          of scalar compression, particularly when \(\alpha_{NI}\) is profiled.
+          of scalar compression, particularly when $\alpha_{NI}$ is profiled.
 
-        A scalar \(\mu\)-score at \(\alpha_{NI}=0\) does not automatically
+        A scalar $\mu$-score at $\alpha_{NI}=0$ does not automatically
         preserve all profiled information. A joint score vector, or a suitable
         efficient score, is a natural extension. This example measures the
         agreement obtained by the requested scalar construction.
 
-        Notebook 4's \(\sigma_\mu(\eta)\) and \(\hat\mu(\eta)\) study uses the
+        Notebook 4's $\sigma_\mu(\eta)$ and $\hat\mu(\eta)$ study uses the
         same frozen-fit convention. Those local widths help explain sensitivity
         near the generating minimum; this complete profile scan also reveals
         the secondary minimum and any disconnected low-test-statistic regions.
@@ -1667,7 +1667,7 @@ def build():
         ### Further experiments
 
         Increase the integration statistics to test numerical stability; widen
-        the scan to expose interference effects; compare a fixed \(\eta=\mu_*\)
+        the scan to expose interference effects; compare a fixed $\eta=\mu_*$
         score with the moving score; or add nuisance-score components. An
         interval-coverage study would require genuine pseudo-experiments and
         calibration of the chosen statistic, beyond these Asimov comparisons.
@@ -1680,7 +1680,7 @@ def ratio_histogram_cells():
     """Parallel of notebook 4 with explicit ratio-specific statistical claims."""
     cells = start("6. Analytical density-ratio histograms", r"""
     Repeat notebook 4 with the exact density-ratio observable
-    \(z_\eta=r_\eta/(1+r_\eta)\). Use the same selected events, analytical
+    $z_\eta=r_\eta/(1+r_\eta)$. Use the same selected events, analytical
     Asimov data, physical model, binning study, and fit convention. Only the
     scalar observable changes. Run notebooks 1–3 first; no network retraining
     or new Monte Carlo generation is needed. Running notebook 4 also permits
@@ -1691,35 +1691,35 @@ def ratio_histogram_cells():
         ### The ratio of normalized, selected densities
 
         Use the same selected phase space and yield factors as notebook 4:
-        \[
+        $$
         D_\eta(x)=(\eta-\sqrt\eta)\lambda_Sp_S(x)
         +\sqrt\eta\lambda_{SBI}p_{SBI}(x)
         +(1-\sqrt\eta)\lambda_Bp_B(x)+\lambda_{NI}p_{NI}(x),
-        \]
-        \[
+        $$
+        $$
         \Lambda_\eta=(\eta-\sqrt\eta)\lambda_S
         +\sqrt\eta\lambda_{SBI}+(1-\sqrt\eta)\lambda_B+\lambda_{NI}.
-        \]
-        Here every \(p_j\) is a normalized **selected** process density and
-        every \(\lambda_j\) is its selected yield. At nominal \(\alpha_{NI}=0\),
-        \[
+        $$
+        Here every $p_j$ is a normalized **selected** process density and
+        every $\lambda_j$ is its selected yield. At nominal $\alpha_{NI}=0$,
+        $$
         r_\eta(x)=\frac{p(x;\eta,0)}{p_S(x)}
         =\frac{D_\eta(x)/\Lambda_\eta}{D_S(x)/\lambda_S},
         \qquad D_S(x)=\lambda_Sp_S(x),\qquad
         \boxed{z_\eta(x)=\frac{r_\eta(x)}{1+r_\eta(x)}}.
-        \]
+        $$
         The analytical Gaussian components and selected rates are evaluated
         on the same final quadrature. This is an exact analytical construction
         within that numerical integration, **not a learned ratio**. There is
         no score-scale factor. The monotone map places positive ratios between
         zero and one without changing their event ordering.
 
-        For each fixed \(\eta\), this ordering is optimal for the binary
-        comparison of the selected \(p(x;\eta,0)\) with the selected S reference.
+        For each fixed $\eta$, this ordering is optimal for the binary
+        comparison of the selected $p(x;\eta,0)$ with the selected S reference.
         That binary statement does not make the scalar sufficient for the
-        physical \(\mu\)-family. In particular, its unbinned local Fisher
-        information at \(\mu=\eta\) need not equal that of the full event: the
-        score \(\partial_\mu\log p\) need not be a function of \(r_\eta\).
+        physical $\mu$-family. In particular, its unbinned local Fisher
+        information at $\mu=\eta$ need not equal that of the full event: the
+        score $\partial_\mu\log p$ need not be a function of $r_\eta$.
         Keeping the Poisson event count retains the separate rate information.
         """),
         md(SCORE_DISTRIBUTIONS_INTRO),
@@ -1727,14 +1727,14 @@ def ratio_histogram_cells():
         md(r"""
         ### Freeze the observable inside each likelihood fit
 
-        For the test of \(\mu_0\), construct \(z_{\eta=\mu_0}\) at
-        \(\alpha_{NI}=0\), then freeze its bin edges, event assignments, and
-        Asimov data while fitting all physical alternatives \(\mu\):
-        \[
+        For the test of $\mu_0$, construct $z_{\eta=\mu_0}$ at
+        $\alpha_{NI}=0$, then freeze its bin edges, event assignments, and
+        Asimov data while fitting all physical alternatives $\mu$:
+        $$
         t(\mu_0)=-2\log\frac{L(\mu_0;\eta=\mu_0)}
                                   {\max_\mu L(\mu;\eta=\mu_0)}.
-        \]
-        Refill the same analytical Asimov expectation when \(\eta\) changes.
+        $$
+        Refill the same analytical Asimov expectation when $\eta$ changes.
         The coarsening scan below fixes NI at nominal, as in notebook 4.
         Moving the construction point to the tested hypothesis does not create
         the score's local information-preservation guarantee for this ratio.
@@ -1771,13 +1771,13 @@ def ratio_histogram_cells():
         md(r"""
         ### Distinguish ratio compression from finite binning
 
-        Compression from \(x\) to \(r_\eta(x)\) can lose local information
+        Compression from $x$ to $r_\eta(x)$ can lose local information
         before any bins are introduced. At a fixed truth, its per-event shape
         Fisher-information loss is the conditional score variance
-        \[
+        $$
         I_X^{\rm shape}-I_{r_\eta}^{\rm shape}
         =E[\operatorname{Var}(\partial_\mu\log p(X;\mu)\mid r_\eta(X))].
-        \]
+        $$
         It vanishes only when the relevant score is determined by the ratio.
         The extended diagnostic multiplies the per-event information by the
         expected event count and adds the Poisson rate information.
@@ -1786,7 +1786,7 @@ def ratio_histogram_cells():
         sequence, so every successive point need not improve monotonically.
 
         Fine bins approach the unbinned **ratio experiment**, which may differ
-        from the full unbinned event experiment even at \(\mu=\eta\). The Fisher
+        from the full unbinned event experiment even at $\mu=\eta$. The Fisher
         table measures that total loss without assuming it vanishes. Compare
         with notebook 4's corresponding score table at the same anchors and
         resolutions. Both histogram studies use analytical Asimov data, so their
@@ -1800,8 +1800,8 @@ def ratio_histogram_cells():
         run configuration, just as notebook 4 does. The local `BIN_COUNTS`
         override above affects only the coarsening study. Using the same
         estimator resolution makes the score/ratio comparison controlled.
-        Changing \(\eta\) changes a frozen observable, not the generating data.
-        A flat \(\hat\mu(\eta)\) does not establish information sufficiency:
+        Changing $\eta$ changes a frozen observable, not the generating data.
+        A flat $\hat\mu(\eta)$ does not establish information sufficiency:
         the local width can still increase after ratio compression.
         """),
         code(r'''
@@ -1826,7 +1826,7 @@ def ratio_spline_cells():
     """Parallel of notebook 5 with the same ratio construction as notebook 6."""
     cells = start("7. Density-ratio spline templates and profiled fits", r"""
     Repeat notebook 5 with the analytical normalized-density ratio observable
-    \(z_\eta=r_\eta/(1+r_\eta)\) from notebook 6. The physical model, selected
+    $z_\eta=r_\eta/(1+r_\eta)$ from notebook 6. The physical model, selected
     samples, analytical Asimov data, spline method, NI nuisance interpolation,
     and Gaussian auxiliary constraint are unchanged. Run notebooks 1–3 and 6
     first. The outputs are separate from the score-template study.
@@ -1835,11 +1835,11 @@ def ratio_spline_cells():
         md(SPLINE_COORDINATE_INTRO),
         md(r"""
         Here the frozen scalar is
-        \[
+        $$
         z_\eta(x)=\frac{r_\eta(x)}{1+r_\eta(x)},\qquad
         r_\eta(x)=\frac{D_\eta(x)/\Lambda_\eta}{D_S(x)/\lambda_S}
         \quad(\alpha_{NI}=0).
-        \]
+        $$
         Both densities are normalized after the same fixed preselection, using
         the common quadrature. There is no score-scale parameter and no neural
         estimate in this observable. Changing the histogram coordinate does not
@@ -1900,10 +1900,10 @@ def ratio_spline_cells():
           compression loss, as well as finite binning and the nuisance-morph
           difference. It has no automatic local Fisher-preservation guarantee.
 
-        The ratio gives the binary ordering for \(\eta\) versus the S reference.
+        The ratio gives the binary ordering for $\eta$ versus the S reference.
         A scalar preserving that ordering need not retain all information about
-        the physical \(\mu\)-family, particularly with NI profiled. Notebook
-        6's \(\sigma_\mu(\eta)\) and \(\hat\mu(\eta)\) curves describe the same
+        the physical $\mu$-family, particularly with NI profiled. Notebook
+        6's $\sigma_\mu(\eta)$ and $\hat\mu(\eta)$ curves describe the same
         fixed-truth frozen-fit convention. Those local widths are not global
         confidence intervals across separate likelihood minima.
         """),
@@ -1920,7 +1920,7 @@ def ratio_spline_cells():
 
         Compare ratio and score results at matching bin counts and anchors;
         increase integration statistics to separate numerical fluctuations from
-        scalar-compression loss; or compare a fixed \(\eta=\mu_*\) ratio with
+        scalar-compression loss; or compare a fixed $\eta=\mu_*$ ratio with
         the moving ratio. A coverage study needs pseudo-experiments and
         calibration beyond these analytical and model-Asimov comparisons.
         """),

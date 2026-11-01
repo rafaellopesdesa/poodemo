@@ -226,15 +226,15 @@ def diagnostic_cells():
         md(r"""
         # 12. Why do the toy test-statistic distributions differ?
 
-        Diagnose the notebook 11 results at **\(\mu=0\) and \(1.4\)** without
+        Diagnose the notebook 11 results at **$\mu=0$ and $1.4$** without
         changing the physics model or trained networks. We separate competing
         likelihood minima, numerical minimization, integration error, and
         finite-bin compression. All fits remain **stat-only** and use the same
-        two-sided \(q_\mu=-2\log[L(\mu)/L(\hat\mu)]\).
+        two-sided $q_\mu=-2\log[L(\mu)/L(\hat\mu)]$.
 
         | Stage | Question | Additional cost |
         |---|---|---|
-        | Saved-record analysis | Does a different minimum explain the paired \(q_\mu\) differences? | Tables and plots only |
+        | Saved-record analysis | Does a different minimum explain the paired $q_\mu$ differences? | Tables and plots only |
         | Coverage bootstrap | How uncertain are the empirical calibration thresholds and their transfer? | Resampling existing toy records |
         | Independent integration | Do simulator bin means and expected scores agree with the frozen model? | New integration proposals and frozen preselection |
         | Paired refits | Does the result change with finer minimization, wider bounds, more bins, or new integrals? | Reconstructed selected experiments and fits |
@@ -251,7 +251,7 @@ def diagnostic_cells():
 
         The original exposure, tested hypotheses, observable power, random seed,
         and 12-bin definition are read from the saved notebook 11 metadata.
-        The \(\eta=\mu_{\rm test}\) observable and its normalization constants
+        The $\eta=\mu_{\rm test}$ observable and its normalization constants
         stay frozen during every fit and integration comparison.
 
         Defaults use 1,000 coverage bootstrap replicates; two independent banks
@@ -268,7 +268,7 @@ def diagnostic_cells():
         are rejected rather than mixed.
 
         `BRANCH_SPLIT=1` is a descriptive threshold separating the low- and
-        high-\(\mu\) solutions. It is not a new physical bound or an optimizer
+        high-$\mu$ solutions. It is not a new physical bound or an optimizer
         setting. At truth 1.4 the high branch is the branch containing the truth.
         """),
         code(SETTINGS),
@@ -279,8 +279,8 @@ def diagnostic_cells():
         experiment. Pair by **tested hypothesis and toy ID**, retaining failure
         flags, rather than comparing independent histogram fluctuations.
 
-        Inspect \(\hat\mu_{\rm binned}\) versus \(\hat\mu_{\rm analytic}\), then
-        \(\Delta q=q_{\rm binned}-q_{\rm analytic}\) within each pair of branches.
+        Inspect $\hat\mu_{\rm binned}$ versus $\hat\mu_{\rm analytic}$, then
+        $\Delta q=q_{\rm binned}-q_{\rm analytic}$ within each pair of branches.
         A concentration of large differences in branch-disagreeing experiments
         would support the competing-minimum explanation. Comparisons within
         the same branch check whether that explanation is sufficient.
@@ -299,8 +299,8 @@ def diagnostic_cells():
 
         Interpret the results as uncertainty conditional on the saved model and
         integration bank. They do not include finite-MC uncertainty in its
-        templates or in the trained ratios. At \(\mu=0\), the point mass at
-        \(q=0\) makes empirical quantiles discontinuous and nonrandomized
+        templates or in the trained ratios. At $\mu=0$, the point mass at
+        $q=0$ makes empirical quantiles discontinuous and nonrandomized
         acceptance can be conservative; bootstrap intervals are a diagnostic,
         not an exact coverage guarantee. The extreme log-scale tail remains
         limited by the number of available toys.
@@ -336,17 +336,17 @@ def diagnostic_cells():
         original bank are also tabulated, but its observable normalizers depend
         on that bank: a naive old-plus-new quadrature error is not an exact pull.
 
-        At the boundary, use \(\kappa=\sqrt\mu\). For fixed bin means
-        \(\nu_i^{\rm model}(\kappa)\), the expected score is
-        \[
+        At the boundary, use $\kappa=\sqrt\mu$. For fixed bin means
+        $\nu_i^{\rm model}(\kappa)$, the expected score is
+        $$
         E_{\rm true}[U_\kappa]
         =\sum_i\left(\frac{\nu_i^{\rm true}}{\nu_i^{\rm model}}-1\right)
         \frac{\partial\nu_i^{\rm model}}{\partial\kappa},\qquad
         I_{\kappa\kappa}
         =\sum_i\frac{(\partial_\kappa\nu_i^{\rm model})^2}
         {\nu_i^{\rm model}}.
-        \]
-        Inspect \(E[U_\kappa]/\sqrt{I_{\kappa\kappa}}\), with its integration
+        $$
+        Inspect $E[U_\kappa]/\sqrt{I_{\kappa\kappa}}$, with its integration
         uncertainty. A negative expected score can leave the constrained Asimov
         MLE at zero while changing how often fluctuated experiments land on the
         boundary. This local score does not predict which distant minimum wins;
@@ -356,7 +356,7 @@ def diagnostic_cells():
 
         The 36-bin templates below subdivide the original 12 bins into three;
         they preserve their boundaries and keep 0.5 inside a bin. They use the
-        **same power \(a\)**. No spline interpolation is introduced.
+        **same power $a$**. No spline interpolation is introduced.
         """),
         code(INTEGRATION_RUN),
         md(r"""
@@ -365,8 +365,8 @@ def diagnostic_cells():
         The original seed, tested hypothesis, toy ID, and simulator stream
         reconstruct the same experiments used in notebook 11. First check the
         original fit settings; then compare a denser minimization on the same
-        range and a fit extended to \(0\leq\mu\leq3\). The notebook checks
-        reproduced counts, \(q\), and \(\hat\mu\) before showing the diagnostic
+        range and a fit extended to $0\leq\mu\leq3$. The notebook checks
+        reproduced counts, $q$, and $\hat\mu$ before showing the diagnostic
         summary; a mismatch for an originally valid fit stops interpretation.
 
         The random subset supports comparisons representative of the saved
@@ -393,10 +393,10 @@ def diagnostic_cells():
         would mean the wider range still needs investigation; 3 is a diagnostic
         choice, not a proof that the global minimum has been found.
 
-        More bins need not move every individual \(q_\mu\) monotonically toward
+        More bins need not move every individual $q_\mu$ monotonically toward
         the unbinned value: both the numerator and fitted denominator change.
         Use paired differences, branch changes, and the random-subset summaries
-        together. We keep \(a\) fixed so a separate future transformation study
+        together. We keep $a$ fixed so a separate future transformation study
         does not become confounded with this bin-count comparison.
         """),
         code(REFITS_RUN),
@@ -568,8 +568,8 @@ def convergence_cells():
 
         This addresses two questions separately: whether the result changes
         when replacing replica 0 by replica 1, and whether those changes shrink
-        as each bank grows. We compare mean \(q_\mu\), the paired
-        binned-minus-analytical difference, the zero-\(q\) fraction, and branch
+        as each bank grows. We compare mean $q_\mu$, the paired
+        binned-minus-analytical difference, the zero-$q$ fraction, and branch
         disagreement. The 12-bin model and its nested 36-bin refinement use the
         same events, fit bounds, minimizer, and integration proposals.
 
@@ -768,30 +768,30 @@ def decomposition_cells():
         again. Keep its `SOURCE_TAG`, `OUTPUT_TAG` and `CONVERGENCE_TAG` below.
 
         We separate two reasons why the binned and analytical test statistics
-        can differ. With the observable frozen at \(\eta=\mu_{\rm test}\), define
-        for either likelihood \(m\)
+        can differ. With the observable frozen at $\eta=\mu_{\rm test}$, define
+        for either likelihood $m$
 
-        \[
+        $$
         D_{m,\eta}(\mu)=-2\log\frac{L_{m,\eta}(\mu)}{L_{m,\eta}(1)},\qquad
         q_m(\eta)=D_{m,\eta}(\eta)-D_{m,\eta}(\hat\mu_m).
-        \]
+        $$
 
         The unbinned analytical likelihood does not itself depend on the
-        observable partition. The subscript \(\eta\) records the matched bank
+        observable partition. The subscript $\eta$ records the matched bank
         and frozen partition used in its comparison with the binned model.
-        Writing \(\Delta=\mathrm{binned}-\mathrm{analytical}\),
+        Writing $\Delta=\mathrm{binned}-\mathrm{analytical}$,
 
-        \[
+        $$
         \boxed{\Delta q=\underbrace{\Delta D(\eta)}_{\text{fixed-pair term}}
         -\underbrace{\Delta D(\hat\mu)}_{\text{minimum term}}.}
-        \]
+        $$
 
         Here the minimum term uses **each model's own saved best fit**. It is
         not the difference evaluated at one common best-fit parameter. Its
-        contribution to \(\Delta q\) has a minus sign.
+        contribution to $\Delta q$ has a minus sign.
 
-        The fixed-pair term tests the comparison between \(\eta\) and the
-        reference \(1\) that the ratio observable is designed to preserve
+        The fixed-pair term tests the comparison between $\eta$ and the
+        reference $1$ that the ratio observable is designed to preserve
         before binning. The minimum term tests the change in improvement of
         fit when the denominator is free to explore the full parameter range.
         Finite bins and finite integration samples can affect both terms.
@@ -807,8 +807,8 @@ def decomposition_cells():
         preselection, and shared by all comparisons. No ratio-network evaluation
         or optimization is required in this stage.
 
-        We evaluate \(D(\eta)\) and \(D(\hat\mu)\) at the stored fit result and
-        check that their difference reproduces the saved \(q\). The context,
+        We evaluate $D(\eta)$ and $D(\hat\mu)$ at the stored fit result and
+        check that their difference reproduces the saved $q$. The context,
         predictions, fit settings, selected toy IDs and reconstructed event
         coordinates are checked against section 6. Missing or incompatible
         inputs fail visibly rather than triggering new fits or bank generation.
@@ -830,7 +830,7 @@ def decomposition_cells():
         Inspect the signed mean **and RMS** of each term: a small signed mean
         can conceal cancellation between large positive and negative errors.
         The per-toy plots identify whether the two fitted minima occupy the
-        same or different branches, using the saved split at \(\mu=1\).
+        same or different branches, using the saved split at $\mu=1$.
         This branch label is an operational diagnostic, not a fit constraint.
 
         All signed decomposition axes are **linear**, because these quantities
@@ -856,10 +856,10 @@ def decomposition_cells():
           interpreting the corresponding conditional means or tails.
 
         A possible subsequent control is the two-dimensional analytical
-        statistic \((u,v)\), with the event count, where
-        \(u=I/(B+\mathrm{NI})\), \(v=S/(B+\mathrm{NI})\) and
-        \(I=\mathrm{SBI}-S-B\). For \(\kappa=\sqrt\mu\), the stat-only intensity
-        is \(\lambda_\kappa=(B+\mathrm{NI})(1+\kappa u+\kappa^2v)\).
+        statistic $(u,v)$, with the event count, where
+        $u=I/(B+\mathrm{NI})$, $v=S/(B+\mathrm{NI})$ and
+        $I=\mathrm{SBI}-S-B$. For $\kappa=\sqrt\mu$, the stat-only intensity
+        is $\lambda_\kappa=(B+\mathrm{NI})(1+\kappa u+\kappa^2v)$.
         Before binning this retains the parameter dependence of the full
         family wherever the reference intensity is positive. A finite 2D
         histogram would still have binning and integration errors. This section
@@ -868,7 +868,7 @@ def decomposition_cells():
         These tests do not recalibrate confidence intervals. Once the numerical
         and compression contributions are understood, assess coverage using
         each binned model's own toys and physical simulator toys. Agreement with
-        the analytical distribution of \(q\) is not itself a coverage criterion.
+        the analytical distribution of $q$ is not itself a coverage criterion.
         """),
     ]
     cells[0].metadata["poodemo_append_section"] = DECOMPOSITION_MARKER
@@ -1024,19 +1024,19 @@ def family_cells():
         while some toys still select different minima. Here we directly measure
         the evidence separating the two branches, and add a two-dimensional
         analytical control that retains the **full stat-only family before
-        binning**. Write \(C=B+\mathrm{NI}\), \(I=\mathrm{SBI}-S-B\), and
-        \[
+        binning**. Write $C=B+\mathrm{NI}$, $I=\mathrm{SBI}-S-B$, and
+        $$
         u(x)=\frac{I(x)}{C(x)},\qquad v(x)=\frac{S(x)}{C(x)},\qquad
         \lambda(x;\kappa)=C(x)\,[1+\kappa u(x)+\kappa^2v(x)],\quad
         \kappa=\sqrt\mu.
-        \]
-        The factor \(C(x)\) cancels in likelihood ratios. Consequently the
-        event count and unbinned \((u,v)\) retain this model's parameter
+        $$
+        The factor $C(x)$ cancels in likelihood ratios. Consequently the
+        event count and unbinned $(u,v)$ retain this model's parameter
         dependence. We check that identity numerically on each reconstructed
         experiment before interpreting the binned control.
 
         We compare the analytical likelihood, the existing 12/36-bin scalar
-        observable, and **12x12/36x36 histograms of \((u,v)\)**, on the same
+        observable, and **12x12/36x36 histograms of $(u,v)$**, on the same
         toys and integration proposals. The 2D histograms are still finite
         approximations; sufficiency of their unbinned coordinates does not
         guarantee that any particular 2D grid is adequate.
@@ -1046,11 +1046,11 @@ def family_cells():
         #### Replay the same integration points into a frozen two-dimensional grid
 
         Each axis uses quantiles of the original integration bank, weighted by
-        \(B+\mathrm{NI}\). Boundaries are fixed before looking at toy outcomes
-        and stay independent of \(\mu\), \(\eta\), bank replica and fit result.
+        $B+\mathrm{NI}$. Boundaries are fixed before looking at toy outcomes
+        and stay independent of $\mu$, $\eta$, bank replica and fit result.
         The 36-bin axis refines the 12-bin axis, so the two grids are nested.
         Infinite outer edges retain the tails. Heatmap axes show quantile-bin
-        coordinates, rather than a uniform spacing in physical \(u\) or \(v\).
+        coordinates, rather than a uniform spacing in physical $u$ or $v$.
 
         **This stage adds computation:** earlier checkpoints retained component
         sums, not event coordinates, so those sums cannot be rebinned into 2D.
@@ -1072,12 +1072,12 @@ def family_cells():
         md(r"""
         #### Fit both branches and separate changed evidence from movement of minima
 
-        With \(D_m(\mu)=-2\log[L_m(\mu)/L_m(1)]\), define
-        \[
+        With $D_m(\mu)=-2\log[L_m(\mu)/L_m(1)]$, define
+        $$
         G_m=\min_{\mu\in[1,3]}D_m(\mu)
              -\min_{\mu\in[0,1]}D_m(\mu).
-        \]
-        **Negative \(G_m\) favors the high branch; positive \(G_m\) favors the
+        $$
+        **Negative $G_m$ favors the high branch; positive $G_m$ favors the
         low branch.** The actual bounds and split follow the saved study.
         Ties and a winning minimum at the shared split are flagged as ambiguous.
         Each branch's split-boundary flag is also recorded: a losing constrained
@@ -1086,11 +1086,11 @@ def family_cells():
 
         To explain a shift in preference, evaluate every binned model at the
         **same two analytical branch minima**:
-        \[
+        $$
         C_m=D_m(\hat\mu_H^{A})-D_m(\hat\mu_L^{A}),\qquad
         G_m-G_A=\underbrace{C_m-G_A}_{\text{same-hypothesis evidence change}}
               +\underbrace{G_m-C_m}_{\text{within-branch refitting change}}.
-        \]
+        $$
         A negative first term means the histogram makes the analytical high
         solution relatively more attractive even before moving either fitted
         point. A negative second term means additional movement of the branch
@@ -1108,7 +1108,7 @@ def family_cells():
         md(r"""
         #### Inspect the branch preference, full scans and 2D support together
 
-        The \(G_m\)-versus-\(G_A\) plots show which toys cross zero and change
+        The $G_m$-versus-$G_A$ plots show which toys cross zero and change
         branch. The signed means and RMS distinguish a systematic shift from
         broadening. Full scans show whether the same high solution became less
         penalized, or whether the fitted point itself moved. The largest-bank
@@ -1140,7 +1140,7 @@ def family_cells():
         This control uses analytical component densities throughout. It does
         not attribute an observed effect to NN calibration, and it does not
         recalibrate confidence intervals. The scalar observable still uses
-        reference \(\mu=1\); testing a reference based on each experiment's
+        reference $\mu=1$; testing a reference based on each experiment's
         unbinned MLE remains a separate follow-up. Notebooks 08–11 and their
         production binning are unchanged by this diagnostic.
         """),
@@ -1287,13 +1287,13 @@ def mle_reference_cells():
         binned fit for every toy and tested hypothesis. The change here is the
         **reference defining the observable**, not removal or addition of a fit.
         First fit the analytical unbinned likelihood to this toy and integration
-        bank, obtaining \(\hat\mu_A\). Then compare
-        \[
+        bank, obtaining $\hat\mu_A$. Then compare
+        $$
         t_{\eta,1}(x)=F_a\!\left(\frac{p(x;\eta)}{p(x;1)}\right),\qquad
         t_{\eta,\hat\mu_A}(x)=F_a\!\left(
           \frac{p(x;\eta)}{p(x;\hat\mu_A)}\right),\qquad
         F_a(R)=\frac{R^a}{1+R^a}.
-        \]
+        $$
         For each choice we use matched 12/36-bin predictions from the same MC
         events, histogram the same physical toy, and freely fit both branches.
         The fixed-reference predictions are reused and checked; the new
@@ -1301,7 +1301,7 @@ def mle_reference_cells():
         **The chosen reference and mapping stay frozen throughout that fit.**
         The analytical MLE is explicitly included among the fit candidates.
 
-        The bin boundaries, power \(a\), and original-bank normalizers defining
+        The bin boundaries, power $a$, and original-bank normalizers defining
         the densities stay unchanged, isolating the effect of the reference.
         The analytical reference is determined separately for each toy and bank;
         comparisons between banks consequently include changes in both the
@@ -1334,30 +1334,30 @@ def mle_reference_cells():
         md(r"""
         #### Separate the intended comparison from the gain of the free fit
 
-        For either binned mapping \(B\), let
-        \(D_B(\mu)=-2\log[L_B(\mu)/L_B(1)]\). With the same analytical
-        best fit \(\hat\mu_A\), calculate
-        \[
+        For either binned mapping $B$, let
+        $D_B(\mu)=-2\log[L_B(\mu)/L_B(1)]$. With the same analytical
+        best fit $\hat\mu_A$, calculate
+        $$
         q_{\mathrm{pair},B}=D_B(\eta)-D_B(\hat\mu_A),\qquad
         g_B=D_B(\hat\mu_A)-D_B(\hat\mu_B)\geq0,
-        \]
-        \[
+        $$
+        $$
         q_B-q_A=
         \underbrace{q_{\mathrm{pair},B}-q_A}_{\delta_{\mathrm{pair}}}
         +\underbrace{g_B}_{\text{additional gain from the free binned fit}}.
-        \]
+        $$
         The signed pair statistic is **not truncated at zero**. A small pair
         error but large gain means the intended comparison is reproduced while
         the compressed likelihood still finds a more favorable denominator.
         Fits retain the physical bounds and both branches of section 6.
 
         **Exact degeneracy is part of the test.** If
-        \(\eta=\hat\mu_A\), every event maps to exactly \(0.5\), inside a
+        $\eta=\hat\mu_A$, every event maps to exactly $0.5$, inside a
         bin rather than on an edge. The mapping is then yield-only. Its pair
         statistic vanishes, but its free-fit gain need not vanish. We keep these
         toys, compare their fits with an independent one-bin yield likelihood,
         and report them separately from the nondegenerate population. We do
-        not move the reference, jitter the observable, or force \(q_B=0\).
+        not move the reference, jitter the observable, or force $q_B=0$.
 
         Near equality can also compress events into very few bins at the
         existing power. The records include reference separation and both
@@ -1384,10 +1384,10 @@ def mle_reference_cells():
         #### How to interpret this test
 
         - Smaller pair errors would show that the MLE reference improves the
-          intended \(\eta\)-versus-\(\hat\mu_A\) comparison at this binning.
+          intended $\eta$-versus-$\hat\mu_A$ comparison at this binning.
         - A remaining free-fit gain would show that preserving this comparison
           does not force the compressed likelihood maximum to remain at
-          \(\hat\mu_A\). Inspect its branch and full scan.
+          $\hat\mu_A$. Inspect its branch and full scan.
         - Separate exact-degenerate, nearly degenerate and well-separated
           references before attributing changes to the choice of reference.
         - Agreement between banks supports stability of the comparison but
@@ -1539,25 +1539,25 @@ def shifted_reference_cells():
         cache is reused. No generation or training changes are needed.
 
         Test whether shifting only the denominator is sufficient to improve
-        the scalar observable. For each physical tested hypothesis \(\eta\),
+        the scalar observable. For each physical tested hypothesis $\eta$,
         compare these four **fixed** mappings:
 
         | Variant | Ratio defining the observable |
         |---|---|
-        | Unshifted baseline | \(r(x;\eta)/r(x;1)\) |
-        | Numerator only | \(r(x;\eta+\epsilon)/r(x;1)\) |
-        | Denominator only | \(r(x;\eta)/r(x;1+\delta)\) |
-        | Both endpoints | \(r(x;\eta+\epsilon)/r(x;1+\delta)\) |
+        | Unshifted baseline | $r(x;\eta)/r(x;1)$ |
+        | Numerator only | $r(x;\eta+\epsilon)/r(x;1)$ |
+        | Denominator only | $r(x;\eta)/r(x;1+\delta)$ |
+        | Both endpoints | $r(x;\eta+\epsilon)/r(x;1+\delta)$ |
 
-        Defaults are \(\epsilon=\delta=0.1\). At \(\eta=0\), this gives
-        endpoint pairs \((0,1),(0.1,1),(0,1.1),(0.1,1.1)\). At
-        \(\eta=1.4\), it gives \((1.4,1),(1.5,1),(1.4,1.1),(1.5,1.1)\).
-        These offsets are in \(\mu\), not \(\sqrt\mu\); moving from zero
+        Defaults are $\epsilon=\delta=0.1$. At $\eta=0$, this gives
+        endpoint pairs $(0,1),(0.1,1),(0,1.1),(0.1,1.1)$. At
+        $\eta=1.4$, it gives $(1.4,1),(1.5,1),(1.4,1.1),(1.5,1.1)$.
+        These offsets are in $\mu$, not $\sqrt\mu$; moving from zero
         to 0.1 is a displacement of about 0.316 in the amplitude parameter.
 
         Only the **observable** changes. Toys and the numerator of the test
-        statistic remain at their actual physical \(\eta=0\) or \(1.4\).
-        The expected bin yields retain their full physical \(\mu\) dependence,
+        statistic remain at their actual physical $\eta=0$ or $1.4$.
+        The expected bin yields retain their full physical $\mu$ dependence,
         and every binned denominator is freely fitted across both branches.
         """),
         code(SHIFTED_REFERENCE_SETUP),
@@ -1566,7 +1566,7 @@ def shifted_reference_cells():
 
         As in the preceding compression controls, the ratios are evaluated
         from **analytical component densities**, isolating information loss
-        from neural calibration. We use \(T=\operatorname{sigmoid}(a\log R)\)
+        from neural calibration. We use $T=\operatorname{sigmoid}(a\log R)$
         with the saved power, original density normalizers, and the same
         12/36-bin edges; 0.5 remains inside a bin. This is a controlled change
         of endpoints, without simultaneous power or bin optimization.
@@ -1588,11 +1588,11 @@ def shifted_reference_cells():
         hashes. The unshifted analytical and binned controls must reproduce
         section 6 before interpreting a shift. The same free-fit decomposition
         is evaluated for every mapping:
-        \[
+        $$
         q_B-q_A=
         \underbrace{D_B(\eta)-D_B(\hat\mu_A)-q_A}_{\delta_{\rm pair}}
         +\underbrace{D_B(\hat\mu_A)-D_B(\hat\mu_B)}_{g_B\geq0}.
-        \]
+        $$
         The analytical MLE is used as a common diagnostic anchor; it does not
         set these observable endpoints or constrain the binned fit. The pair
         term stays signed. Unsupported observations and failed fits are
@@ -1614,7 +1614,7 @@ def shifted_reference_cells():
 
         Look first at the **denominator-only versus unshifted** comparison for
         36 bins, then check consistency at 12 bins and in the other bank.
-        Inspect RMS \(\Delta q\), paired squared-error changes, branch
+        Inspect RMS $\Delta q$, paired squared-error changes, branch
         agreement and the pair/refit decomposition together. Occupied observed
         and predicted bins help determine whether a change also improves use
         of the fixed binning. Shifts can change both the retained direction and
@@ -1625,7 +1625,7 @@ def shifted_reference_cells():
         md(r"""
         #### What this comparison can establish
 
-        Neither physical hypothesis \(\mu=0\) nor \(\mu=1\) is itself
+        Neither physical hypothesis $\mu=0$ nor $\mu=1$ is itself
         degenerate. Equal ratio endpoints produce a constant observable;
         a nonconstant scalar can also lose information about other hypotheses
         during a free fit. Shifting endpoints changes the retained combination
@@ -1637,7 +1637,7 @@ def shifted_reference_cells():
         the **fully refitted** statistic and improve competing-branch agreement
         across both banks, with adequate support. Merely reducing the signed
         mean or increasing occupied bins is insufficient. Rows stratified by
-        `analytical_at_test` mean \(\hat\mu_A=\eta\); this does **not** mean
+        `analytical_at_test` mean $\hat\mu_A=\eta$; this does **not** mean
         the fixed shifted observable is constant.
 
         These four choices are specified before this comparison; no endpoint

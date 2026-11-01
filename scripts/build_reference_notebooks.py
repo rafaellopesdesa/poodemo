@@ -13,13 +13,13 @@ DEFINITION = r"""
 ### Ratio to the fixed physical reference
 
 At nominal NI nuisance, use the analytical **selected, normalized** densities:
-\[
+$$
 \eta_{\mathrm{eff}}=\max(\eta,\eta_{\min}),\qquad
 R_\eta(x)=\frac{r(x;\eta_{\mathrm{eff}})}{r(x;1)}
 =\frac{p(x;\eta_{\mathrm{eff}},0)}{p(x;1,0)},
 \qquad z_\eta(x)=\frac{R_\eta(x)^a}{1+R_\eta(x)^a}
 =\operatorname{sigmoid}\!\left(a\log R_\eta(x)\right).
-\]
+$$
 The S reference cancels. Both normalizations use the same final quadrature;
 this observable is analytical, not learned. The denominator is always at
 **mu=1 and alpha_NI=0**, independent of the fit, anchor and Asimov truth settings.
@@ -353,8 +353,8 @@ Tables use `reference_ratio_` and figures `09_`.'''
                     source = source[:source.index(marker)].rstrip()
             source += "\n\n" + RUNTIME_NOTE.strip()
         elif source.startswith("### How the observable changes with eta"):
-            source = source.replace("observable constructed at \\(\\eta\\)",
-                                    "observable constructed at \\(\\eta_{\\mathrm{eff}}=\\max(\\eta,0.2)\\)")
+            source = source.replace("observable constructed at $\\eta$",
+                                    "observable constructed at $\\eta_{\\mathrm{eff}}=\\max(\\eta,0.2)$")
             source = source.replace(r"\max(\eta,0.1)", r"\max(\eta,0.2)")
             source = source.replace("Edit `ETA_VALUES` and `HIST_BINS` below", "Edit `ETA_VALUES` and `N_BINS` below")
         elif source.startswith("### Freeze the observable inside each fit"):

@@ -111,23 +111,23 @@ def discriminator_cells():
         md(r"""
         ### Four observable choices
 
-        Write \(r_j(x)=p_j(x)/p_S(x)\), with each process density normalized
+        Write $r_j(x)=p_j(x)/p_S(x)$, with each process density normalized
         after the same preselection. For the process axes use
-        \[
+        $$
         z_j(x)=\frac{r_j(x)^{a_j}}{1+r_j(x)^{a_j}}
         =\operatorname{sigmoid}\!\left(a_j\log r_j(x)\right).
-        \]
-        A finite positive \(a_j\) preserves ordering while redistributing bin
-        resolution. The editable starting powers are \(a_{NI}=1\) and
-        \(a_{SBI}=a_B=2\). Inspect the marginal plots and endpoint-occupation
+        $$
+        A finite positive $a_j$ preserves ordering while redistributing bin
+        resolution. The editable starting powers are $a_{NI}=1$ and
+        $a_{SBI}=a_B=2$. Inspect the marginal plots and endpoint-occupation
         table before changing them; the powers are fixed for the whole study.
 
         | Observable | Coordinates | Total cells |
         |---|---|---:|
-        | Fixed NI discriminator | \(z_{NI}\) | 36 |
-        | Fixed NI and SBI discriminators | \((z_{NI},z_{SBI})\) | 1296 |
-        | Fixed NI, SBI and B discriminators | \((z_{NI},z_{SBI},z_B)\) | 46656 |
-        | Moving physical-reference ratio | \(z_\eta=R_\eta^{100}/(1+R_\eta^{100}),\ R_\eta=p_{\max(\eta,0.2)}/p_1\) | 36 |
+        | Fixed NI discriminator | $z_{NI}$ | 36 |
+        | Fixed NI and SBI discriminators | $(z_{NI},z_{SBI})$ | 1296 |
+        | Fixed NI, SBI and B discriminators | $(z_{NI},z_{SBI},z_B)$ | 46656 |
+        | Moving physical-reference ratio | $z_\eta=R_\eta^{100}/(1+R_\eta^{100}),\ R_\eta=p_{\max(\eta,0.2)}/p_1$ | 36 |
 
         The default **analytical axes** match the construction in 08–09 and
         isolate the information lost by compression and binning. Choosing
@@ -136,10 +136,10 @@ def discriminator_cells():
         errors. The physical generating
         model and analytical benchmark remain unchanged.
 
-        For the moving observable, set \(\eta=\mu_0\) at each tested point,
-        use \(\eta_{\rm eff}=\max(\eta,0.2)\) in the numerator only,
+        For the moving observable, set $\eta=\mu_0$ at each tested point,
+        use $\eta_{\rm eff}=\max(\eta,0.2)$ in the numerator only,
         then **freeze the observable and the data** throughout its likelihood
-        fit. The physical \(\mu\) in every expected yield and free fit is
+        fit. The physical $\mu$ in every expected yield and free fit is
         unchanged, including below the floor. The fixed process axes have no
         floor and stay fixed across the entire scan. All use the
         same [0,1] edge convention that keeps 0.5 inside a bin. The likelihood
@@ -150,7 +150,7 @@ def discriminator_cells():
         md(r"""
         ### Build the templates and scan the likelihood
 
-        The physical \(\mu\) coefficients and selected process yields are
+        The physical $\mu$ coefficients and selected process yields are
         identical across the histograms. Stat-only fixes the NI nuisance at
         zero; the profiled comparison includes its Gaussian constraint and
         the binned nuisance interpolation used in notebook 09. The diagnostic
@@ -170,7 +170,7 @@ def discriminator_cells():
         Then compare the likelihood scans directly. The information panel
         measures **local precision at the fixed Asimov truth**, which is a
         different question from retaining a finite-separation test against 1.
-        At \(\eta=1\), the moving observable collapses to 0.5 and contains only
+        At $\eta=1$, the moving observable collapses to 0.5 and contains only
         event-count information. Its test of the generating truth can still
         correctly give zero even though its frozen local width is poor.
         """),
@@ -190,8 +190,8 @@ def discriminator_cells():
 
         With NI fixed, the nominal intensity is a known linear combination of
         S, SBI, B and NI. Consequently the **continuous vector**
-        \((r_{NI},r_{SBI},r_B)\), together with the event count, contains the
-        information needed for the nominal \(\mu\) family: the common S density
+        $(r_{NI},r_{SBI},r_B)$, together with the event count, contains the
+        information needed for the nominal $\mu$ family: the common S density
         cancels from likelihood ratios. Finite 36-by-36-by-36 bins still lose
         information, and sparse integration cells can limit the comparison.
         When NI is profiled, its variation ratios need not be functions of this
@@ -264,7 +264,7 @@ print("Toy records:", ROOT / "results" / f"{OUTPUT_TAG}_results.csv")
 def toy_cells():
     cells = start("11. Test-statistic distributions and calibration with toys", r"""
     Measure the **stat-only** sampling distribution at the two requested
-    hypotheses, \(\mu=0\) and \(\mu=1.4\). In each ensemble the tested value is
+    hypotheses, $\mu=0$ and $\mu=1.4$. In each ensemble the tested value is
     also the generating truth. Compare analytical and learned unbinned fits
     with the **direct 36-bin histogram model with a numerator floor**, using the same binning method
     as notebook 08, physical simulator toys, and each model's own toys.
@@ -280,15 +280,15 @@ def toy_cells():
         md(r"""
         ### Define one statistic and five comparisons
 
-        At each tested \(\mu_0\), use the **two-sided** likelihood-ratio statistic
-        \[
+        At each tested $\mu_0$, use the **two-sided** likelihood-ratio statistic
+        $$
         t_{\mu_0}=-2\log\frac{L(\mu_0)}{L(\widehat\mu)},
         \qquad \widehat\mu=\underset{0\leq\mu\leq3}{\arg\max}\ L(\mu).
-        \]
+        $$
         All NI nuisances are fixed at nominal. This is not the one-sided
         upper-limit statistic that sets the result to zero when
-        \(\widehat\mu>\mu_0\). The exact zero boundary is included: minimization
-        uses \(\kappa=\sqrt\mu\), avoiding differentiation of \(\sqrt\mu\) at zero,
+        $\widehat\mu>\mu_0$. The exact zero boundary is included: minimization
+        uses $\kappa=\sqrt\mu$, avoiding differentiation of $\sqrt\mu$ at zero,
         and searches the grid's candidate minima before local refinement.
         The point 1.4 lies inside the fit range, allowing fluctuations on both
         sides. Inspect upper-bound fits before trusting a truncated fit range.
@@ -302,12 +302,12 @@ def toy_cells():
         | Binned / binned | Independent Poisson counts from the binned model | Same 36-bin model |
 
         The simulator rows deliberately share each experiment across fit
-        methods. For the binned fits, build the observable at \(\eta=\mu_0\)
-        and **hold it fixed while fitting every alternative \(\mu\)**.
-        Use numerator endpoint \(\eta_{\rm eff}=\max(\eta,0.2)\); the
-        reference remains \(p(x;1)\). The floor does not constrain the fitted
-        physical \(\mu\) or change any physical generating density. The
-        fit domain \([0,3]\) and 129-point \(\sqrt\mu\) search match the
+        methods. For the binned fits, build the observable at $\eta=\mu_0$
+        and **hold it fixed while fitting every alternative $\mu$**.
+        Use numerator endpoint $\eta_{\rm eff}=\max(\eta,0.2)$; the
+        reference remains $p(x;1)$. The floor does not constrain the fitted
+        physical $\mu$ or change any physical generating density. The
+        fit domain $[0,3]$ and 129-point $\sqrt\mu$ search match the
         notebook-12 diagnostics and include both competing branches.
         """),
         code(TOY_SETTINGS),
@@ -337,16 +337,16 @@ def toy_cells():
         transfers to fresh physical experiments.
 
         **Direct bin yields at every eta:** construct the observable once at
-        each tested \(\eta=\mu_0\), with \(\eta_{\rm eff}=\max(\eta,0.2)\)
+        each tested $\eta=\mu_0$, with $\eta_{\rm eff}=\max(\eta,0.2)$
         used only in the observable numerator, and integrate each process intensity in its
         bins using the saved quadrature. Keep these process bin yields fixed
         while varying the physical signal strength:
-        \[
+        $$
         \nu_i(\mu;\eta)
         =(\mu-\sqrt\mu)\nu_{S,i}(\eta)
         +\sqrt\mu\,\nu_{SBI,i}(\eta)
         +(1-\sqrt\mu)\nu_{B,i}(\eta)+\nu_{NI,i}(\eta).
-        \]
+        $$
         These are the exact physical coefficients multiplying numerically
         integrated bin yields, with NI fixed at nominal. The same method is
         used at **eta=0 and eta=1.4**, with numerator endpoints **0.2 and 1.4**
@@ -380,7 +380,7 @@ def toy_cells():
         ### Empirical distributions and calibrated acceptance
 
         Compare the test-statistic histograms, empirical survival curves,
-        quantiles, and fitted-\(\mu\) distributions. Both the test-statistic
+        quantiles, and fitted-$\mu$ distributions. Both the test-statistic
         histograms and survival curves use **logarithmic vertical axes** to
         expose the tails. Their test-statistic axes remain linear so that the
         probability mass at zero remains represented. Similar Asimov scans do
@@ -388,7 +388,7 @@ def toy_cells():
         the zero boundary and the second interference minimum can invalidate
         a simple common asymptotic reference. The gray dashed asymptotic
         curves are visual guides only. We **measure** critical values from toys
-        instead of imposing a \(\chi^2_1\) or boundary-mixture approximation.
+        instead of imposing a $\chi^2_1$ or boundary-mixture approximation.
 
         The cross-calibration table applies a model's own empirical critical
         value to simulator-generated test statistics. Even-numbered toy IDs

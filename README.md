@@ -108,7 +108,7 @@ These are Gaussian wavefunctions. Inclusive yields, the destructive phase,
 means, and correlated covariance matrices are displayed in notebook 1 and
 recorded in `run.json`. S is displaced to larger means and has narrower widths than B,
 while SBI stays close to B. The destructive phase retains a second basin below 1. The SBI template is a positive process with intensity
-\(D_{SBI}=|A_S+A_B|^2\). Its integral is calculated analytically, including
+$D_{SBI}=|A_S+A_B|^2$. Its integral is calculated analytically, including
 interference, and is reported rather than assigned an independent normalization.
 NI is incoherent.
 
