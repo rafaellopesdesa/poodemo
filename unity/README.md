@@ -2,10 +2,10 @@
 
 This workflow freezes the `paper-distinct-s-v4` generator and preselection from
 Google Drive, generates new selected events on Unity, trains five independent
-100-member ensembles, and publishes **inference models only** to GitHub. Colab
+100-member ensembles, and collects **inference models only** for transfer to Google Drive. Colab
 computes event weights again from those models on the existing Drive samples.
 No generated events, per-event weights, optimizer states, or Lightning checkpoints
-are returned to GitHub.
+are included in the transfer.
 
 The frozen inputs are already in `unity/source/`: the analytic generator is
 specified by `run.json`, and the saved selector and threshold are copied from
@@ -19,8 +19,9 @@ The original selector is reused, never retrained or retuned.
 - Environment: `/project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-env`
 - Submission, generated banks, checkpoints and execution:
   `/work/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo/paper-distinct-s-v4-unity100`
-- Publication checkout (created separately by the collector):
-  `/project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-publish-unity100`
+- Collected model directory for SCP (created by `collect`):
+  `/project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-models/paper-distinct-s-v4-unity100`
+- Google Drive destination: `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`
 
 Keep the source checkout unchanged during a campaign. Each job verifies its code
 and frozen input identity. Commit source changes before initializing a production
@@ -35,11 +36,10 @@ cd /project/pi_rclsa_umass_edu/rclsa_umass_edu
 GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/rafaellopesdesa/poodemo.git
 cd poodemo
 module load conda/latest
-conda create -y -c conda-forge --prefix /project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-env python=3.11 pip git-lfs
+conda create -y -c conda-forge --prefix /project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-env python=3.11 pip
 conda activate /project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-env
 python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 python -m pip install -r unity/requirements.txt -e '.[training]'
-git lfs install --local
 ```
 
 If the checkout already exists, update it instead of cloning it again. Use a CUDA
@@ -81,9 +81,9 @@ bank; it saves no event weights and fits no calibration map.
 
 The 500 inference models contain roughly 4.2 GB of parameters. Training checkpoints
 also contain optimizer state and need substantially more space (roughly 30 GB for
-models plus best/last checkpoints, before filesystem overhead). Only the inference
-files enter Git LFS. GitHub LFS storage/download usage applies to the repository
-owner; repeated Colab downloads can be avoided with a persistent cache.
+models plus best/last checkpoints, before filesystem overhead). Only inference
+models and small metadata files enter the collected directory transferred to Drive.
+The notebook loads them directly from the mounted Drive directory.
 
 Run a pilot member to measure actual runtime before releasing the full array.
 A full production job can be expensive: 100 epochs means roughly one million
@@ -142,42 +142,69 @@ python -m unity.submit --root "$POODEMO_UNITY_RUN" --stage train --indices 4,109
 python -m unity.submit --root "$POODEMO_UNITY_RUN" --stage normalize --dependency RETRY_JOB_ID
 ```
 
-## Collect, commit, and push inference models
+## Collect the inference models for SCP
 
-Configure your usual GitHub authentication and Git author identity on Unity.
-Do this publication step from the login node after all jobs finish. It creates
-an isolated worktree/branch, validates every required member and normalization
-receipt, copies only a strict list of inference/metadata files, checks Git LFS
-tracking, and commits the result. It does not alter `main`.
+After **all training and normalization jobs finish**, run the existing collector
+with the same source checkout used for training. This does not require a GitHub
+commit or upload. It verifies every member and normalization receipt and copies
+only inference models and small metadata files; samples and optimizer checkpoints
+remain in the work directory.
 
 ```bash
-python -m unity.publish \
-  --root "$POODEMO_UNITY_RUN" \
-  --checkout /project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-publish-unity100 \
-  --push
+python -m unity.workflow collect \
+  --root /work/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo/paper-distinct-s-v4-unity100 \
+  --destination /project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-models/paper-distinct-s-v4-unity100
 ```
 
-Omit `--push` to create the local commit first. The branch is
-`unity-models/paper-distinct-s-v4-unity100`. No partial ensemble is published;
-a missing, corrupt, mismatched or unfinished member stops collection. A bundle
-cannot overwrite an existing publication directory. After a failed upload, rerun
-`git push` from the publication checkout; do not collect again. The commit SHA
-printed by the script is the immutable identifier to use in Colab.
+The collector refuses missing, mismatched or unfinished members and does not
+overwrite an existing destination. The entire collected directory is about
+4.2 GB with the default architecture. Keep its layout unchanged during transfer:
+
+| Relative path inside `paper-distinct-s-v4-unity100/` | Contents |
+| --- | --- |
+| `bundle.json` | File checksums and model/selection identity |
+| `campaign.json` | Frozen training configuration and provenance |
+| `ratios/<task>/ensemble.json` | Member list and ensemble normalization |
+| `ratios/<task>/normalization.json` | Normalization metadata |
+| `ratios/<task>/member_000/` through `member_099/` | `model.pt` and member metadata |
+
+The five `<task>` names are `SBI_over_S`, `B_over_S`, `NI_over_S`,
+`NI_up_over_NI` and `NI_down_over_NI`. Copy all files produced by the collector.
+
+From your computer, create the `poodemo/unity_models` folder inside your locally
+synced Google Drive, then use SCP to copy the collected campaign folder into it.
+Replace the SSH alias and local Drive path in this example:
+
+```bash
+scp -r YOUR_UNITY_SSH_ALIAS:/project/pi_rclsa_umass_edu/rclsa_umass_edu/poodemo-models/paper-distinct-s-v4-unity100 \
+  /path/to/GoogleDrive/MyDrive/poodemo/unity_models/
+```
+
+Alternatively, SCP to a local staging folder and upload that campaign folder to
+Drive. Google Drive itself is not an SCP endpoint. Wait for synchronization/upload
+to finish before running notebook 03. Avoid adding an extra enclosing directory:
+`bundle.json` must be directly inside the campaign folder at the destination.
 
 ## Retest in notebook 03
 
-Notebook 03 now has an optional Unity model-source cell. Until a production bundle
-exists its default remains `RATIO_SOURCE = "drive"`.
+Notebook 03 now defaults to loading the transferred Unity models:
 
 ```python
 RATIO_SOURCE = "unity"
-UNITY_BUNDLE = "paper-distinct-s-v4-unity100"
-UNITY_REF = "FULL_40_CHARACTER_PUBLICATION_COMMIT_SHA"
+UNITY_MODEL_DIR = Path(
+    "/content/drive/MyDrive/poodemo/unity_models/paper-distinct-s-v4-unity100"
+)
 ```
 
-Run the source cell and remaining notebook cells. The source helper uses a sparse
-Git LFS checkout, checks every file hash, and confirms the generator, selector and
-threshold match the Drive run. It never calls ratio training in Unity mode.
+Change `UNITY_MODEL_DIR` in the notebook (or set `POODEMO_UNITY_MODEL_DIR`) for a
+different location. On a local Jupyter installation, set it to the local path of
+the same collected directory. No Git LFS installation, GitHub model branch or
+commit SHA is needed. The previous Git LFS publication/download helpers remain
+available for optional use, but the notebook does not call them.
+
+Run the source cell and remaining notebook cells. The loader checks every file
+hash and confirms the generator, selector and threshold match the Drive run.
+A missing or incomplete transfer fails explicitly; it never falls back to training.
 Inference loads one network at a time and averages **ratios**, not logits, without
 allocating a members-by-events matrix. The saved scalar normalization is applied
 without refitting it on the plotted samples. Per-event weights are calculated
@@ -190,6 +217,10 @@ available. Set `VALIDATE_UNITY_MEMBERS = True` to also plot all 500 individual
 networks; otherwise only the five full ensembles are plotted. Reweighting,
 calibration, independent closure and the usual three Asimov comparisons all use
 the imported models. Existing ratio/residual axis limits are retained.
+
+For the original three-member workflow, explicitly set `RATIO_SOURCE = "drive"`.
+This change does not modify the frozen Unity training/generation code or campaign
+identity; the existing collector can be used without changing your running jobs.
 
 Ensembling may reduce fluctuation but cannot remove bias shared by the members.
 The unchanged notebook evaluation statistics and quadrature can still limit
