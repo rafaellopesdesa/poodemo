@@ -776,14 +776,21 @@ print(json.dumps({key: example[key] for key in
 '''
 
 UNITY_SOURCE_INTRO = r"""
-### Optional: load the Unity ensembles
+### Load the Unity ensembles from Google Drive
 
-Leave `RATIO_SOURCE = "drive"` to keep the original three-member workflow.
-After training on Unity, set it to `"unity"`, enter the bundle name and the
-**full publication commit SHA** printed by `unity.publish`, and rerun this
-notebook. Install Git LFS once in Colab if needed: `!apt-get -qq install git-lfs`.
+The default is `RATIO_SOURCE = "unity"`. After the Unity training and normalization
+jobs finish, use `python -m unity.workflow collect` as documented in
+`unity/README.md`. Copy the **entire collected directory**, preserving its
+structure, to `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`.
+The directory must contain `bundle.json`, `campaign.json` and `ratios/` with all
+five tasks and their member subdirectories. Edit `UNITY_MODEL_DIR` below to use
+a different location, or set the `POODEMO_UNITY_MODEL_DIR` environment variable.
+The notebook reads these files directly from mounted Drive; no model download,
+Git LFS installation or publication commit is needed. An incomplete transfer
+raises an error rather than starting training. To use the original three-member
+workflow instead, explicitly set `RATIO_SOURCE = "drive"`.
 
-Only inference models and metadata are downloaded. Event weights are computed
+Only inference models and metadata are transferred. Event weights are computed
 here from the models on the existing Drive samples. The physics, preselection
 checkpoint and threshold must match exactly. Unity mode skips training and
 retains the Unity ensemble's independent mean-normalization constant; it does
@@ -802,20 +809,25 @@ the earlier run until you execute the notebook again.
 """
 
 UNITY_SOURCE_CODE = r'''
-from poodemo.ensemble_bundle import fetch_bundle, use_bundle, BundleEvaluationRun
+from poodemo.ensemble_bundle import use_bundle, BundleEvaluationRun
 
-RATIO_SOURCE = "drive"  # "drive" or "unity"
-UNITY_BUNDLE = "paper-distinct-s-v4-unity100"
-UNITY_REF = ""  # Full 40-character commit SHA printed by unity.publish.
-UNITY_CACHE = Path("/content/poodemo-unity-models") if IN_COLAB else Path.home() / ".cache/poodemo-unity-models"
+RATIO_SOURCE = "unity"  # "unity": transferred models; "drive": original three-member workflow.
+UNITY_MODEL_DIR = Path(os.environ.get(
+    "POODEMO_UNITY_MODEL_DIR",
+    "/content/drive/MyDrive/poodemo/unity_models/paper-distinct-s-v4-unity100",
+)).expanduser()
 VALIDATE_UNITY_MEMBERS = False
 
 source_run = run.base_run if isinstance(run, BundleEvaluationRun) else run
 if RATIO_SOURCE == "unity":
-    unity_bundle = fetch_bundle(UNITY_BUNDLE, UNITY_REF, UNITY_CACHE)
-    run = use_bundle(source_run, unity_bundle)
+    if not (UNITY_MODEL_DIR / "bundle.json").is_file():
+        raise FileNotFoundError(
+            f"Copy the complete Unity model bundle to {UNITY_MODEL_DIR}. "
+            "Expected bundle.json, campaign.json and ratios/ directly inside it. "
+            "See unity/README.md for the collection and transfer commands.")
+    run = use_bundle(source_run, UNITY_MODEL_DIR)
     ROOT = run.evaluation_root  # Plot cells use ROOT; event reads use run.path().
-    print("Unity models:", unity_bundle)
+    print("Unity models on Drive:", UNITY_MODEL_DIR)
     print("Evaluation outputs:", ROOT)
 elif RATIO_SOURCE == "drive":
     run, ROOT = source_run, source_run.root
