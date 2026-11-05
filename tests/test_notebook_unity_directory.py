@@ -2,6 +2,7 @@
 import ast
 import json
 from pathlib import Path
+import runpy
 import shutil
 
 import pytest
@@ -13,6 +14,90 @@ from poodemo.pipeline import RATIO_TASKS
 from unity.workflow import source_identity
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(params=['saved', 'generated'])
+def notebook_code(request, monkeypatch):
+    if request.param == 'saved':
+        notebook = json.loads((REPO/'notebooks/03_unbinned_nsbi.ipynb').read_text())
+        cells = notebook['cells']
+    else:
+        builder = runpy.run_path(str(REPO/'scripts/build_notebooks.py'))
+        notebooks = {}
+        monkeypatch.setitem(builder['build'].__globals__, 'write',
+                            lambda name, cells: notebooks.update({name: cells}))
+        builder['build']()
+        cells = notebooks['03_unbinned_nsbi.ipynb']
+    return [''.join(cell['source']).strip() for cell in cells if cell['cell_type'] == 'code']
+
+
+@pytest.mark.parametrize('ratio_source', ['unity', 'drive'])
+def test_top_to_bottom_model_selection_precedes_validation(
+        notebook_code, ratio_source, tmp_path, monkeypatch):
+    """Execute the real setup/diagnostic cells in order without costly predictions."""
+    import os
+    import numpy as np
+    import pandas as pd
+    from poodemo import closure_validation, pipeline
+
+    events = []
+    run = Run(tmp_path/'run', {}, PhysicsModel())
+    bundle = tmp_path/'models'
+    save_json(bundle/'bundle.json', {})
+    monkeypatch.setenv('POODEMO_UNITY_MODEL_DIR', str(bundle))
+    samples = {'S': np.zeros((2, 3))}
+
+    def load_models(base_run, directory):
+        assert base_run is run
+        assert directory == bundle
+        events.append('load')
+        return ensemble_bundle.BundleEvaluationRun(
+            run, bundle, {'name': 'test', 'campaign_id': 'notebook-order'})
+
+    def check_run(selected_run):
+        if ratio_source == 'unity':
+            assert isinstance(selected_run, ensemble_bundle.BundleEvaluationRun)
+            assert selected_run.path('models', 'ratios') == bundle/'ratios'
+        else:
+            assert selected_run is run
+
+    def prepare_bank(selected_run, **kwargs):
+        check_run(selected_run)
+        events.append('bank')
+        return {'samples': samples, 'generated_counts': {'S': 2}}
+
+    def validate(selected_run, validation_samples, **kwargs):
+        assert ratio_source == 'unity', 'Drive mode must retain its training workflow'
+        check_run(selected_run)
+        assert validation_samples is samples
+        assert kwargs['validate_members'] is False
+        events.append('validate')
+        return pd.DataFrame()
+
+    def train(selected_run, *, validation_samples, **kwargs):
+        assert ratio_source == 'drive', 'Unity mode must never train in Colab'
+        check_run(selected_run)
+        assert validation_samples is samples
+        events.append('train')
+        return pd.DataFrame()
+
+    monkeypatch.setattr(ensemble_bundle, 'use_bundle', load_models)
+    monkeypatch.setattr(closure_validation, 'prepare_validation_bank', prepare_bank)
+    monkeypatch.setattr(ensemble_bundle, 'validate_bundle_ratios', validate)
+    monkeypatch.setattr(pipeline, 'train_ratios', train)
+    namespace = {'os': os, 'Path': Path, 'run': run, 'MODE': 'smoke',
+                 'np': np, 'pd': pd, 'display': lambda value: None}
+    for source in notebook_code:
+        if 'use_bundle(source_run,' in source:
+            source = source.replace('RATIO_SOURCE = "unity"', f'RATIO_SOURCE = "{ratio_source}"')
+        if any(call in source for call in ('use_bundle(source_run,',
+                                          'prepare_validation_bank(run,',
+                                          'ratio_diagnostics = validate_bundle_ratios(')):
+            exec(source, namespace)
+    assert events == (['load', 'bank', 'validate'] if ratio_source == 'unity'
+                      else ['bank', 'train'])
+    assert namespace['ROOT'] == (namespace['run'].evaluation_root if ratio_source == 'unity'
+                                 else run.root)
 
 
 def source_constants():
