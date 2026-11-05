@@ -28,7 +28,8 @@ class MemberFilterPolicy:
     max_point_mass: float = 0.01
     min_effective_fraction: float = 0.001
     peer_factor: float = 100.0
-    catastrophic_peer_factor: float = 1.e6
+    # Apply the same disagreement threshold even at negligible-mass nodes.
+    catastrophic_peer_factor: float = 100.0
     peer_mad_scale: float = 8.0
     peer_outlier_mass: float = 0.001
     min_retained_fraction: float = 0.5
@@ -152,7 +153,8 @@ def _screen(logs, log_calibration_means, log_mass, policy):
             bad = deviation > np.maximum(math.log(policy.peer_factor), policy.peer_mad_scale*mad)
             # Even negligible probability mass can invalidate the polynomial
             # morph at a node. Orders-of-magnitude extrapolation against a
-            # stable peer consensus is therefore also checked pointwise.
+            # stable peer consensus is therefore also checked pointwise. The
+            # default factor is 100 in both checks, independent of tail mass.
             extreme |= np.any(deviation > np.maximum(math.log(policy.catastrophic_peer_factor),
                                                      policy.peer_mad_scale*mad), axis=1)
             max_deviation = np.maximum(max_deviation, deviation.max(axis=1))

@@ -798,6 +798,9 @@ listed with reasons; a separate manifest references only retained members.
 Their arithmetic mean is normalized again on the reserved **Drive calibration
 split**, never on the plotted diagnostic bank or observed data.
 `ENSEMBLE_FILTER_POLICY` controls the documented numerical-quality thresholds.
+By default, a member is rejected if its calibration-centered log ratio differs
+from the peer median by more than both $\log(100)$ and eight robust standard
+deviations at any integration point, even in a negligible-probability tail.
 Filtering stops if a majority cannot be retained or the nuisance morph is invalid.
 The original Drive quadrature and cached diagnostic/Poisson events are reused. New plots, workspaces and results
 are saved in `evaluations/<bundle>/<campaign>/filtered/<filter-id>/`.
@@ -828,7 +831,9 @@ UNITY_MODEL_DIR = Path(os.environ.get(
     "/content/drive/MyDrive/poodemo/unity_models/paper-distinct-s-v4-unity100",
 )).expanduser()
 VALIDATE_UNITY_MEMBERS = False
-ENSEMBLE_FILTER_POLICY = MemberFilterPolicy()  # See unity/README.md for thresholds.
+ENSEMBLE_FILTER_POLICY = MemberFilterPolicy(
+    catastrophic_peer_factor=100.0,  # Pointwise cutoff, even at negligible tail mass.
+)  # See unity/README.md for thresholds; applies to all five ensembles.
 
 source_run = unfiltered_run(run)
 source_run = source_run.base_run if isinstance(source_run, BundleEvaluationRun) else source_run

@@ -49,7 +49,9 @@ def test_material_peer_shape_outlier_with_healthy_integral_is_removed():
     # single-point spike or failed integral: this exercises the peer criterion.
     values[-1, :100] = -12.
     values[-1, 100:] = np.log((1000-100*np.exp(-12))/900)
-    records, kept, _, error = screen(values)
+    # Keep exercising the mass criterion separately when users choose a looser
+    # pointwise threshold; the new default would reject for both reasons.
+    records, kept, _, error = screen(values, policy=MemberFilterPolicy(catastrophic_peer_factor=1.e6))
     assert error is None and kept == list(range(7))
     assert records[-1]['peer_outlier_mass'] == pytest.approx(.1)
     assert records[-1]['reasons'] == ['large peer disagreement on material integration mass']
@@ -64,9 +66,9 @@ def test_shared_real_shape_is_not_rejected_for_large_ratios_alone():
     np.testing.assert_allclose(result[0], values[0])
 
 
-def test_negligible_peer_disagreement_does_not_trigger_pruning():
+def test_negligible_peer_disagreement_below_factor_cutoff_does_not_trigger_pruning():
     values = np.zeros((8, 10000))
-    values[-1, 0] = -8.
+    values[-1, 0] = -np.log(50.)
     _, kept, _, error = screen(values)
     assert error is None and kept == list(range(8))
 
@@ -130,6 +132,7 @@ def saved_run(tmp_path, monkeypatch):
     calls = []
     class FakePredictor:
         kind = 'ratio'
+        tail_log_ratio = 80.
         def __init__(self, path):
             self.path = Path(path)
             num, den = self.path.parent.name.split('_over_')
@@ -139,7 +142,7 @@ def saved_run(tmp_path, monkeypatch):
             calls.append((self.path.parent.name, self.index, len(points)))
             result = np.full(len(points), np.log(1.+.02*self.index))
             if self.index == 4:
-                result[points[:, 0] == 173] = 80.
+                result[points[:, 0] == 173] = self.tail_log_ratio
             return result
         predict_raw_log_ratio = predict_log_ratio
     monkeypatch.setattr(training.Predictor, 'load', lambda path, device='auto': FakePredictor(path))
@@ -188,8 +191,10 @@ def test_cache_tracks_models_banks_policy_and_generated_manifests(saved_run):
     np.save(run.path('selected', 'S_calibration.npy'), np.full((1000, 3), -2.))
     bank_changed = filter_ratio_ensembles(run)
     assert bank_changed.evaluation_root != changed.evaluation_root
-    policy_changed = filter_ratio_ensembles(run, policy=replace(MemberFilterPolicy(), peer_factor=200.))
+    before = len(calls)
+    policy_changed = filter_ratio_ensembles(run, policy=replace(MemberFilterPolicy(), catastrophic_peer_factor=1.e6))
     assert policy_changed.evaluation_root != bank_changed.evaluation_root
+    assert len(calls) > before
 
 
 def test_failed_audit_leaves_report_but_no_active_completion(saved_run, monkeypatch):
@@ -264,3 +269,51 @@ def test_extreme_peer_extrapolation_is_rejected_even_at_negligible_mass_node():
     assert error is None and kept == list(range(7))
     assert records[-1]['peer_outlier_mass'] < .001
     assert records[-1]['reasons'] == ['extreme pointwise peer disagreement']
+
+
+@pytest.mark.parametrize('sign', [-1., 1.])
+def test_new_default_rejects_local_spikes_and_holes_that_passed_old_policy(sign):
+    values = np.zeros((8, 1000)); values[-1, 0] = sign*np.log(200.)
+    mass = np.full(1000, 1/999); mass[0] = 1e-12; mass /= mass.sum()
+    old_policy = MemberFilterPolicy(catastrophic_peer_factor=1.e6)
+    _, old_kept, _, old_error = _screen(values, np.zeros(8), np.log(mass), old_policy)
+    assert old_error is None and old_kept == list(range(8))
+    records, kept, _, error = _screen(values, np.zeros(8), np.log(mass), MemberFilterPolicy())
+    assert error is None and kept == list(range(7))
+    assert records[-1]['peer_outlier_mass'] < 1e-8
+    assert records[-1]['reasons'] == ['extreme pointwise peer disagreement']
+
+
+def test_pointwise_rule_still_requires_disagreement_beyond_robust_peer_spread():
+    values = np.zeros((8, 1000))
+    # At this node the ensemble is broadly dispersed, without an isolated
+    # failure. Absolute factors above 100 alone must not decide membership.
+    values[:, 0] = [-8., -6., -4., -2., 2., 4., 6., 8.]
+    mass = np.full(1000, 1/999); mass[0] = 1e-12; mass /= mass.sum()
+    records, kept, _, error = _screen(values, np.zeros(8), np.log(mass), MemberFilterPolicy())
+    assert error is None and kept == list(range(8))
+    assert all(not r['reasons'] for r in records)
+
+
+def test_stricter_default_filters_negligible_tail_outliers_in_all_five_tasks(saved_run, monkeypatch):
+    run, q, _ = saved_run
+    original_member = run.path('models', 'ratios', 'SBI_over_S', 'member_004')
+    predictor_type = type(training.Predictor.load(original_member))
+    monkeypatch.setattr(predictor_type, 'tail_log_ratio', np.log(200.))
+    q['weights'][173] = 1e-12
+    q['weights'] /= q['weights'].sum()
+    np.save(run.path('quadrature', 'weights.npy'), q['weights'])
+    filtered = filter_ratio_ensembles(run)
+    report = json.loads(filtered.path('results', 'ensemble_filter', 'manifest.json').read_text())
+    assert report['status'] == 'passed'
+    assert report['inputs']['policy']['catastrophic_peer_factor'] == 100.
+    for num, den in RATIO_TASKS:
+        task = f'{num}_over_{den}'
+        assert len(report['tasks'][task]['kept']) == 4
+        assert Path(report['tasks'][task]['rejected'][0]).name == 'member_004'
+    import pandas as pd
+    records = pd.read_csv(filtered.path('results', 'ensemble_filter', 'members.csv'))
+    rejected = records.loc[~records.kept]
+    assert len(rejected) == 5
+    assert rejected.reasons.eq('extreme pointwise peer disagreement').all()
+    assert rejected.peer_outlier_mass.lt(1e-8).all()

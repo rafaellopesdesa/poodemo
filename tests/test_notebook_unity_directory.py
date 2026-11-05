@@ -84,6 +84,7 @@ def test_top_to_bottom_model_selection_precedes_validation(
     def filter_members(selected_run, *, policy):
         check_run(selected_run)
         assert isinstance(policy, member_filter.MemberFilterPolicy)
+        assert policy.catastrophic_peer_factor == 100.
         events.append('filter')
         filtered = member_filter.FilteredEvaluationRun(selected_run, tmp_path/'filtered', {})
         report = filtered.path('results', 'ensemble_filter', 'summary.csv')

@@ -237,16 +237,19 @@ cuts, not statistical confidence levels:
 | Single-point concentration | More than 1% of normalized integration or calibration mass at one point |
 | Effective sample size | Less than 0.1% of the bank size on integration or calibration events |
 | Peer disagreement | Log-ratio departure exceeds both $\log(100)$ and 8 robust standard deviations, on more than 0.1% of member or peer integration mass |
-| Extreme pointwise disagreement | Departure exceeds both $\log(10^6)$ and 8 robust standard deviations at any integration point |
+| Extreme pointwise disagreement | Departure exceeds both $\log(100)$ and 8 robust standard deviations at any integration point, regardless of probability mass |
 
 Peer comparison uses the pointwise median and $1.4826\,\mathrm{MAD}$ among
 members that pass the preceding checks. Members are centered using their reserved
 calibration means **for this comparison only**. Inference still averages the
-original retained ratios arithmetically and applies one ensemble scalar. A
-negligible tail discrepancy alone is not sufficient for ordinary peer rejection.
-The separate six-orders-of-magnitude criterion catches extreme extrapolation
-even at very low-weight nodes, because the nuisance polynomial must remain
-physical at those nodes too.
+original retained ratios arithmetically and applies one ensemble scalar.
+The pointwise cutoff now uses a factor of 100, tightened from the previous
+factor of one million, for **all five ensembles**. It rejects both upward spikes
+and downward holes against a stable peer consensus even at negligible-mass
+nodes, because the nuisance polynomial must remain physical at those nodes too.
+The eight-robust-standard-deviation requirement remains in force; a large ratio
+shared by the ensemble is not itself a peer outlier. The mass-based criterion
+is retained and remains useful if the two peer factors are configured differently.
 
 A strict majority must survive, with at least two retained members when the
 original ensemble has two or more. Widespread failures stop the audit with an
@@ -265,7 +268,7 @@ ENSEMBLE_FILTER_POLICY = MemberFilterPolicy(
     max_point_mass=0.01,
     min_effective_fraction=0.001,
     peer_factor=100.0,
-    catastrophic_peer_factor=1.e6,
+    catastrophic_peer_factor=100.0,
     peer_mad_scale=8.0,
     peer_outlier_mass=0.001,
     min_retained_fraction=0.5,
@@ -289,6 +292,9 @@ temporary disk-backed log-prediction matrix in the Colab runtime, approximately
 task. No large prediction matrix is written to Drive. Complete audits are reused
 when checkpoint/calibrator hashes, integration and calibration files, policy,
 and implementation match. A changed input creates a new filter identity.
+The stricter pointwise default therefore triggers a new audit; previous audits
+are preserved and are not reused under the new policy. No manual cache deletion
+or Unity retraining is needed.
 
 For Unity, outputs are under:
 
