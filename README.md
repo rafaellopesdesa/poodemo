@@ -167,6 +167,13 @@ without changing a completed v4 run name or its networks. After the initial
 v4 retraining, matching checkpoints are reused and diagnostics can be rerun
 without retraining or recalibration.
 
+Calibration curves default to 15 approximately equal-occupancy bins in the
+equal-prior score mixture, with axes zoomed symmetrically around $0.5$ to cover
+the observed scores and empirical error bars. The legend reports the usable
+point count if tied scores or sparse class counts prevent 15 points. Residual
+panels retain $[-0.01,0.01]$, and reweighting ratio panels retain $[0.95,1.05]$.
+This changes diagnostic binning only; the predicted ratios are unchanged.
+
 The physical expected-yield exposure is separate from Monte Carlo counts;
 there are still six generated samples and five ratio-training tasks. Use the
 new run name `paper-distinct-s-v4` and rerun generation and training. Earlier

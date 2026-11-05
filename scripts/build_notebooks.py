@@ -867,7 +867,16 @@ counts define normalization; the displayed range is never renormalized to
 force agreement. Bins with too few target or reference events are flagged, not
 reported as successful closure.
 
-Calibration figures compare the mean predicted score $s=r/(1+r)$ to the
+Calibration figures use 15 approximately equal-occupancy bins in the balanced
+score mixture, including distributions concentrated near $0.5$. Axes zoom
+symmetrically around $0.5$ to include the full score excursions and empirical
+error bars. Tied scores or insufficient class counts can reduce the number of
+usable points; the legend reports the actual count. Residual panels retain
+the range $[-0.01,0.01]$. Binning changes only the display: ratios are not
+renormalized or recalibrated on these samples. Error bars use the existing
+fixed-bin moment approximation conditional on the adaptive bin boundaries.
+
+The curves compare the mean predicted score $s=r/(1+r)$ to the
 observed numerator fraction using an equal class prior, with residual
 $f_{\rm numerator}-\langle s\rangle$ underneath. After the member filter
 freezes all five memberships, the retained ensembles
@@ -885,7 +894,7 @@ from poodemo.closure_validation import prepare_validation_bank
 
 DIAGNOSTIC_N_PER_SAMPLE = 20_000 if MODE == "smoke" else 2_000_000
 DIAGNOSTIC_EDGES = np.linspace(-5., 6., 56)
-CALIBRATION_BINS = 20
+CALIBRATION_BINS = 15  # Balanced-score quantiles, including narrow support near 0.5.
 VALIDATION_LOG_SCALE = False  # Set True for logarithmic marginal-density panels.
 
 validation_bank = prepare_validation_bank(run, n_per_sample=DIAGNOSTIC_N_PER_SAMPLE)

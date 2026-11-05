@@ -100,7 +100,42 @@ def reweighting_table(numerator, denominator, denominator_ratios, edges, *, min_
     return pd.concat(rows, ignore_index=True)
 
 
-def calibration_table(numerator_scores, denominator_scores, edges=None, *, min_count=5):
+def _calibration_scores(numerator_scores, denominator_scores):
+    scores = [np.asarray(s, dtype=float) for s in (numerator_scores, denominator_scores)]
+    for s in scores:
+        if s.ndim != 1 or len(s) < 2 or np.any(~np.isfinite(s)) or np.any((s < 0) | (s > 1)):
+            raise ValueError("Scores must be finite 1D arrays in [0, 1], with at least two events")
+    return scores
+
+
+def calibration_bin_edges(numerator_scores, denominator_scores, bins=15):
+    """Approximately equal-occupancy bins for the balanced score mixture.
+
+    Use both complete classes with total weight 1/2 each. Boundaries only split
+    distinct scores, so ties/constant classifiers produce fewer bins rather
+    than fabricated points. The outer edges remain 0 and 1 to retain all tails.
+    No density-ratio normalization or calibration is fitted here.
+    """
+    if isinstance(bins, (bool, np.bool_)) or not isinstance(bins, (int, np.integer)) or bins < 2:
+        raise ValueError("score_bins must be an integer of at least two")
+    num, den = _calibration_scores(numerator_scores, denominator_scores)
+    scores = np.concatenate([num, den])
+    weights = np.r_[np.full(len(num), .5/len(num)), np.full(len(den), .5/len(den))]
+    order = np.argsort(scores, kind="stable")
+    unique, starts = np.unique(scores[order], return_index=True)
+    if len(unique) == 1:
+        return np.array([0., 1.])
+    cumulative = np.cumsum(np.add.reduceat(weights[order], starts))
+    cumulative /= cumulative[-1]
+    indices = np.unique(np.searchsorted(cumulative, np.arange(1, bins)/bins))
+    indices = indices[indices < len(unique)-1]
+    left, right = unique[indices], unique[indices+1]
+    cuts = left+(right-left)/2
+    cuts = np.where(cuts <= left, np.nextafter(left, right), cuts)
+    return np.unique(np.r_[0., cuts[(cuts > 0) & (cuts < 1)], 1.])
+
+
+def calibration_table(numerator_scores, denominator_scores, edges=None, *, min_count=5, bins=15):
     """Reliability and residual tables at an equal numerator/reference prior.
 
     Classes are weighted by inverse total class size, so unequal selected
@@ -109,14 +144,15 @@ def calibration_table(numerator_scores, denominator_scores, edges=None, *, min_c
     includes the covariance of both quantities, using fixed-sample influence
     moments separately for the two independently simulated classes.  Empty or
     sparsely populated class bins have unavailable estimates, not zero error.
+    Unless explicit edges are supplied, use balanced-mixture quantile bins.
+    Errors retain the fixed-bin moment approximation conditional on the chosen
+    partition; uncertainty from choosing the adaptive boundaries is not included.
     """
-    edges = _edges(np.linspace(0., 1., 21) if edges is None else edges)
+    scores = _calibration_scores(numerator_scores, denominator_scores)
+    requested_bins = bins if edges is None else len(edges)-1
+    edges = _edges(calibration_bin_edges(*scores, bins=bins) if edges is None else edges)
     if edges[0] != 0. or edges[-1] != 1.:
         raise ValueError("Calibration bins must cover the whole [0, 1] score range")
-    scores = [np.asarray(s, dtype=float) for s in (numerator_scores, denominator_scores)]
-    for s in scores:
-        if s.ndim != 1 or len(s) < 2 or np.any(~np.isfinite(s)) or np.any((s < 0) | (s > 1)):
-            raise ValueError("Scores must be finite 1D arrays in [0, 1], with at least two events")
     if min_count < 2:
         raise ValueError("min_count must be at least two for an uncertainty estimate")
     n_num, n_den = map(len, scores)
@@ -155,6 +191,8 @@ def calibration_table(numerator_scores, denominator_scores, edges=None, *, min_c
         "calibration_valid": valid,
         "status": np.where(valid, "available", "unavailable: low class count"),
         "numerator_events": n_num, "denominator_events": n_den,
+        "score_min": min(s.min() for s in scores), "score_max": max(s.max() for s in scores),
+        "requested_bins": requested_bins,
     })
 
 
@@ -232,37 +270,59 @@ def plot_calibration(table, numerator, denominator, *, output=None, label=None):
     """Balanced-class reliability and correlated residual uncertainty panels."""
     import matplotlib.pyplot as plt
     import mplhep as hep
+    # Zoom symmetrically about the balanced-class score, covering all observed
+    # scores and displayed empirical error bars. Never crop a discrepant point
+    # merely to make the calibration curve look closer to the diagonal.
+    extent = [.5]
+    for name in ("score_min", "score_max", "predicted"):
+        if name in table:
+            extent.extend(table[name].to_numpy())
+    good = table.calibration_valid.to_numpy()
+    for sign in (-1., 1.):
+        extent.extend((table.empirical+sign*table.empirical_se).to_numpy()[good])
+    extent = np.asarray(extent, dtype=float)
+    radius = min(.5, max(.005, 1.08*np.max(np.abs(extent[np.isfinite(extent)]-.5))))
+    limits = (.5-radius, .5+radius)
     with plt.style.context(hep.style.ATLAS):
         fig, (ax, residual_ax) = plt.subplots(2, 1, figsize=(7.6, 7.2), sharex=True,
                     gridspec_kw={"height_ratios": [3, 1], "hspace": .06})
-        ax.plot([0, 1], [0, 1], color="black", linewidth=1., linestyle="--")
+        ax.plot(limits, limits, color="black", linewidth=1., linestyle="--")
         for stage, part in table.groupby("stage", sort=False):
             good = part.calibration_valid.to_numpy()
             color = STAGE_COLORS[stage]
+            count = int(good.sum())
+            requested = int(part.requested_bins.iloc[0]) if "requested_bins" in part else len(part)
+            legend = f"{STAGE_LABELS[stage]} ({count}/{requested} points)"
             ax.errorbar(part.predicted.to_numpy()[good], part.empirical.to_numpy()[good],
                         yerr=part.empirical_se.to_numpy()[good], fmt="o-", markersize=4,
-                        color=color, linewidth=1., label=STAGE_LABELS[stage])
+                        color=color, linewidth=1., label=legend)
             residual_ax.errorbar(part.predicted.to_numpy()[good], part.residual.to_numpy()[good],
                         yerr=part.residual_se.to_numpy()[good], fmt="o", markersize=3,
                         color=color, linewidth=1.)
-        ax.set(ylabel="Empirical numerator fraction", xlim=(0, 1), ylim=(0, 1))
+        ax.set(xlim=limits, ylim=limits)
+        ax.set_ylabel("Empirical numerator fraction", fontsize=18)
         ax.legend(fontsize=12, frameon=False)
         residual_ax.axhline(0., color="black", linewidth=1.)
         residual_ax.set_ylim(-0.01, 0.01)
-        residual_ax.set(xlabel=r"Mean predicted $r/(1+r)$", ylabel="Empirical\n− predicted")
+        residual_ax.set_xlabel(r"Mean predicted $r/(1+r)$", fontsize=18)
+        residual_ax.set_ylabel("Empirical\n− predicted", fontsize=14)
+        for panel in (ax, residual_ax):
+            panel.tick_params(labelsize=14)
+            panel.yaxis.get_offset_text().set_fontsize(12)
         residual_ax.grid(axis="y", alpha=.2)
         heading = f"{numerator}/{denominator}" + (f" ({label})" if label else "")
         fig.suptitle(f"{heading}: balanced-class calibration", fontsize=16)
         fig.text(.5, .018, "Independent selected samples; equal class prior.\n"
-                 "Sparse bins omitted; residual errors include score–fraction covariance.",
+                 "Tied scores reduce the bin count; sparse class bins are omitted.\n"
+                 "Errors include score–fraction covariance, conditional on the chosen bins.",
                  ha="center", fontsize=10)
-        fig.subplots_adjust(top=.89, bottom=.17, left=.17, right=.96)
+        fig.subplots_adjust(top=.89, bottom=.19, left=.17, right=.96)
         _save_figure(fig, output)
     return fig
 
 
 def plot_ratio_task(numerator, denominator, samples, predictor, output, *, edges=None,
-                    score_bins=20, max_events=None, min_count=5, log=False,
+                    score_bins=15, max_events=None, min_count=5, log=False,
                     results=None, prefix="03", label=None, stages=("raw", "normalized")):
     """Save one completed classifier's independent validation figures/tables.
 
@@ -279,8 +339,8 @@ def plot_ratio_task(numerator, denominator, samples, predictor, output, *, edges
     results = output if results is None else Path(results)
     results.mkdir(parents=True, exist_ok=True)
     edges = _edges(np.linspace(-5., 6., 56) if edges is None else edges)
-    if score_bins < 2:
-        raise ValueError("score_bins must be at least two")
+    if isinstance(score_bins, (bool, np.bool_)) or not isinstance(score_bins, (int, np.integer)) or score_bins < 2:
+        raise ValueError("score_bins must be an integer of at least two")
     if max_events is not None and max_events < 2:
         raise ValueError("max_events must be at least two or None")
     key = f"{numerator}_over_{denominator}"
@@ -300,7 +360,7 @@ def plot_ratio_task(numerator, denominator, samples, predictor, output, *, edges
             raise ValueError(f"Nonfinite or extreme {stage} predictions for {key}; inspect the network")
         rw = reweighting_table(num, den, np.exp(log_den), edges, min_count=min_count)
         cal = calibration_table(expit(log_num), expit(log_den),
-                                np.linspace(0., 1., score_bins + 1), min_count=min_count)
+                                bins=score_bins, min_count=min_count)
         for table in (rw, cal):
             table.insert(0, "stage", stage)
             table.insert(0, "task", key)
@@ -323,7 +383,7 @@ def plot_ratio_task(numerator, denominator, samples, predictor, output, *, edges
     return {"reweighting": rw, "calibration": cal, "figures": figures}
 
 
-def plot_ratio_validation(samples, predictors, output, *, edges=None, score_bins=20,
+def plot_ratio_validation(samples, predictors, output, *, edges=None, score_bins=15,
                           max_events=None, min_count=5, log=False, results=None):
     """Save all five ratio tasks' reweighting and calibration figures/tables.
 
