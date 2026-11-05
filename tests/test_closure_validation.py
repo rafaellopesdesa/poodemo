@@ -165,3 +165,21 @@ def test_fresh_bank_reuses_only_its_own_frozen_selector_cache(tmp_path, monkeypa
     checkpoint.write_bytes(b"changed selector")
     with pytest.raises(ValueError, match="selector checkpoint changed"):
         prepare_validation_bank(run, n_per_sample=500)
+
+
+def test_optimizer_cannot_label_a_worse_boundary_solution_valid(monkeypatch):
+    from poodemo import inference
+    fields, weights = discrete_model()
+    truth = fields[0][1]+fields[0][3]
+    likelihood = IndependentValidationLikelihood(fields, weights, fields, weights*truth)
+
+    def bad_minimize(objective, start, **kwargs):
+        boundary = np.array([.001, -3.])
+        return SimpleNamespace(x=boundary, fun=objective(boundary), success=True,
+                               message='Converged at a bound', nfev=1)
+
+    monkeypatch.setattr(inference, 'minimize', bad_minimize)
+    fit = likelihood.fit(systematics=True, mu_bounds=(.001, 2.))
+    assert not fit.success
+    assert fit.nll == pytest.approx(likelihood.nll(1., [0.]))
+    assert 'worse objective' in fit.message

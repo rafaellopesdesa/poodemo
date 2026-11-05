@@ -205,31 +205,125 @@ available for optional use, but the notebook does not call them.
 Run the source cell and remaining notebook cells. The loader checks every file
 hash and confirms the generator, selector and threshold match the Drive run.
 A missing or incomplete transfer fails explicitly; it never falls back to training.
-Inference loads one network at a time and averages **ratios**, not logits, without
-allocating a members-by-events matrix. The saved scalar normalization is applied
-without refitting it on the plotted samples. Per-event weights are calculated
-in Colab and are not fetched from Unity.
+Inference loads one network at a time and averages **ratios**, not logits.
+Per-event weights are calculated in Colab and are not fetched from Unity.
 
-Original selected events, diagnostic banks, independent Poisson draws and workspace
-quadrature are reused. New outputs go under the original Drive run's
-`evaluations/<bundle>/<campaign-id>/`, so the three-member results remain
-available. Set `VALIDATE_UNITY_MEMBERS = True` to also plot all 500 individual
-networks; otherwise only the five full ensembles are plotted. Reweighting,
-calibration, independent closure and the usual three Asimov comparisons all use
-the imported models. Existing ratio/residual axis limits are retained.
+### Member screening before validation and fits
 
-For the original three-member workflow, explicitly set `RATIO_SOURCE = "drive"`.
-This change does not modify the frozen Unity training/generation code or campaign
-identity; the existing collector can be used without changing your running jobs.
+Notebook 03 screens **all five ensembles**, including SBI/S, B/S, NI/S,
+NI_up/NI and NI_down/NI. It rejects whole member trainings; it does not clip
+individual event weights, fit a calibration map, select on fitted parameters,
+or use analytic target ratios to decide membership. The original checkpoints
+and transferred bundle stay intact. The original Drive workflow also uses this
+screening after its members have been trained/reused.
 
-Ensembling may reduce fluctuation but cannot remove bias shared by the members.
-The unchanged notebook evaluation statistics and quadrature can still limit
-closure. Compare learned and analytic fits on the same events when assessing
-improvement.
+Each member is evaluated on the **full frozen integration bank**, including its
+sparsely populated tails, and the reserved Drive denominator calibration split.
+Nominal tasks use the signal integration measure. Systematic tasks use the
+**retained learned NI shape** on those same nodes, so screening checks the actual
+product of ratios used by the workspace. The diagnostic and independent Poisson
+banks never determine membership or scalar normalization. Because integration
+nodes now participate in member selection, they are not an independent test of
+that selection; the held-out diagnostics remain essential.
+
+The defaults in `MemberFilterPolicy` are deliberately loose numerical-quality
+cuts, not statistical confidence levels:
+
+| Check | Default rejection condition |
+| --- | --- |
+| Numeric output | Nonfinite prediction, or log ratio outside the inference range $[-700,700]$ |
+| Calibration mean | Raw deployed member mean outside $[1/5,5]$ on reserved calibration events |
+| Integration consistency | Integration mean divided by calibration mean outside $[1/5,5]$ |
+| Single-point concentration | More than 1% of normalized integration or calibration mass at one point |
+| Effective sample size | Less than 0.1% of the bank size on integration or calibration events |
+| Peer disagreement | Log-ratio departure exceeds both $\log(100)$ and 8 robust standard deviations, on more than 0.1% of member or peer integration mass |
+| Extreme pointwise disagreement | Departure exceeds both $\log(10^6)$ and 8 robust standard deviations at any integration point |
+
+Peer comparison uses the pointwise median and $1.4826\,\mathrm{MAD}$ among
+members that pass the preceding checks. Members are centered using their reserved
+calibration means **for this comparison only**. Inference still averages the
+original retained ratios arithmetically and applies one ensemble scalar. A
+negligible tail discrepancy alone is not sufficient for ordinary peer rejection.
+The separate six-orders-of-magnitude criterion catches extreme extrapolation
+even at very low-weight nodes, because the nuisance polynomial must remain
+physical at those nodes too.
+
+A strict majority must survive, with at least two retained members when the
+original ensemble has two or more. Widespread failures stop the audit with an
+explicit report; the code does not keep pruning until a fit succeeds. The retained
+ensemble must also pass the integral/concentration checks. Finally, the NI
+interpolation is checked over a grid in $[-1,1]$, including tiny displacements
+around zero. A remaining invalid morph stops evaluation. This grid is a preflight
+check, not a proof between grid points; the likelihood's domain checks remain.
+
+Configure thresholds in the notebook source cell, for example:
+
+```python
+from poodemo.member_filter import MemberFilterPolicy
+ENSEMBLE_FILTER_POLICY = MemberFilterPolicy(
+    max_integral_factor=5.0,
+    max_point_mass=0.01,
+    min_effective_fraction=0.001,
+    peer_factor=100.0,
+    catastrophic_peer_factor=1.e6,
+    peer_mad_scale=8.0,
+    peer_outlier_mass=0.001,
+    min_retained_fraction=0.5,
+)
+```
+
+Do not tune these thresholds to obtain a preferred likelihood result. A shared
+bias among members may pass this filter, and an otherwise legitimate but poorly
+sampled tail can fail the numerical-quality checks. Inspect reported failures
+and independent closure before changing a policy.
+
+After selection, the retained ensemble's mean-normalization scalar is recomputed
+on the original **Drive calibration split** (`selected/S_calibration.npy` or
+`selected/NI_calibration.npy`), since the Unity scalar belonged to a different
+membership. No Unity calibration events need to be transferred. The usual frozen
+workspace quadrature normalization is subsequently applied as before.
+
+The first audit adds inference over both banks for every member. It uses a
+temporary disk-backed log-prediction matrix in the Colab runtime, approximately
+360 MB for 100 members and 451,000 integration points, and removes it after each
+task. No large prediction matrix is written to Drive. Complete audits are reused
+when checkpoint/calibrator hashes, integration and calibration files, policy,
+and implementation match. A changed input creates a new filter identity.
+
+For Unity, outputs are under:
+
+```text
+runs/paper-distinct-s-v4/evaluations/<bundle>/<campaign-id>/filtered/<filter-id>/
+```
+
+The notebook prints this path and the retained/rejected counts. In that directory:
+
+- `results/ensemble_filter/members.csv`: every member, metrics, decision, and reasons.
+- `results/ensemble_filter/summary.csv`: counts and retained-ensemble metrics for all tasks.
+- `results/ensemble_filter/manifest.json`: source hashes, policy, calibration provenance,
+  original member paths, retained/rejected lists, and nuisance preflight result.
+- `models/ratios/<task>/ensemble.json`: relative references to the retained original
+  checkpoints, with the new normalization. These are views, not copied model files.
+
+All subsequent notebook-03 reweighting, calibration, architecture, independent
+closure, and Asimov fits read these same filtered manifests. Set
+`VALIDATE_UNITY_MEMBERS = True` to plot each retained member as well. Existing
+ratio/residual axis limits are retained. Previous unfiltered outputs are isolated
+from this run, and stale notebook outputs were cleared.
+
+Use a **fresh Colab runtime** (or refresh `/content/poodemo` and restart it) so the
+new Python module is loaded, then run notebook 03 from the top. Existing Drive
+samples and models are reused. For the original three-member workflow, explicitly
+set `RATIO_SOURCE = "drive"`; derived outputs live under
+`runs/<run>/evaluations/filtered/<filter-id>/`.
+
+This update leaves all files hashed by the Unity campaign unchanged. Existing
+training/generation jobs and the collector need no update or retraining.
 
 ## Tests
 
 ```bash
+python -m pytest -q tests/test_member_filter.py tests/test_notebook_unity_directory.py tests/test_closure_validation.py
 python -m pytest -q tests/test_unity_workflow.py tests/test_training.py tests/test_ratio_training_sequence.py
 ```
 

@@ -583,6 +583,7 @@ def run_closure_validation(run, bank, *, predictors=None, scan_points=81,
             for p in sorted(directory.rglob("*")) if p.is_file()
             and p.name in ("model.pt", "ensemble.json", "calibrator.joblib")}
     save_json(output / "provenance.json", {
+        "member_filter": getattr(run, "filter_manifest", None),
         "bank": bank["provenance"], "network_fingerprints": fingerprints,
         "workspace_quadrature": {name: file_digest(run.path("quadrature", name+".npy"))
                                  for name in ("x", "weights", "nominal", "down", "up")},

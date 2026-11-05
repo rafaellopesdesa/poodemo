@@ -792,24 +792,35 @@ workflow instead, explicitly set `RATIO_SOURCE = "drive"`.
 
 Only inference models and metadata are transferred. Event weights are computed
 here from the models on the existing Drive samples. The physics, preselection
-checkpoint and threshold must match exactly. Unity mode skips training and
-retains the Unity ensemble's independent mean-normalization constant; it does
-not fit anything to the diagnostic bank. The original Drive quadrature and
-cached diagnostic/Poisson events are reused. New plots, workspaces and results
-are saved in a separate `evaluations/<bundle>/<campaign>/` directory.
+checkpoint and threshold must match exactly. Unity mode skips training.
+Before validation, all five ensembles are screened member by member on the frozen workspace quadrature. Rejected checkpoints are
+listed with reasons; a separate manifest references only retained members.
+Their arithmetic mean is normalized again on the reserved **Drive calibration
+split**, never on the plotted diagnostic bank or observed data.
+`ENSEMBLE_FILTER_POLICY` controls the documented numerical-quality thresholds.
+Filtering stops if a majority cannot be retained or the nuisance morph is invalid.
+The original Drive quadrature and cached diagnostic/Poisson events are reused. New plots, workspaces and results
+are saved in `evaluations/<bundle>/<campaign>/filtered/<filter-id>/`.
+The report records source hashes, membership, calibration, and screening policy.
+A matching completed audit is reused; changed inputs or policy require a new audit.
+Selection uses the integration bank, so that bank is no longer an independent
+validation of model selection. The separate diagnostic/Poisson banks remain held out.
 
 The default Unity campaign has 100 members per ratio task, five million
 **selected training events per source**, 500,000 validation events and one
 million normalization events. All members use the same training bank with
 independent initialization/minibatch seeds. Ensemble averaging reduces training
 variability; shared sample/model/optimization bias need not disappear.
-`VALIDATE_UNITY_MEMBERS` also enables every member's diagnostic plots; by default
-only the complete ensembles are plotted. Saved outputs below still describe
-the earlier run until you execute the notebook again.
+`VALIDATE_UNITY_MEMBERS` also enables each retained member's diagnostic plots;
+by default only the retained ensembles are plotted. The first audit evaluates
+every member on the integration and reserved calibration banks; this adds
+inference time but performs no Unity retraining. Use a fresh Colab runtime to
+load the updated source. Downstream outputs must be recomputed after filtering.
 """
 
 UNITY_SOURCE_CODE = r'''
 from poodemo.ensemble_bundle import use_bundle, BundleEvaluationRun
+from poodemo.member_filter import MemberFilterPolicy, unfiltered_run
 
 RATIO_SOURCE = "unity"  # "unity": transferred models; "drive": original three-member workflow.
 UNITY_MODEL_DIR = Path(os.environ.get(
@@ -817,8 +828,10 @@ UNITY_MODEL_DIR = Path(os.environ.get(
     "/content/drive/MyDrive/poodemo/unity_models/paper-distinct-s-v4-unity100",
 )).expanduser()
 VALIDATE_UNITY_MEMBERS = False
+ENSEMBLE_FILTER_POLICY = MemberFilterPolicy()  # See unity/README.md for thresholds.
 
-source_run = run.base_run if isinstance(run, BundleEvaluationRun) else run
+source_run = unfiltered_run(run)
+source_run = source_run.base_run if isinstance(source_run, BundleEvaluationRun) else source_run
 if RATIO_SOURCE == "unity":
     if not (UNITY_MODEL_DIR / "bundle.json").is_file():
         raise FileNotFoundError(
@@ -856,12 +869,12 @@ reported as successful closure.
 
 Calibration figures compare the mean predicted score $s=r/(1+r)$ to the
 observed numerator fraction using an equal class prior, with residual
-$f_{\rm numerator}-\langle s\rangle$ underneath. Immediately after **each
-member** finishes, its raw reweighting and calibration plots are displayed,
-before training the next member in Drive mode. Unity mode evaluates saved
-ensembles (and optionally their members) without training. The final ratio is shown in
-both raw and calibration-mean-normalized forms. Member checks do not alter
-the ensemble weights or fit any calibration map. Calibration
+$f_{\rm numerator}-\langle s\rangle$ underneath. After the member filter
+freezes all five memberships, the retained ensembles
+(and optionally their retained members) are plotted. Unity mode loads existing
+models; Drive mode first trains/reuses its members. The final ratio is shown in
+both raw and calibration-mean-normalized forms. These plotted diagnostics do
+not change membership, ensemble weights, or fit any calibration map. Calibration
 here is a diagnostic: these cells do not fit a new calibration map. Error bars
 describe the independent finite validation samples conditional on the trained
 network; they do not include training or calibration uncertainty.
@@ -884,30 +897,34 @@ display(pd.DataFrame([
 '''
 
 TRAIN_RATIOS_WITH_VALIDATION_CODE = r'''
-from poodemo.pipeline import train_ratios
+from poodemo.member_filter import filter_ratio_ensembles, prepare_ratio_members, unfiltered_run
+from poodemo.ensemble_bundle import validate_bundle_ratios
 
 def show_ratio_validation(report):
     print(f"{report['ratio']} — {report['stage']}", flush=True)
     for figure in report["figures"].values():
         display(figure)
-    # Canvases are saved and closed by the pipeline after this callback returns.
+    # Canvases are saved and closed after this callback returns.
     if report["stage"] == "ensemble":
         display(report["reweighting"].groupby("stage", sort=False)[
             ["denominator_mean_ratio", "numerator_events", "denominator_events"]].first())
 
 validation_options = {"edges": DIAGNOSTIC_EDGES, "score_bins": CALIBRATION_BINS,
                       "log": VALIDATION_LOG_SCALE}
-if RATIO_SOURCE == "unity":
-    from poodemo.ensemble_bundle import validate_bundle_ratios
-    ratio_diagnostics = validate_bundle_ratios(
-        run, validation_bank["samples"], on_validation=show_ratio_validation,
-        validation_options=validation_options, validate_members=VALIDATE_UNITY_MEMBERS)
-else:
-    ratio_diagnostics = train_ratios(
-        run, validation_samples=validation_bank["samples"],
-        on_validation=show_ratio_validation, validation_options=validation_options)
+# Freeze membership before any plotted validation or likelihood evaluation.
+ensemble_run = unfiltered_run(run)
+if RATIO_SOURCE == "drive":
+    # Train/reuse all original members, then validate the retained ensembles.
+    prepare_ratio_members(ensemble_run)
+run = filter_ratio_ensembles(ensemble_run, policy=ENSEMBLE_FILTER_POLICY)
+ROOT = run.evaluation_root
+display(pd.read_csv(run.path("results", "ensemble_filter", "summary.csv")))
+print("Member decisions:", run.path("results", "ensemble_filter", "members.csv"))
+ratio_diagnostics = validate_bundle_ratios(
+    run, validation_bank["samples"], on_validation=show_ratio_validation,
+    validation_options=validation_options, validate_members=VALIDATE_UNITY_MEMBERS)
 display(ratio_diagnostics)
-print("Saved per-member and ensemble plots:", run.path("plots", "03_validation"))
+print("Saved retained-member and ensemble plots:", run.path("plots", "03_validation"))
 '''
 
 CLOSURE_VALIDATION_INTRO = r"""
@@ -960,7 +977,7 @@ CLOSURE_PROFILE_NI = True
 closure_validation = run_closure_validation(
     run, validation_bank, scan_points=CLOSURE_SCAN_POINTS,
     poisson_generated_events=POISSON_GENERATED_EVENTS, profile=CLOSURE_PROFILE_NI,
-    output_directory=run.path("results", "03_closure") if RATIO_SOURCE == "unity" else None,
+    output_directory=run.path("results", "03_closure"),
 )
 display(closure_validation["convergence"])
 display(closure_validation["fits"])

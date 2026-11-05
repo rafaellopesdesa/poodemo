@@ -283,16 +283,20 @@ class TemplateLikelihood:
             bounds = [tuple(mu_bounds)] + bounds_alpha
             unpack = lambda z: (float(z[0]), np.asarray(z[1:]))
         results = []
+        best_seen = [np.inf, None]
         for start in starts:
             def objective(z):
                 value = self.nll(*unpack(z))
+                if np.isfinite(value) and value < best_seen[0]:
+                    best_seen[:] = [value, np.asarray(z).copy()]
                 return value if np.isfinite(value) else 1e100
+            objective(start)
             result = minimize(objective, start, method="L-BFGS-B", bounds=bounds,
                               options={"maxiter": maxiter, "ftol": 1e-12, "gtol": 1e-7})
             if not result.success:
                 fallback = minimize(objective, result.x, method="Powell", bounds=bounds,
                                     options={"maxiter": maxiter, "ftol": 1e-10, "xtol": 1e-7})
-                if fallback.success or fallback.fun <= result.fun:
+                if fallback.fun <= result.fun:
                     result = fallback
             results.append(result)
         converged = [result for result in results if result.success and result.fun < 1e99]
@@ -305,6 +309,11 @@ class TemplateLikelihood:
             best = min(unresolved, key=lambda result: result.fun)
         mu, alpha = unpack(best.x)
         value = self.nll(mu, alpha)
+        if best_seen[0] < value - 1e-6:
+            mu, alpha = unpack(best_seen[1])
+            return FitResult(mu, alpha.copy(), float(best_seen[0]), False,
+                             'Optimizer returned a worse objective than an evaluated point',
+                             int(sum(result.nfev for result in results)))
         return FitResult(mu, alpha.copy(), value, bool(best.success and np.isfinite(value)),
                          str(best.message), int(sum(result.nfev for result in results)))
 

@@ -38,7 +38,7 @@ def test_top_to_bottom_model_selection_precedes_validation(
     import os
     import numpy as np
     import pandas as pd
-    from poodemo import closure_validation, pipeline
+    from poodemo import closure_validation, pipeline, member_filter
 
     events = []
     run = Run(tmp_path/'run', {}, PhysicsModel())
@@ -67,24 +67,35 @@ def test_top_to_bottom_model_selection_precedes_validation(
         return {'samples': samples, 'generated_counts': {'S': 2}}
 
     def validate(selected_run, validation_samples, **kwargs):
-        assert ratio_source == 'unity', 'Drive mode must retain its training workflow'
-        check_run(selected_run)
+        assert isinstance(selected_run, member_filter.FilteredEvaluationRun)
+        check_run(selected_run.base_run)
         assert validation_samples is samples
         assert kwargs['validate_members'] is False
         events.append('validate')
         return pd.DataFrame()
 
-    def train(selected_run, *, validation_samples, **kwargs):
+    def train(selected_run, **kwargs):
         assert ratio_source == 'drive', 'Unity mode must never train in Colab'
         check_run(selected_run)
-        assert validation_samples is samples
+        assert 'validation_samples' not in kwargs  # Diagnostics follow filtering.
         events.append('train')
         return pd.DataFrame()
+
+    def filter_members(selected_run, *, policy):
+        check_run(selected_run)
+        assert isinstance(policy, member_filter.MemberFilterPolicy)
+        events.append('filter')
+        filtered = member_filter.FilteredEvaluationRun(selected_run, tmp_path/'filtered', {})
+        report = filtered.path('results', 'ensemble_filter', 'summary.csv')
+        report.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({'retained_members': [4]}).to_csv(report, index=False)
+        return filtered
 
     monkeypatch.setattr(ensemble_bundle, 'use_bundle', load_models)
     monkeypatch.setattr(closure_validation, 'prepare_validation_bank', prepare_bank)
     monkeypatch.setattr(ensemble_bundle, 'validate_bundle_ratios', validate)
-    monkeypatch.setattr(pipeline, 'train_ratios', train)
+    monkeypatch.setattr(member_filter, 'prepare_ratio_members', train)
+    monkeypatch.setattr(member_filter, 'filter_ratio_ensembles', filter_members)
     namespace = {'os': os, 'Path': Path, 'run': run, 'MODE': 'smoke',
                  'np': np, 'pd': pd, 'display': lambda value: None}
     for source in notebook_code:
@@ -94,10 +105,9 @@ def test_top_to_bottom_model_selection_precedes_validation(
                                           'prepare_validation_bank(run,',
                                           'ratio_diagnostics = validate_bundle_ratios(')):
             exec(source, namespace)
-    assert events == (['load', 'bank', 'validate'] if ratio_source == 'unity'
-                      else ['bank', 'train'])
-    assert namespace['ROOT'] == (namespace['run'].evaluation_root if ratio_source == 'unity'
-                                 else run.root)
+    assert events == (['load', 'bank', 'filter', 'validate'] if ratio_source == 'unity'
+                      else ['bank', 'train', 'filter', 'validate'])
+    assert namespace['ROOT'] == namespace['run'].evaluation_root
 
 
 def source_constants():
