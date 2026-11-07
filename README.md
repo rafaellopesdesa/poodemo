@@ -607,6 +607,25 @@ it does not by itself establish coverage or an optimal floor for every truth.
 The primary estimator CSV and metadata retain the configured positive floor;
 separate `reference_ratio_estimator_eta_no_floor.csv` and
 `reference_ratio_estimator_eta_no_floor_config.json` preserve the unfloored control.
+
+Notebook 08 defaults to the **filtered Unity ensembles selected in notebook 03**.
+Keep the same `UNITY_MODEL_DIR` (by default
+`My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`) and
+`ENSEMBLE_FILTER_POLICY`. The bundle is verified and the unchanged filter cache
+is reused for all five ensembles; no training is performed. The original Drive
+models remain available through the explicit `RATIO_SOURCE="drive"` option.
+Use a fresh Colab runtime and run 08 from the top after updating the source.
+
+The observable and histogram templates remain analytical. The unbinned refresh
+evaluates the selected neural ratios on the existing Drive quadrature. Every
+08 table, figure, and workspace is routed through the selected evaluation,
+including the bin-count sweep and no-floor control. The printed output directory
+and `reference_ratio_model_source.json` record the campaign and filter identity.
+Analysis-setting copies preserve this selection with `run.with_config(...)`;
+they do not change the saved generation/training configuration. A matching
+`RUN_NAME` alone does not select these outputs in downstream notebooks: those
+must also use the same ensemble/filter evaluation before consuming 08 results.
+
 Notebook 09 includes
 an explicit knot at the floor transition, as well as at eta=1, and validates
 intermediate template predictions. Data are refilled directly at physical

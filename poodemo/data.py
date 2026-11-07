@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import copy
 from pathlib import Path
 import hashlib
 import json
@@ -48,6 +49,20 @@ class Run:
 
     def path(self, *parts):
         return self.root.joinpath(*parts)
+
+    def with_config(self, **updates):
+        """Copy analysis settings while preserving model and output routing.
+
+        Bundle/filter views have extra constructor arguments, so dataclass
+        replacement cannot clone them. Keep their identity and paths, and
+        propagate the settings through any wrapped runs without modifying the
+        original views or the persisted generation/training configuration.
+        """
+        updated = copy(self)
+        updated.config = {**self.config, **updates}
+        if hasattr(self, 'base_run'):
+            updated.base_run = self.base_run.with_config(**updates)
+        return updated
 
 
 def default_config(mode="production"):
