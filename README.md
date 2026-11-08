@@ -15,7 +15,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Study the floored reference ratio with 36-bin displays and a resolution sweep | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
-| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Interpolate 36-bin reference-ratio templates and compare profiled fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
+| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Compare adaptive bin splines and joint cumulative interpolation with direct fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
@@ -608,7 +608,7 @@ The primary estimator CSV and metadata retain the configured positive floor;
 separate `reference_ratio_estimator_eta_no_floor.csv` and
 `reference_ratio_estimator_eta_no_floor_config.json` preserve the unfloored control.
 
-Notebook 08 defaults to the **filtered Unity ensembles selected in notebook 03**.
+Notebooks 08 and 09 default to the **filtered Unity ensembles selected in notebook 03**.
 Keep the same `UNITY_MODEL_DIR` (by default
 `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`) and
 `ENSEMBLE_FILTER_POLICY`. The bundle is verified and the unchanged filter cache
@@ -626,19 +626,56 @@ they do not change the saved generation/training configuration. A matching
 `RUN_NAME` alone does not select these outputs in downstream notebooks: those
 must also use the same ensemble/filter evaluation before consuming 08 results.
 
-Notebook 09 includes
-an explicit knot at the floor transition, as well as at eta=1, and validates
-intermediate template predictions. Data are refilled directly at physical
-eta using the same floored map. Saved notebook-08 metadata must match the
-floor, power, bin-edge policy and requested bin count before notebook 09 can
-reuse it. Changing the compression settings requires rerunning 08 then 09.
-The piecewise-constant low-end partition does not remove physical mu dependence
-from the interpolated likelihood's yields.
+Notebook 09 reuses the matching 08 unbinned curves and compares three independent
+interpolators against direct fills: adaptive bin-fraction PCHIP, a joint CDF in
+$(z,\eta)$, and a joint CDF in $(u,\eta)$, where
+
+$$
+u_\eta(x)=\frac{\log R_\eta(x)}{\eta_{\rm eff}-1},\qquad
+u_1(x)=\left.\partial_\mu\log p(x;\mu,0)\right|_{\mu=1}.
+$$
+
+CDFs use convex linear interpolation in $\eta$ to preserve monotonicity and
+normalization. The raw-$z$ control is equivalent to linear interpolation of
+bin yields at fixed edges. The $u$ method uses monotone PCHIP through weighted
+mid-mass CDF values at all distinct event coordinates. It integrates over the
+**original $z$ bins**, mapped into $u$ with the order reversed below $1$.
+It does not introduce fixed score bins. The equality collapse at $\eta=1$ and
+the plateau below the floor remain exact; physical coefficients are unchanged.
+The finite-bank CDF smoothing error is checked at anchors, independently of
+errors between $\eta$ anchors.
+
+`SPLINE_SETTINGS` controls the initial grid focused around $1$, separate adaptive
+budgets, per-bin diagnostic error and physical-mixture Poisson-deviance tolerances,
+and off-anchor likelihood tolerance (default $|\Delta q|\leq0.01$). Midpoints
+drive refinement; separate golden-fraction points are reserved for validation.
+Asimov counts are always refilled. The summary reports failed checks, fit failures,
+refinement limits and MLE shifts. Full $(\mu,\alpha_{NI})$ surfaces at the worst
+points use a common likelihood offset. Same-parameter NLL and small/empty-bin
+checks accompany the profiled comparisons; morph-order differences remain separate.
+No positive means or pseudo-counts are added. A failed optimizer can be certified
+only when a feasible point attains the known nonnegative NLL lower bound within
+$10^{-10}$; both its original status and the certificate are recorded.
+
+Run 09 from the top in a fresh runtime or refreshed source checkout. The interpolation
+and fits run on CPU and print progress. Only two full-event CDFs are cached at a
+time; no new training or event generation is needed. Saved 08 metadata must match
+the selected evaluation, floor, power, bin edges and requested bin count.
+
+New products are isolated in `results/reference_ratio_interpolation/` and
+`plots/09_interpolation/` under the selected filtered evaluation. They include
+per-method anchor NPZ files, refinement histories, independent validation tables,
+fits, bin errors, common-parameter NLL comparisons and surfaces. Metadata records
+the model selection, interpolation settings and quadrature fingerprint. The $u$
+CDFs can be rebuilt from that existing bank and the saved recipe; the bank is not
+duplicated. Legacy spline products and notebook 08 results are not overwritten,
+and no method is automatically promoted to downstream inference.
 
 The builders preserve current study and plotting controls while refreshing
 these notebooks and clearing their stale outputs. Use
-`python scripts/build_reference_notebooks.py` to rebuild only 08–09.
-Notebooks 01–07 and their outputs are not rewritten.
+`python scripts/build_reference_spline_notebook.py` to rebuild **09 only**, preserving
+the executed 08 notebook. `python scripts/build_reference_notebooks.py` explicitly
+rebuilds both 08 and 09. Other notebooks and their outputs are not rewritten.
 
 ## Process discriminators and sampling calibration (10–11)
 

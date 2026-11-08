@@ -355,7 +355,7 @@ with plt.style.context(hep.style.ATLAS), plt.rc_context({"font.size": 14}):
 
 def configure_reference_cells(cells, number):
     """Migrate only relevant controls/text; retain custom axes and bin sweeps."""
-    if number == 8 and not any(cell.get('id') == 'reference-model-source' for cell in cells):
+    if number in (8, 9) and not any(cell.get('id') == 'reference-model-source' for cell in cells):
         setup_index = next(i for i, cell in enumerate(cells)
                            if 'run = create_run(ROOT,' in cell.source)
         cells[setup_index + 1:setup_index + 1] = [
@@ -519,10 +519,13 @@ the transition just above eta_min, and the separate rate-only collapse at eta=1.
 The floor only targets the low-eta compression problem diagnosed in notebook 12;
 it does not imply full-family sufficiency or guarantee coverage. Notebook 11
 uses direct yields and pseudo-experiments, independently of spline precision.'''
-        if number == 8 and cell.cell_type == 'code':
+        if number in (8, 9) and cell.cell_type == 'code':
             source = source.replace('ROOT / "results"', 'run.path("results")')
             source = source.replace('ROOT / "plots"', 'run.path("plots")')
         cell.source = source
+    if number == 9:
+        from build_reference_spline_notebook import spline_cells
+        cells = spline_cells(cells)
     return cells
 
 
