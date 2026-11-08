@@ -1,9 +1,8 @@
 """Constrained reference-ratio template interpolation for notebook 09.
 
-Eta selects a frozen partition, never the physical fit parameter. The study
-compares independent-bin PCHIP with two cumulative-distribution surfaces.
-CDF surfaces use convex, degree-one interpolation in eta (monotonicity in the
-observable is then guaranteed), not unconstrained bicubic interpolation.
+Eta selects a frozen partition, never the physical fit parameter. Both methods
+use the rescaled coordinate u: a smooth CDF and an exact weighted empirical CDF.
+Convex, degree-one interpolation in eta preserves coordinate monotonicity.
 """
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
@@ -17,11 +16,11 @@ from scipy.special import logit
 
 from . import pipeline
 from .data import PROCESSES, save_json
-from .inference import FitResult, YieldFractionSpline, component_coefficients, poisson_asimov_nll
+from .inference import FitResult, component_coefficients, poisson_asimov_nll
 
-METHODS = ("bin_pchip", "cdf_z", "cdf_u")
-LABELS = {"direct": "Direct fills", "bin_pchip": "Adaptive bin PCHIP",
-          "cdf_z": "Joint CDF in z", "cdf_u": "Joint CDF in u"}
+METHODS = ("cdf_u", "ecdf_u")
+LABELS = {"direct": "Direct fills", "cdf_u": "Smooth CDF in u",
+          "ecdf_u": "Exact weighted empirical CDF in u"}
 VARIATIONS = ("nominal", "NI_down", "NI_up")
 
 
@@ -111,17 +110,18 @@ class TemplateBank:
         z = pipeline.observable_values(self.run, self.quad, eta, "reference_ratio")
         return np.histogram(z, self.edges, weights=self.quad["weights"] * self.quad["truth"])[0]
 
-    def _cdf(self, anchor):
+    def _cdf(self, anchor, *, empirical=False):
         anchor = max(float(anchor), self.floor)
-        if anchor in self.cdf_cache:
-            self.cdf_cache.move_to_end(anchor)
-            return self.cdf_cache[anchor]
+        key = (anchor, empirical)
+        if key in self.cdf_cache:
+            self.cdf_cache.move_to_end(key)
+            return self.cdf_cache[key]
         # Discard before constructing another large spline, bounding peak RAM.
         while len(self.cdf_cache) >= self.cache_size:
             self.cdf_cache.popitem(last=False)
         u = rescaled_log_ratio(self.quad, anchor)
         order = np.argsort(u, kind="stable")
-        coordinates, starts, counts = np.unique(u[order], return_index=True, return_counts=True)
+        coordinates, starts = np.unique(u[order], return_index=True)
         flat = self.weighted.reshape(-1, len(u))
         # Identical nominal/varied S, SBI and B share one CDF. This also makes
         # their numerical support exactly identical across nuisance anchors.
@@ -136,6 +136,14 @@ class TemplateBank:
         totals = weights.sum(axis=1)
         grouped = np.add.reduceat(weights, starts, axis=1)
         cumulative = np.cumsum(grouped, axis=1)
+        if empirical:
+            # Unnormalized prefix sums, including the empty prefix. Searching
+            # distinct coordinates includes/excludes an entire tied mass.
+            # No mid-mass smoothing, endpoint adjustment or renormalization.
+            record = (coordinates, np.column_stack([np.zeros(len(unique)), cumulative]),
+                      np.asarray(mapping))
+            self.cdf_cache[key] = record
+            return record
         # Mid-mass knots give a monotone continuous approximation to the
         # empirical CDF. Every distinct event coordinate is retained: there
         # is no uniform-grid compression that could discard small tails.
@@ -147,17 +155,26 @@ class TemplateBank:
         else:
             cdf = None  # A genuine point mass; handle its jump exactly.
         record = (coordinates, cdf, np.asarray(mapping))
-        self.cdf_cache[anchor] = record
+        self.cdf_cache[key] = record
         return record
 
-    def cdf_u_bins(self, anchor, eta):
+    def cdf_u_bins(self, anchor, eta, *, empirical=False):
         """Integrate an anchor's u CDF over the query eta's ORIGINAL z bins."""
-        coordinates, cdf, mapping = self._cdf(anchor)
+        if not np.isfinite(eta) or eta == 1.:
+            raise ValueError("Query eta must be finite and different from 1; fill the collapse exactly")
+        coordinates, cdf, mapping = self._cdf(anchor, empirical=empirical)
         boundaries = logit(self.edges) / (self.power * (eta - 1.))
         reverse = eta < 1.
         if reverse:
             boundaries = boundaries[::-1]
-        if cdf is None:
+        if empirical:
+            # Original bins are [lo,hi), with the final edge included. Mapping
+            # reverses them to (lo,hi] below eta=1. Infinite u endpoints include
+            # the complete finite bank, including saturated z=0 or z=1 values.
+            indices = np.searchsorted(coordinates, boundaries, side="right" if reverse else "left")
+            bins = np.diff(cdf[:, indices], axis=-1)[mapping].reshape(
+                *self.totals.shape, len(boundaries) - 1)
+        elif cdf is None:
             # Positive slope: [lo,hi); negative slope: (lo,hi].
             fraction = ((coordinates[0] >= boundaries[:-1]) & (coordinates[0] < boundaries[1:])
                         if not reverse else
@@ -177,18 +194,17 @@ class TemplateBank:
 
 
 class CumulativeTemplates:
-    """Monotone coordinate splines, with convex linear eta interpolation.
+    """Smooth or empirical u CDFs, with convex linear eta interpolation.
 
-    z uses cumulative probabilities at the original bin edges. At those edges
-    it is exactly the linear-bin-interpolation control. u uses full event CDFs;
-    its original-bin boundaries move with eta. No cubic eta overshoot or
-    independent renormalization can change total probability.
+    Original z-bin boundaries move in u with the query eta. The empirical
+    variant is exact on its finite bank at eta anchors, up to arithmetic;
+    interpolation between anchors still requires independent validation.
     """
 
-    def __init__(self, bank, etas, coordinate):
-        self.bank, self.etas, self.coordinate = bank, np.asarray(etas, float), coordinate
-        if coordinate not in ("z", "u") or len(self.etas) < 2 or np.any(np.diff(self.etas) <= 0):
-            raise ValueError("Expected increasing anchors and coordinate z or u")
+    def __init__(self, bank, etas, *, empirical=False):
+        self.bank, self.etas, self.empirical = bank, np.asarray(etas, float), empirical
+        if len(self.etas) < 2 or np.any(~np.isfinite(self.etas)) or np.any(np.diff(self.etas) <= 0):
+            raise ValueError("Expected finite increasing eta anchors")
         self.totals = bank.totals
 
     def _one(self, eta):
@@ -199,13 +215,8 @@ class CumulativeTemplates:
         right = int(np.clip(np.searchsorted(self.etas, eta, side="right"), 1, len(self.etas) - 1))
         left, right = self.etas[right - 1], self.etas[right]
         fraction = (eta - left) / (right - left)
-        if self.coordinate == "z":
-            # PCHIP in z reproduces the CDF's bin-edge knots. Evaluating only
-            # those knots is algebraically the same as this direct expression.
-            low, high = self.bank.exact(left), self.bank.exact(right)
-        else:
-            low = self.bank.cdf_u_bins(left, eta)
-            high = self.bank.cdf_u_bins(right, eta) if fraction != 0 else low
+        low = self.bank.cdf_u_bins(left, eta, empirical=self.empirical)
+        high = self.bank.cdf_u_bins(right, eta, empirical=self.empirical) if fraction != 0 else low
         return (1. - fraction) * low + fraction * high
 
     def __call__(self, eta):
@@ -237,11 +248,9 @@ def initial_eta_grid(run, settings):
 
 
 def make_interpolator(bank, etas, method):
-    if method == "bin_pchip":
-        return YieldFractionSpline(etas, np.stack([bank.exact(e) for e in etas]))
     if method not in METHODS:
         raise ValueError(f"Unknown interpolation method: {method}")
-    return CumulativeTemplates(bank, etas, method[-1])
+    return CumulativeTemplates(bank, etas, empirical=method == "ecdf_u")
 
 
 def template_metrics(exact, predicted, probe_mus):
@@ -406,13 +415,15 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     probe_mus = np.unique(np.r_[np.linspace(*bounds, 5), run.config["asimov_mu"]])
     output = run.path("results", "reference_ratio_interpolation")
     output.mkdir(parents=True, exist_ok=True)
-    metadata = dict(schema_version=1, settings=asdict(settings),
+    metadata = dict(schema_version=2, settings=asdict(settings),
                     observable=pipeline.observable_configuration(run, "reference_ratio"),
                     bin_edges=bank.edges.tolist(), n_bins=n_bins,
                     quadrature_fingerprint=_fingerprint(bank),
                     probe_mus=probe_mus.tolist(), evaluation_root=str(run.path("results").parent),
-                    cdf_recipe="full-event mid-mass monotone PCHIP in u; convex linear eta interpolation",
-                    anchor_archive_contents="Direct input histograms; cdf_u predictions also require the quadrature and recipe",
+                    cdf_recipes={"cdf_u": "full-event mid-mass monotone PCHIP in u",
+                                 "ecdf_u": "exact weighted empirical CDF in u; grouped ties and raw prefix sums"},
+                    eta_interpolation="convex linear; query eta maps original z edges into each anchor's u CDF",
+                    anchor_archive_contents="Direct input histograms; both u CDF methods also require the quadrature and recipe",
                     status="running", methods=list(METHODS))
     provenance = run.path("results", "reference_ratio_model_source.json")
     if provenance.exists():
@@ -430,11 +441,10 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     validation, worst_bins, fit_candidates = [], [], []
     for method, model in models.items():
         heldout = heldout_eta_grid(model, bank.floor, settings.validation_intervals)
-        # u also has a coordinate-smoothing error AT eta anchors. Expose that
-        # independently: eta refinement cannot remove that source of error.
+        # Separate coordinate approximation from eta interpolation for BOTH
+        # methods. The empirical method should close at its anchors to roundoff.
         points = [(e, "heldout") for e in heldout]
-        if method == "cdf_u":
-            points += [(e, "anchor_coordinate_check") for e in model.etas]
+        points += [(e, "anchor_coordinate_check") for e in model.etas]
         for point_number, (eta, role) in enumerate(sorted(points), start=1):
             exact, prediction = bank.exact(eta), model(eta)
             metrics = template_metrics(exact, prediction, probe_mus)
@@ -554,13 +564,16 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
         truth = fixed.loc[(fixed.mu == run.config["asimov_mu"]) & (fixed.alpha_NI == 0.)]
         truth_nll = float(truth.nll_interpolated.max())
         history = next(h for h in histories if h.method.iloc[0] == method)
+        heldout = v.loc[v.role == "heldout"]
+        anchors = v.loc[v.role == "anchor_coordinate_check"]
         summary.append(dict(method=method, n_anchors=len(model.etas),
                             stop_reason=history.stop_reason.iloc[-1],
-                            heldout_checks=int((v.role == "heldout").sum()),
-                            template_failures=int((~v.passed).sum()),
-                            off_anchor_fits=len(c), q_failures=int((~all_fits.q_passed).sum()),
+                            heldout_checks=len(heldout), heldout_failures=int((~heldout.passed).sum()),
+                            anchor_checks=len(anchors), anchor_failures=int((~anchors.passed).sum()),
+                            fit_checks=len(all_fits), off_anchor_fits=len(c),
+                            q_failures=int((~all_fits.q_passed).sum()),
                             invalid_fits=int((~all_fits.valid | ~all_fits.valid_direct).sum()),
-                            max_abs_delta_q=float(c.delta_q.abs().max()),
+                            max_abs_delta_q=float(all_fits.delta_q.abs().max()),
                             mle_shift_flags=int(all_fits.mle_shift_flag.sum()),
                             domain_mismatches=domain_mismatches, max_truth_nll=truth_nll,
                             passed=bool(history.stop_reason.iloc[-1] == "tolerances_met"

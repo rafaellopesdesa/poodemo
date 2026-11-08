@@ -4,10 +4,9 @@ from build_notebooks import REPO
 
 DESCRIPTION = r'''# 9. Reference-ratio interpolation and likelihood closure
 
-Compare direct **36-bin** histograms with three template interpolators:
-independent-bin PCHIP with adaptive $\eta$ anchors, a joint cumulative
-representation in $(z,\eta)$, and a cumulative representation using the
-rescaled coordinate $(u,\eta)$. Keep the observable floor at $0.2$ and power
+Compare direct **36-bin** histograms with two methods in the rescaled coordinate
+$(u,\eta)$: a **smooth CDF** and an **exact weighted empirical CDF**. Both use
+adaptive $\eta$ anchors. Keep the observable floor at $0.2$ and power
 at $100$, matching notebook 08 and its selected, filtered Unity ensembles.
 
 The direct fills remain the reference. A method is **not accepted merely
@@ -16,20 +15,7 @@ profiled likelihoods, fitted branches and common-parameter objectives are
 reported separately. No interpolation is automatically selected for downstream
 inference. This notebook requires no new samples or network training.'''
 
-THEORY = r'''### Interpolate probability across bins and construction points
-
-For each component $j$ and nominal/NI variation, the cumulative representation
-predicts original-bin yields as
-$$
-H_{jb}(\eta)=N_j\,[F_j(z_{b+1},\eta)-F_j(z_b,\eta)].
-$$
-Monotonicity in the coordinate and fixed cumulative endpoints preserve
-nonnegative bins and the component total. We use **convex linear interpolation
-in $\eta$**, a degree-one spline; unconstrained bicubic interpolation would not
-preserve those guarantees. In the raw-$z$ control, coordinate-spline knots
-include every output edge, so the resulting counts are algebraically equal
-to linear interpolation of bin yields. Coupling bins alone is not a guarantee
-of improved closure.
+THEORY = r'''### Two CDF representations in the rescaled coordinate
 
 Near $\eta=1$, remove the known contraction from the interpolation coordinate:
 $$
@@ -37,9 +23,8 @@ u_\eta(x)=\frac{\log R_\eta(x)}{\eta_{\mathrm{eff}}-1},\qquad
 u_1(x)=\left.\partial_\mu\log p(x;\mu,0)\right|_{\mu=1},\qquad
 z_\eta=\operatorname{sigmoid}\!\left[a(\eta_{\mathrm{eff}}-1)u_\eta\right].
 $$
-The implementation uses `log1p` and the analytic
-interference coefficients to avoid cancellation near the reference point.
-The **original $z$ bin edges** map to
+The implementation uses `log1p` and the analytic interference coefficients to
+avoid cancellation near the reference point. The **original $z$ bin edges** map to
 $$
 u_b(\eta)=\frac{\operatorname{logit}(z_b)}{a(\eta_{\mathrm{eff}}-1)}.
 $$
@@ -48,12 +33,36 @@ At $\eta=1$, the histogram is filled exactly into the bin containing $0.5$;
 we do not replace this rate-only experiment with fixed score bins. The exact
 floor plateau is also preserved. Physical $\mu$ is never floored.
 
-The $u$ CDF uses monotone PCHIP through weighted mid-mass values at **all distinct
-event coordinates**. Only two anchor CDFs are kept in memory. Its continuous
-approximation to the finite-bank empirical CDF introduces a coordinate-smoothing
-error, which is tested at $\eta$ anchors as well as between them. More $\eta$
-anchors cannot remove that error. Structural support endpoints and equality
-collapse remain exact; no positive bin floors or pseudo-counts are introduced.'''
+At each anchor $\eta_k$, and for each component $j$ and nominal/NI variation,
+compare two representations of the same weighted event bank:
+
+- **Smooth CDF in $u$ (`cdf_u`):** monotone PCHIP through weighted mid-mass
+  values at all distinct event coordinates. This continuous approximation can
+  introduce coordinate-smoothing errors even at its own $\eta$ anchors.
+- **Exact weighted empirical CDF in $u$ (`ecdf_u`):** retain every weighted
+  point mass, group ties, and evaluate cumulative sums with binary searches.
+  There is no smoothing in $u$, no endpoint adjustment, and no renormalization.
+  For positive component weights $w_{ij}$ and total $N_j=\sum_i w_{ij}$,
+  $$
+  \widehat F_{j,k}(u)=\frac{1}{N_j}\sum_i w_{ij}\,
+       \mathbf{1}\!\left[u_{\eta_k}(x_i)\leq u\right].
+  $$
+
+Both methods integrate the anchor CDFs over the **query $\eta$'s original bin
+boundaries** and use convex linear interpolation between neighboring $\eta$
+anchors. This degree-one interpolation preserves coordinate monotonicity,
+nonnegative component bins and component totals. With the empirical CDF, the
+endpoint convention matters: $[u_{\rm lo},u_{\rm hi})$ above $1$ and
+$(u_{\rm lo},u_{\rm hi}]$ below $1$. All tied events enter the same bin.
+The infinite endpoint limits retain the complete finite bank.
+
+The empirical method must reproduce direct fills **at its anchors up to
+floating-point precision**. It is exact for this event bank, not an exact
+analytic CDF or a guarantee of closure between anchors. Only $\eta$
+interpolation remains approximate. Its step structure is allowed: the inner
+likelihood fit varies physical $\mu$ and the nuisance with $\eta$ frozen.
+No positive bin floors or pseudo-counts are introduced. Only two anchor CDF
+representations are cached at a time.'''
 
 VALIDATION = r'''### Refine, then validate on reserved points
 
@@ -74,7 +83,11 @@ midpoint decisions. The likelihood scan and extra reserved fits use directly
 refilled Asimov counts and a frozen $\eta$ in both fits. Additional diagnostics
 include small/empty bins, fixed-parameter NLL comparisons, both best-fit
 parameters, boundaries and full $(\mu,\alpha_{NI})$ surfaces at the worst points.
-The $u$ method also reports coordinate-smoothing errors at its own anchors.
+Both methods report coordinate checks at their own anchors. The summary gives
+separate check and failure counts for anchors and held-out points. Anchor checks
+isolate CDF representation errors; held-out checks also include interpolation in
+$\eta$. The likelihood failure count refers to all `fit_checks`, with the
+number of `off_anchor_fits` also shown.
 
 The surface plots share the direct model's likelihood offset. They are not
 independently shifted to their minima. A good $q$ comparison can coexist with a
@@ -142,8 +155,8 @@ def spline_cells(cells):
     runtime.source = runtime.source.split(note)[0].rstrip() + '\n\n' + r'''For this interpolation comparison, refresh the temporary checkout or start a
 fresh Colab runtime, then run **09 from the top**. Notebook 08 must already have
 completed with the same Unity directory, filtering policy, floor, power and bin
-count. Its saved unbinned curves are reused from that evaluation. The three
-interpolation comparisons run on CPU and can take appreciable time; progress
+count. Its saved unbinned curves are reused from that evaluation. The two
+$u$ interpolation comparisons run on CPU and can take appreciable time; progress
 and bounded refinement budgets are printed. No training or regeneration is needed.'''
     return [md(DESCRIPTION, 'spline-title'), runtime, bootstrap, setup,
             by_id['reference-model-intro'], by_id['reference-model-source'], definition,
@@ -154,8 +167,11 @@ display(splines["summary"])
 print("Results:", splines["output"])''', 'spline-run'),
             code('''print("Independent template checks with the largest physical-probe deviance:")
 display(splines["validation"].query("role == 'heldout'").nlargest(15, "max_deviance"))
-print("CDF coordinate-smoothing checks at eta anchors:")
-display(splines["validation"].query("role == 'anchor_coordinate_check'").nlargest(10, "max_deviance"))
+print("Coordinate checks at eta anchors, shown separately for each method:")
+for method in splines["models"]:
+    print(method)
+    display(splines["validation"].query(
+        "role == 'anchor_coordinate_check' and method == @method").nlargest(10, "max_deviance"))
 print("Off-anchor fit discrepancies (invalid fits are listed separately):")
 comparison = splines["comparison"]
 off_anchor = comparison.loc[~comparison.is_anchor]
@@ -186,7 +202,7 @@ multiple physical strengths may have the same total rate.
 The tables and interpolation recipes are saved in
 `results/reference_ratio_interpolation/` under the printed filtered evaluation;
 figures are in `plots/09_interpolation/`. Each method has its own anchor archive.
-The $u$ CDF recipe references the existing quadrature, whose fingerprint is
+Both $u$ CDF recipes reference the existing quadrature, whose fingerprint is
 saved; no large event bank is duplicated. Legacy spline products and notebook
 08 outputs are not replaced by this benchmark.
 

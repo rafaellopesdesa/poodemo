@@ -15,7 +15,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Study the floored reference ratio with 36-bin displays and a resolution sweep | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
-| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Compare adaptive bin splines and joint cumulative interpolation with direct fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
+| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Compare smooth and exact weighted empirical CDFs in $u$ with direct fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
@@ -626,32 +626,42 @@ they do not change the saved generation/training configuration. A matching
 `RUN_NAME` alone does not select these outputs in downstream notebooks: those
 must also use the same ensemble/filter evaluation before consuming 08 results.
 
-Notebook 09 reuses the matching 08 unbinned curves and compares three independent
-interpolators against direct fills: adaptive bin-fraction PCHIP, a joint CDF in
-$(z,\eta)$, and a joint CDF in $(u,\eta)$, where
+Notebook 09 reuses the matching 08 unbinned curves and compares two methods
+against direct fills, both in the rescaled coordinate $(u,\eta)$:
 
 $$
 u_\eta(x)=\frac{\log R_\eta(x)}{\eta_{\rm eff}-1},\qquad
 u_1(x)=\left.\partial_\mu\log p(x;\mu,0)\right|_{\mu=1}.
 $$
 
-CDFs use convex linear interpolation in $\eta$ to preserve monotonicity and
-normalization. The raw-$z$ control is equivalent to linear interpolation of
-bin yields at fixed edges. The $u$ method uses monotone PCHIP through weighted
-mid-mass CDF values at all distinct event coordinates. It integrates over the
-**original $z$ bins**, mapped into $u$ with the order reversed below $1$.
-It does not introduce fixed score bins. The equality collapse at $\eta=1$ and
-the plateau below the floor remain exact; physical coefficients are unchanged.
-The finite-bank CDF smoothing error is checked at anchors, independently of
-errors between $\eta$ anchors.
+- **Smooth CDF in $u$ (`cdf_u`):** monotone PCHIP through weighted mid-mass
+  CDF values at all distinct event coordinates.
+- **Exact weighted empirical CDF in $u$ (`ecdf_u`):** raw cumulative event
+  weights, grouped ties and binary searches; no coordinate smoothing or
+  renormalization. At its own anchors it reproduces direct fills up to
+  floating-point precision. It is exact for the finite event bank; interpolation
+  between anchors still requires validation.
+
+Both use convex linear interpolation in $\eta$ to preserve monotonicity and
+normalization. They integrate over the **original $z$ bins**, mapped into $u$
+with the order and interval endpoint conventions reversed below $1$. The
+infinite limits retain the full bank. No fixed score bins are introduced.
+The equality collapse at $\eta=1$ and the plateau below the floor remain exact;
+physical coefficients are unchanged. Coordinate errors at anchors and
+interpolation errors at reserved points have separate check/failure counts and
+separate plot panels. The smooth version remains a control for the empirical
+CDF; the independent-bin and raw-$z$ interpolators are no longer part of 09.
 
 `SPLINE_SETTINGS` controls the initial grid focused around $1$, separate adaptive
 budgets, per-bin diagnostic error and physical-mixture Poisson-deviance tolerances,
 and off-anchor likelihood tolerance (default $|\Delta q|\leq0.01$). Midpoints
 drive refinement; separate golden-fraction points are reserved for validation.
-Asimov counts are always refilled. The summary reports failed checks, fit failures,
-refinement limits and MLE shifts. Full $(\mu,\alpha_{NI})$ surfaces at the worst
-points use a common likelihood offset. Same-parameter NLL and small/empty-bin
+Asimov counts are always refilled. The summary reports `heldout_checks` and
+`heldout_failures`, `anchor_checks` and `anchor_failures`, fit failures,
+refinement limits and MLE shifts. The `q_failures` count and `max_abs_delta_q`
+cover all `fit_checks`; `off_anchor_fits` gives the subset between anchors.
+Full $(\mu,\alpha_{NI})$ surfaces at the worst points use a common likelihood
+offset. Same-parameter NLL and small/empty-bin
 checks accompany the profiled comparisons; morph-order differences remain separate.
 No positive means or pseudo-counts are added. A failed optimizer can be certified
 only when a feasible point attains the known nonnegative NLL lower bound within
@@ -667,7 +677,7 @@ New products are isolated in `results/reference_ratio_interpolation/` and
 per-method anchor NPZ files, refinement histories, independent validation tables,
 fits, bin errors, common-parameter NLL comparisons and surfaces. Metadata records
 the model selection, interpolation settings and quadrature fingerprint. The $u$
-CDFs can be rebuilt from that existing bank and the saved recipe; the bank is not
+CDFs can be rebuilt from that existing bank and their saved recipes; the bank is not
 duplicated. Legacy spline products and notebook 08 results are not overwritten,
 and no method is automatically promoted to downstream inference.
 

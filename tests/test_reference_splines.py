@@ -61,15 +61,10 @@ def test_totals_exact_plateau_collapse_and_no_extrapolation(bank, method):
         model(1.41)
 
 
-def test_raw_cdf_control_is_linear_bin_interpolation(bank):
-    model = CumulativeTemplates(bank, [0., .2, .9, 1., 1.1, 1.4], 'z')
-    np.testing.assert_allclose(model(.95), .5*(bank.exact(.9)+bank.exact(1.)), rtol=1e-12, atol=1e-10)
-
-
 def test_u_mapping_orders_edges_both_sides_and_retains_tails(bank):
     for eta in (.974074074, 1.0273):
         anchors = [0., .2, eta, 1.4]
-        model = CumulativeTemplates(bank, anchors, 'u')
+        model = CumulativeTemplates(bank, anchors)
         actual = model(eta)
         # Build the expected bin probabilities independently, directly from
         # the CDF values; a missing reversal swaps the entire distribution.
@@ -89,13 +84,78 @@ def test_u_mapping_orders_edges_both_sides_and_retains_tails(bank):
         np.testing.assert_allclose(mean_actual, mean_direct, atol=.15)
 
 
-def test_point_mass_cdf_and_shared_nuisance_support():
+def test_empirical_cdf_closes_at_anchors_without_direct_fill_fallback(bank, monkeypatch):
+    anchors = np.array([0., .2, .37, .666171875, .7596875, .974074, .991436,
+                        1., 1.008545, 1.0273, 1.15625, 1.4])
+    reference = {eta: bank.exact(eta).copy() for eta in anchors}
+    model = make_interpolator(bank, anchors, 'ecdf_u')
+    original = bank.exact
+    def special_only(eta):
+        assert eta <= bank.floor or eta == 1., 'Empirical anchors must use the CDF, not direct-fill fallback'
+        return original(eta)
+    monkeypatch.setattr(bank, 'exact', special_only)
+    for eta in anchors:
+        np.testing.assert_allclose(model(eta), reference[eta], rtol=2e-11, atol=1e-9)
+        assert metric_pass(template_metrics(reference[eta], model(eta), [.001, .5, 1., 2.]),
+                           SplineStudySettings())
+
+
+@pytest.mark.parametrize('anchor,eta', [(.72, .73), (1., .974), (1., 1.027), (1.25, 1.3)])
+def test_empirical_cdf_uses_query_edges_and_anchor_coordinates(bank, anchor, eta):
+    # Independent event histogram of the transported anchor coordinates. This
+    # must hold off-anchor too, unlike a fallback to the query's direct fills.
+    z = expit(bank.power * (eta - 1) * rescaled_log_ratio(bank.quad, anchor))
+    expected = np.array([np.histogram(z, bank.edges, weights=w)[0]
+                         for w in bank.weighted.reshape(12, -1)]).reshape(3, 4, -1)
+    actual = bank.cdf_u_bins(anchor, eta, empirical=True)
+    np.testing.assert_allclose(actual, expected, rtol=2e-11, atol=1e-9)
+    np.testing.assert_array_equal(actual[expected == 0.], 0.)
+
+
+@pytest.mark.parametrize('eta', [.7, 1.3])
+def test_empirical_cdf_keeps_ties_on_correct_edges_and_saturated_endpoints(monkeypatch, eta):
+    from poodemo import reference_splines
+    nominal = np.arange(1., 25.).reshape(4, 6)
+    down, up = nominal.copy(), nominal.copy()
+    down[-1] *= .5
+    up[-1] *= 1.5
+    quad = dict(nominal=nominal, down=down[None], up=up[None], weights=np.arange(1., 7.),
+                truth=nominal[1]+nominal[3], x=np.zeros((6, 2)))
+    run = SimpleNamespace(config={'reference_ratio_power': 100., 'reference_ratio_eta_floor': .2})
+    bank = TemplateBank(run, quad, pipeline.observable_bin_edges(36, 'reference_ratio'))
+    z = np.array([0., bank.edges[10], bank.edges[10], .5, bank.edges[25], 1.])
+    u = logit(z)/(bank.power*(eta-1.))
+    u[0], u[-1] = -np.sign(eta-1.)*1e4, np.sign(eta-1.)*1e4
+    monkeypatch.setattr(reference_splines, 'rescaled_log_ratio', lambda quad, anchor: u)
+    expected = np.array([np.histogram(z, bank.edges, weights=w)[0]
+                         for w in bank.weighted.reshape(12, -1)]).reshape(3, 4, -1)
+    np.testing.assert_array_equal(bank.cdf_u_bins(eta, eta, empirical=True), expected)
+    np.testing.assert_array_equal(expected.sum(axis=-1), bank.totals)
+
+
+def test_empirical_eta_interpolation_is_convex_and_cache_distinguishes_methods(bank):
+    model = make_interpolator(bank, [0., .2, .7, 1., 1.4], 'ecdf_u')
+    eta = .8
+    fraction = (eta-.7)/(1.-.7)
+    low = bank.cdf_u_bins(.7, eta, empirical=True)
+    high = bank.cdf_u_bins(1., eta, empirical=True)
+    np.testing.assert_allclose(model(eta), (1.-fraction)*low+fraction*high, rtol=1e-12)
+    before = bank.cdf_u_bins(.7, .73, empirical=True)
+    smooth = bank.cdf_u_bins(.7, .73)
+    after = bank.cdf_u_bins(.7, .73, empirical=True)
+    np.testing.assert_array_equal(before, after)
+    assert np.max(abs(smooth-after)) > 1e-6
+    assert set(bank.cdf_cache) == {(.7, False), (.7, True)}
+
+
+@pytest.mark.parametrize('empirical', [False, True])
+def test_point_mass_cdf_and_shared_nuisance_support(empirical):
     nominal = np.tile(np.array([2., 3., 4., 5.])[:, None], (1, 4))
     quad = dict(nominal=nominal, down=nominal[None], up=nominal[None], weights=np.ones(4),
                 truth=nominal[1]+nominal[3], x=np.zeros((4, 2)))
     run = SimpleNamespace(config={'reference_ratio_power': 100., 'reference_ratio_eta_floor': .2})
     bank = TemplateBank(run, quad, pipeline.observable_bin_edges(36, 'reference_ratio'))
-    model = CumulativeTemplates(bank, [0., .2, .9, 1., 1.1, 1.4], 'u')
+    model = CumulativeTemplates(bank, [0., .2, .9, 1., 1.1, 1.4], empirical=empirical)
     for eta in (.3, .99, 1., 1.01):
         assert np.count_nonzero(model(eta).sum(axis=(0, 1))) == 1
         np.testing.assert_allclose(model(eta), bank.exact(eta))
@@ -103,6 +163,10 @@ def test_point_mass_cdf_and_shared_nuisance_support():
 
 class SmoothBank:
     floor = .2
+    totals = np.tile([10., 20., 20., 40.], (3, 1))
+    def cdf_u_bins(self, anchor, eta, *, empirical=False):
+        # Controlled moving template for testing adaptive eta refinement.
+        return self.exact(anchor)
     def exact(self, eta):
         fraction = .5 + .35*np.tanh((max(eta, self.floor)-.977)/.012)
         totals = np.tile([10., 20., 20., 40.], (3, 1))
@@ -110,10 +174,10 @@ class SmoothBank:
 
 
 def test_adaptation_resolves_transition_and_leaves_independent_checks():
-    settings = SplineStudySettings(max_anchors=101, max_rounds=8,
+    settings = SplineStudySettings(max_anchors=301, max_rounds=8,
                                    max_bin_pull=.025, max_deviance=.002)
     grid = np.array([0., .2, .85, 1., 1.2])
-    model, history = adapt_templates(SmoothBank(), grid, 'bin_pchip', settings, [.02, 1., 2.], lambda _: None)
+    model, history = adapt_templates(SmoothBank(), grid, 'ecdf_u', settings, [.02, 1., 2.], lambda _: None)
     assert len(model.etas) > len(grid)
     assert history.iloc[-1].stop_reason == 'tolerances_met'
     checks = heldout_eta_grid(model, .2, 25)
@@ -125,7 +189,7 @@ def test_adaptation_resolves_transition_and_leaves_independent_checks():
 
 def test_refinement_limits_are_not_silently_accepted():
     settings = SplineStudySettings(max_anchors=5, max_rounds=2, max_bin_pull=1e-8, max_deviance=1e-10)
-    model, history = adapt_templates(SmoothBank(), [0., .2, .85, 1., 1.2], 'bin_pchip',
+    model, history = adapt_templates(SmoothBank(), [0., .2, .85, 1., 1.2], 'ecdf_u',
                                     settings, [1.], lambda _: None)
     assert history.iloc[-1].stop_reason == 'anchor_limit'
     assert history.iloc[-1].n_failed > 0
@@ -178,7 +242,20 @@ def _small_study(tmp_path, monkeypatch, selected_quadrature):
 
 def test_complete_workflow_with_real_fits_and_output_roundtrip(tmp_path, monkeypatch, selected_quadrature):
     run, study = _small_study(tmp_path, monkeypatch, selected_quadrature)
-    assert set(study['models']) == set(METHODS)
+    assert set(study['models']) == {'cdf_u', 'ecdf_u'}
+    assert set(study['scans'].method) == {'direct', 'cdf_u', 'ecdf_u'}
+    for row in study['summary'].itertuples():
+        validation = study['validation'].query('method == @row.method')
+        heldout = validation.query("role == 'heldout'")
+        anchors = validation.query("role == 'anchor_coordinate_check'")
+        assert row.heldout_checks == len(heldout)
+        assert row.heldout_failures == (~heldout.passed).sum()
+        assert row.anchor_checks == len(anchors) == row.n_anchors
+        assert row.anchor_failures == (~anchors.passed).sum()
+        assert row.fit_checks == len(study['comparison'].query('method == @row.method'))
+    empirical = study['summary'].query("method == 'ecdf_u'").iloc[0]
+    assert empirical.anchor_failures == 0
+    assert 'template_failures' not in study['summary']
     assert study['comparison'].q_direct.notna().any()
     # A failed optimizer must be reported, never turned into passing closure.
     invalid = ~study['comparison'].valid | ~study['comparison'].valid_direct
@@ -189,6 +266,8 @@ def test_complete_workflow_with_real_fits_and_output_roundtrip(tmp_path, monkeyp
         assert len(saved) == len(study[name])
     metadata = json.loads((study['output']/'metadata.json').read_text())
     assert metadata['status'] == 'complete'
+    assert metadata['schema_version'] == 2
+    assert set(metadata['cdf_recipes']) == set(METHODS)
     assert len(metadata['quadrature_fingerprint']) == 64
     for method in METHODS:
         with np.load(study['output']/f'{method}_anchors.npz') as archive:
@@ -253,8 +332,9 @@ def test_notebook_runs_study_with_selected_evaluation(monkeypatch, tmp_path):
     assert seen == [selected.path('results')]
 
 
-def test_rescaled_cdf_respects_local_rate_only_plateau(bank):
-    model = CumulativeTemplates(bank, [0., .2, .9, 1., 1.1, 1.4], 'u')
+@pytest.mark.parametrize('empirical', [False, True])
+def test_rescaled_cdf_respects_local_rate_only_plateau(bank, empirical):
+    model = CumulativeTemplates(bank, [0., .2, .9, 1., 1.1, 1.4], empirical=empirical)
     for eta in (1.-1e-8, 1.+1e-8):
         value = model(eta)
         assert np.count_nonzero(value.sum(axis=(0, 1))) == 1
