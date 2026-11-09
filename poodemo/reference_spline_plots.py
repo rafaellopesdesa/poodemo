@@ -5,7 +5,7 @@ from matplotlib.colors import SymLogNorm
 
 from .reference_splines import LABELS, METHODS
 
-COLORS = dict(direct="black", cdf_u="#2ca02c", ecdf_u="#1f77b4")
+COLORS = dict(direct="black", ecdf_u="#1f77b4")
 
 
 def plot_reference_spline_comparison(run, study, *, scan_xlim=(.02, 1.15),
@@ -90,6 +90,21 @@ def plot_reference_spline_comparison(run, study, *, scan_xlim=(.02, 1.15),
             ax.set_xlabel(r"Frozen observable $\eta$")
             ax.legend(fontsize=9)
         save(fig, "template_closure")
+
+        history = study["refinement"]
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        axes[0].plot(history.n_anchors, history.n_failed, "o-", label="Template midpoint failures")
+        axes[0].plot(history.n_anchors, history.q_failed, "s-", label="Likelihood refinement failures")
+        axes[0].set(xlabel="Number of anchors", ylabel="Failed checks", title="Refinement convergence")
+        axes[0].legend(fontsize=9)
+        for syst, label in ((False, "NI fixed"), (True, "NI profiled")):
+            checks = study["likelihood_refinement"].loc[study["likelihood_refinement"].systematics == syst]
+            worst = checks.groupby("round").delta_q.apply(lambda x: x.abs().max())
+            axes[1].semilogy(worst.index, np.maximum(worst, 1e-12), "o-", label=label)
+        axes[1].axhline(tolerance, color=".4", ls="--", label="Closure tolerance")
+        axes[1].set(xlabel="Refinement round", ylabel=r"Largest $|\Delta q|$", title="Finite valid refinement fits")
+        axes[1].legend(fontsize=9)
+        save(fig, "refinement")
 
         # Inspect the bins at the worst finite likelihood discrepancy.
         comparison = study["comparison"]

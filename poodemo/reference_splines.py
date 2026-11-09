@@ -1,7 +1,7 @@
 """Constrained reference-ratio template interpolation for notebook 09.
 
-Eta selects a frozen partition, never the physical fit parameter. Both methods
-use the rescaled coordinate u: a smooth CDF and an exact weighted empirical CDF.
+Eta selects a frozen partition, never the physical fit parameter. The exact
+weighted empirical CDF uses the rescaled coordinate u.
 Convex, degree-one interpolation in eta preserves coordinate monotonicity.
 """
 from collections import OrderedDict
@@ -11,16 +11,15 @@ import json
 
 import numpy as np
 import pandas as pd
-from scipy.interpolate import PchipInterpolator
 from scipy.special import logit
 
 from . import pipeline
 from .data import PROCESSES, save_json
 from .inference import FitResult, component_coefficients, poisson_asimov_nll
 
-METHODS = ("cdf_u", "ecdf_u")
-LABELS = {"direct": "Direct fills", "cdf_u": "Smooth CDF in u",
-          "ecdf_u": "Exact weighted empirical CDF in u"}
+STUDY_VERSION = 3
+METHODS = ("ecdf_u",)
+LABELS = {"direct": "Direct fills", "ecdf_u": "Exact weighted empirical CDF in u"}
 VARIATIONS = ("nominal", "NI_down", "NI_up")
 
 
@@ -29,12 +28,13 @@ class SplineStudySettings:
     initial_anchors: int = 81
     focus_anchors: int = 81
     focus_halfwidth: float = .1
-    max_anchors: int = 2401
-    max_rounds: int = 8
+    max_anchors: int = 4801
+    max_rounds: int = 12
     max_bin_pull: float = .05
     max_deviance: float = .005
     q_tolerance: float = .01
     mle_tolerance: float = .02  # Diagnostic; a nearly flat likelihood can move its MLE.
+    likelihood_refine_points: int = 32  # In addition to the displayed scan.
     validation_intervals: int = 96
     validation_fit_points: int = 8
     surface_points: int = 3
@@ -44,7 +44,7 @@ class SplineStudySettings:
 
     def __post_init__(self):
         for key in ("initial_anchors", "focus_anchors", "max_anchors", "max_rounds",
-                    "validation_intervals", "validation_fit_points", "surface_points",
+                    "likelihood_refine_points", "validation_intervals", "validation_fit_points", "surface_points",
                     "surface_mu_points", "surface_alpha_points", "cdf_cache_size"):
             value = getattr(self, key)
             minimum = 2 if key in ("initial_anchors", "focus_anchors", "max_anchors",
@@ -110,13 +110,13 @@ class TemplateBank:
         z = pipeline.observable_values(self.run, self.quad, eta, "reference_ratio")
         return np.histogram(z, self.edges, weights=self.quad["weights"] * self.quad["truth"])[0]
 
-    def _cdf(self, anchor, *, empirical=False):
+    def _cdf(self, anchor):
         anchor = max(float(anchor), self.floor)
-        key = (anchor, empirical)
+        key = anchor
         if key in self.cdf_cache:
             self.cdf_cache.move_to_end(key)
             return self.cdf_cache[key]
-        # Discard before constructing another large spline, bounding peak RAM.
+        # Discard before constructing another large CDF, bounding peak RAM.
         while len(self.cdf_cache) >= self.cache_size:
             self.cdf_cache.popitem(last=False)
         u = rescaled_log_ratio(self.quad, anchor)
@@ -133,76 +133,40 @@ class TemplateBank:
                 unique.append(row)
             mapping.append(match)
         weights = np.asarray(unique)[:, order]
-        totals = weights.sum(axis=1)
         grouped = np.add.reduceat(weights, starts, axis=1)
         cumulative = np.cumsum(grouped, axis=1)
-        if empirical:
-            # Unnormalized prefix sums, including the empty prefix. Searching
-            # distinct coordinates includes/excludes an entire tied mass.
-            # No mid-mass smoothing, endpoint adjustment or renormalization.
-            record = (coordinates, np.column_stack([np.zeros(len(unique)), cumulative]),
-                      np.asarray(mapping))
-            self.cdf_cache[key] = record
-            return record
-        # Mid-mass knots give a monotone continuous approximation to the
-        # empirical CDF. Every distinct event coordinate is retained: there
-        # is no uniform-grid compression that could discard small tails.
-        values = (cumulative - .5 * grouped) / totals[:, None]
-        values = np.clip(values, 0., 1.)  # Floating-point cumulative roundoff only.
-        if len(coordinates) > 1:
-            values[:, 0], values[:, -1] = 0., 1.
-            cdf = PchipInterpolator(coordinates, values, axis=1, extrapolate=False)
-        else:
-            cdf = None  # A genuine point mass; handle its jump exactly.
-        record = (coordinates, cdf, np.asarray(mapping))
+        # Raw prefix sums include the empty prefix and every tied mass.
+        record = (coordinates, np.column_stack([np.zeros(len(unique)), cumulative]), np.asarray(mapping))
         self.cdf_cache[key] = record
         return record
 
-    def cdf_u_bins(self, anchor, eta, *, empirical=False):
-        """Integrate an anchor's u CDF over the query eta's ORIGINAL z bins."""
+    def cdf_u_bins(self, anchor, eta):
+        """Integrate the anchor ECDF over the query eta's ORIGINAL z bins."""
         if not np.isfinite(eta) or eta == 1.:
             raise ValueError("Query eta must be finite and different from 1; fill the collapse exactly")
-        coordinates, cdf, mapping = self._cdf(anchor, empirical=empirical)
+        coordinates, cumulative, mapping = self._cdf(anchor)
         boundaries = logit(self.edges) / (self.power * (eta - 1.))
         reverse = eta < 1.
         if reverse:
             boundaries = boundaries[::-1]
-        if empirical:
-            # Original bins are [lo,hi), with the final edge included. Mapping
-            # reverses them to (lo,hi] below eta=1. Infinite u endpoints include
-            # the complete finite bank, including saturated z=0 or z=1 values.
-            indices = np.searchsorted(coordinates, boundaries, side="right" if reverse else "left")
-            bins = np.diff(cdf[:, indices], axis=-1)[mapping].reshape(
-                *self.totals.shape, len(boundaries) - 1)
-        elif cdf is None:
-            # Positive slope: [lo,hi); negative slope: (lo,hi].
-            fraction = ((coordinates[0] >= boundaries[:-1]) & (coordinates[0] < boundaries[1:])
-                        if not reverse else
-                        (coordinates[0] > boundaries[:-1]) & (coordinates[0] <= boundaries[1:]))
-            bins = self.totals[..., None] * fraction
-        else:
-            clipped = np.clip(boundaries, coordinates[0], coordinates[-1])
-            cumulative = cdf(clipped)[mapping].reshape(*self.totals.shape, len(boundaries))
-            cumulative[..., boundaries <= coordinates[0]] = 0.
-            cumulative[..., boundaries >= coordinates[-1]] = 1.
-            fractions = np.diff(cumulative, axis=-1)
-            if np.any(fractions < -1e-13):
-                raise FloatingPointError("A cumulative spline lost monotonicity")
-            fractions = np.maximum(fractions, 0.)
-            bins = fractions * self.totals[..., None]
+        # [lo,hi) above eta=1, (lo,hi] below. Infinite endpoints retain all
+        # finite coordinates, including events whose z rounds to zero or one.
+        indices = np.searchsorted(coordinates, boundaries, side="right" if reverse else "left")
+        bins = np.diff(cumulative[:, indices], axis=-1)[mapping].reshape(
+            *self.totals.shape, len(boundaries) - 1)
         return bins[..., ::-1] if reverse else bins
 
 
 class CumulativeTemplates:
-    """Smooth or empirical u CDFs, with convex linear eta interpolation.
+    """Exact empirical u CDFs, with convex linear eta interpolation.
 
-    Original z-bin boundaries move in u with the query eta. The empirical
-    variant is exact on its finite bank at eta anchors, up to arithmetic;
+    Original z-bin boundaries move in u with the query eta. The representation
+    is exact on its finite bank at eta anchors, up to arithmetic;
     interpolation between anchors still requires independent validation.
     """
 
-    def __init__(self, bank, etas, *, empirical=False):
-        self.bank, self.etas, self.empirical = bank, np.asarray(etas, float), empirical
+    def __init__(self, bank, etas):
+        self.bank, self.etas = bank, np.asarray(etas, float)
         if len(self.etas) < 2 or np.any(~np.isfinite(self.etas)) or np.any(np.diff(self.etas) <= 0):
             raise ValueError("Expected finite increasing eta anchors")
         self.totals = bank.totals
@@ -215,8 +179,8 @@ class CumulativeTemplates:
         right = int(np.clip(np.searchsorted(self.etas, eta, side="right"), 1, len(self.etas) - 1))
         left, right = self.etas[right - 1], self.etas[right]
         fraction = (eta - left) / (right - left)
-        low = self.bank.cdf_u_bins(left, eta, empirical=self.empirical)
-        high = self.bank.cdf_u_bins(right, eta, empirical=self.empirical) if fraction != 0 else low
+        low = self.bank.cdf_u_bins(left, eta)
+        high = self.bank.cdf_u_bins(right, eta) if fraction != 0 else low
         return (1. - fraction) * low + fraction * high
 
     def __call__(self, eta):
@@ -250,7 +214,7 @@ def initial_eta_grid(run, settings):
 def make_interpolator(bank, etas, method):
     if method not in METHODS:
         raise ValueError(f"Unknown interpolation method: {method}")
-    return CumulativeTemplates(bank, etas, empirical=method == "ecdf_u")
+    return CumulativeTemplates(bank, etas)
 
 
 def template_metrics(exact, predicted, probe_mus):
@@ -276,40 +240,89 @@ def metric_pass(metrics, settings):
                 and metrics["support_mismatch"] == 0)
 
 
-def adapt_templates(bank, grid, method, settings, probe_mus, progress=print):
-    """Midpoints drive refinement; independent golden-fraction checks do not."""
-    etas, history = np.asarray(grid).copy(), []
+def likelihood_refinement_grid(run, grid, floor, count):
+    """Declare optimization points before adaptation; golden points stay held out."""
+    eligible = np.flatnonzero(np.asarray(grid)[1:] > floor)
+    selected = eligible[np.unique(np.linspace(0, len(eligible)-1, min(count, len(eligible))).astype(int))]
+    quarters = np.asarray(grid)[selected] + .25*np.diff(grid)[selected]
+    points = np.unique(np.r_[pipeline._positive_study_grid(run), quarters])
+    return points[(points > floor) & (points != 1.)]
+
+
+def _refinement_anchor(low, high, optimization_points):
+    # Do not make a likelihood optimization point an exact interpolation knot.
+    for fraction in (.5, .43, .57):
+        candidate = low + fraction*(high-low)
+        if not np.any(np.abs(optimization_points-candidate) < 1e-13):
+            return candidate
+    raise FloatingPointError("Unable to separate refinement and fit points")
+
+
+def adapt_templates(bank, grid, method, settings, probe_mus, progress=print, *, likelihood_points=None):
+    """Refine on template midpoints and declared q checks, never held-out points."""
+    etas, history, fit_checks = np.asarray(grid).copy(), [], []
+    likelihood_points = np.asarray([] if likelihood_points is None else likelihood_points, float)
+    direct_fits = {}
     for round_number in range(settings.max_rounds + 1):
-        progress(f"{LABELS[method]}: building/checking round {round_number} ({len(etas)} anchors)")
+        progress(f"{LABELS[method]}: round {round_number} ({len(etas)} anchors)")
         model = make_interpolator(bank, etas, method)
-        checks = []
-        for low, high in zip(etas[:-1], etas[1:]):
+        additions, template_failures, likelihood_failures = {}, 0, 0
+        worst_score = 0.
+        def request(low, high, score):
+            candidate = _refinement_anchor(low, high, likelihood_points)
+            additions[candidate] = max(score, additions.get(candidate, 0.))
+        for index, (low, high) in enumerate(zip(etas[:-1], etas[1:])):
             if high <= bank.floor:
                 continue
             eta = (low + high) / 2
             metrics = template_metrics(bank.exact(eta), model(eta), probe_mus)
             score = max(metrics["max_bin_pull"] / settings.max_bin_pull,
                         metrics["max_deviance"] / settings.max_deviance)
-            checks.append((score, eta, metrics))
-            if len(checks) % 100 == 0:
-                progress(f"  {len(checks)} midpoint checks complete")
-        failures = [r for r in checks if not metric_pass(r[2], settings)]
+            worst_score = max(worst_score, score)
+            if not metric_pass(metrics, settings):
+                template_failures += 1
+                request(low, high, score)
+            if (index+1) % 100 == 0:
+                progress(f"  {index+1} midpoint checks complete")
+        for index, eta in enumerate(likelihood_points):
+            if eta not in direct_fits:
+                direct = pipeline._histogram_model(bank.exact(eta), bank.counts(eta))
+                direct_fits[eta] = {s: _fit(bank.run, direct, eta, s) for s in (False, True)}
+            approximate = pipeline._histogram_model(model(eta), bank.counts(eta))
+            for syst in (False, True):
+                reference = direct_fits[eta][syst]
+                fit = _fit(bank.run, approximate, eta, syst)
+                valid = bool(reference['valid'] and fit['valid'])
+                delta = fit['q']-reference['q'] if valid else np.nan
+                score = abs(delta)/settings.q_tolerance if valid else np.inf
+                worst_score = max(worst_score, score)
+                passed = bool(valid and abs(delta) <= settings.q_tolerance)
+                fit_checks.append(dict(method=method, round=round_number, eta=eta,
+                    systematics=syst, q_direct=reference['q'], q_interpolated=fit['q'],
+                    delta_q=delta, valid=valid, passed=passed,
+                    message=fit['message'], direct_message=reference['message']))
+                if not passed:
+                    likelihood_failures += 1
+                    right = int(np.clip(np.searchsorted(etas, eta, side='right'), 1, len(etas)-1))
+                    request(etas[right-1], etas[right], score)
+            if (index+1) % 20 == 0:
+                progress(f"  {index+1}/{len(likelihood_points)} likelihood refinement points complete")
         history.append(dict(method=method, round=round_number, n_anchors=len(etas),
-                            n_failed=len(failures), worst_score=max(r[0] for r in checks)))
-        progress(f"{LABELS[method]}: round {round_number}, {len(etas)} anchors, "
-                 f"{len(failures)} failing midpoint checks")
-        if not failures or round_number == settings.max_rounds or len(etas) >= settings.max_anchors:
+                            n_failed=template_failures, q_checks=2*len(likelihood_points),
+                            q_failed=likelihood_failures, worst_score=worst_score))
+        progress(f"  {template_failures} template and {likelihood_failures} likelihood checks failed")
+        if not additions or round_number == settings.max_rounds or len(etas) >= settings.max_anchors:
             break
-        failures.sort(reverse=True, key=lambda r: r[0])
-        added = [r[1] for r in failures[:settings.max_anchors - len(etas)]]
-        etas = np.unique(np.r_[etas, added])
-    stop = "tolerances_met" if not failures else (
+        candidates = sorted(additions, key=additions.get, reverse=True)
+        etas = np.unique(np.r_[etas, candidates[:settings.max_anchors-len(etas)]])
+    stop = "tolerances_met" if not additions else (
         "anchor_limit" if len(etas) >= settings.max_anchors else "round_limit")
     history[-1]["stop_reason"] = stop
+    model.refinement_checks = pd.DataFrame(fit_checks)
     return model, pd.DataFrame(history)
 
 
-def heldout_eta_grid(model, floor, count):
+def heldout_eta_grid(model, floor, count, excluded=()):
     """Select intervals after training, evaluate an unused irrational fraction."""
     low, high = model.etas[:-1], model.etas[1:]
     eligible = np.flatnonzero(high > floor)
@@ -320,7 +333,8 @@ def heldout_eta_grid(model, floor, count):
         selected = np.unique(np.r_[selected, focus[np.unique(np.linspace(
             0, len(focus) - 1, min(count, len(focus))).astype(int))], eligible[:4]])
     fraction = (3. - np.sqrt(5.)) / 2.
-    return low[selected] + fraction * (high[selected] - low[selected])
+    points = low[selected] + fraction * (high[selected] - low[selected])
+    return points[[not np.any(np.abs(np.asarray(excluded)-point) < 1e-13) for point in points]]
 
 
 def _fit(run, model, mu, systematics):
@@ -409,21 +423,22 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     quad = pipeline.prepare_quadrature(run)
     bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"), settings.cdf_cache_size)
     grid = initial_eta_grid(run, settings)
+    optimization_points = likelihood_refinement_grid(run, grid, bank.floor, settings.likelihood_refine_points)
     # Probe exact physical coefficients at both fit bounds, the rate turnover,
     # the Asimov truth, and intermediate strengths, at all three NI anchors.
     bounds = np.asarray(run.config["mu_fit_bounds"], float)
     probe_mus = np.unique(np.r_[np.linspace(*bounds, 5), run.config["asimov_mu"]])
     output = run.path("results", "reference_ratio_interpolation")
     output.mkdir(parents=True, exist_ok=True)
-    metadata = dict(schema_version=2, settings=asdict(settings),
+    metadata = dict(schema_version=3, settings=asdict(settings),
                     observable=pipeline.observable_configuration(run, "reference_ratio"),
                     bin_edges=bank.edges.tolist(), n_bins=n_bins,
                     quadrature_fingerprint=_fingerprint(bank),
                     probe_mus=probe_mus.tolist(), evaluation_root=str(run.path("results").parent),
-                    cdf_recipes={"cdf_u": "full-event mid-mass monotone PCHIP in u",
-                                 "ecdf_u": "exact weighted empirical CDF in u; grouped ties and raw prefix sums"},
+                    cdf_recipes={"ecdf_u": "exact weighted empirical CDF in u; grouped ties and raw prefix sums"},
+                    likelihood_refinement_points=optimization_points.tolist(),
                     eta_interpolation="convex linear; query eta maps original z edges into each anchor's u CDF",
-                    anchor_archive_contents="Direct input histograms; both u CDF methods also require the quadrature and recipe",
+                    anchor_archive_contents="Direct input histograms; the empirical CDF also requires the quadrature and recipe",
                     status="running", methods=list(METHODS))
     provenance = run.path("results", "reference_ratio_model_source.json")
     if provenance.exists():
@@ -431,7 +446,8 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     save_json(output / "metadata.json", metadata)
     models, histories = {}, []
     for method in METHODS:
-        model, history = adapt_templates(bank, grid, method, settings, probe_mus, progress)
+        model, history = adapt_templates(bank, grid, method, settings, probe_mus, progress,
+                                         likelihood_points=optimization_points)
         models[method] = model
         histories.append(history)
         history.to_csv(output / f"{method}_refinement.csv", index=False)
@@ -440,9 +456,8 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
 
     validation, worst_bins, fit_candidates = [], [], []
     for method, model in models.items():
-        heldout = heldout_eta_grid(model, bank.floor, settings.validation_intervals)
-        # Separate coordinate approximation from eta interpolation for BOTH
-        # methods. The empirical method should close at its anchors to roundoff.
+        heldout = heldout_eta_grid(model, bank.floor, settings.validation_intervals, excluded=optimization_points)
+        # The exact empirical CDF should close at its anchors to roundoff.
         points = [(e, "heldout") for e in heldout]
         points += [(e, "anchor_coordinate_check") for e in model.etas]
         for point_number, (eta, role) in enumerate(sorted(points), start=1):
@@ -485,7 +500,8 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
             is_anchor = method != "direct" and bool(np.any(np.abs(models[method].etas - eta) < 1e-13))
             for systematic in (False, True):
                 scans.append(dict(method=method, eta=eta, mu=eta, systematics=systematic,
-                                  is_anchor=is_anchor, on_scan=bool(np.any(np.abs(scan_grid - eta) < 1e-13)),
+                                  is_anchor=is_anchor, used_for_refinement=bool(np.any(np.abs(optimization_points-eta) < 1e-13)),
+                                  on_scan=bool(np.any(np.abs(scan_grid - eta) < 1e-13)),
                                   **_fit(run, model, eta, systematic)))
             if method == "direct":
                 continue
@@ -559,6 +575,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
         v = validation.loc[validation.method == method]
         all_fits = comparison.loc[comparison.method == method]
         c = all_fits.loc[~all_fits.is_anchor]
+        reserved_fits = c.loc[~c.used_for_refinement & ~c.on_scan]
         fixed = fixed_frame.loc[fixed_frame.method == method]
         domain_mismatches = int((fixed.finite_direct != fixed.finite_interpolated).sum())
         truth = fixed.loc[(fixed.mu == run.config["asimov_mu"]) & (fixed.alpha_NI == 0.)]
@@ -572,6 +589,8 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
                             anchor_checks=len(anchors), anchor_failures=int((~anchors.passed).sum()),
                             fit_checks=len(all_fits), off_anchor_fits=len(c),
                             q_failures=int((~all_fits.q_passed).sum()),
+                            heldout_fit_checks=len(reserved_fits),
+                            heldout_q_failures=int((~reserved_fits.q_passed).sum()),
                             invalid_fits=int((~all_fits.valid | ~all_fits.valid_direct).sum()),
                             max_abs_delta_q=float(all_fits.delta_q.abs().max()),
                             mle_shift_flags=int(all_fits.mle_shift_flag.sum()),
@@ -582,7 +601,9 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     frames = dict(summary=pd.DataFrame(summary), validation=validation, scans=scans,
                   comparison=comparison, fixed_checks=fixed_frame,
                   bin_errors=pd.DataFrame(bin_errors), surfaces=pd.DataFrame(surfaces),
-                  refinement=pd.concat(histories, ignore_index=True), morph_comparison=pd.DataFrame(morph),
+                  refinement=pd.concat(histories, ignore_index=True),
+                  likelihood_refinement=pd.concat([m.refinement_checks for m in models.values()], ignore_index=True),
+                  morph_comparison=pd.DataFrame(morph),
                   unbinned=unbinned)
     for name, frame in frames.items():
         frame.to_csv(output / f"{name}.csv", index=False)
