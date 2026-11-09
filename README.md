@@ -667,8 +667,15 @@ No positive means or pseudo-counts are added. A failed optimizer can be certifie
 only when a feasible point attains the known nonnegative NLL lower bound within
 $10^{-10}$; both its original status and the certificate are recorded.
 
-Run 09 from the top in a fresh runtime or refreshed source checkout. The interpolation
-and fits run on CPU and print progress. Only two full-event CDFs are cached at a
+Run **09 from the top**. Its Colab setup automatically downloads tested revision
+`7ac571c99b47dabcb027fadfb33916582a7f8790` into a fresh temporary directory on
+every setup run and clears cached `poodemo` imports. The next cell verifies
+`cdf_u, ecdf_u` before loading models or starting the study. Older checkouts and
+uploaded source ZIPs are not reused. GitHub authentication, if needed, uses the
+Colab secret `GITHUB_TOKEN` or a hidden prompt. Drive data and models are reused.
+Local runs use their local checkout and must pass the same method check.
+
+The interpolation and fits run on CPU and print progress. Only two full-event CDFs are cached at a
 time; no new training or event generation is needed. Saved 08 metadata must match
 the selected evaluation, floor, power, bin edges and requested bin count.
 

@@ -71,13 +71,16 @@ assert sys.modules["poodemo"] is loaded
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
-def test_all_notebooks_share_the_fixed_bootstrap():
+def test_notebooks_use_shared_bootstrap_or_explicit_09_refresh(monkeypatch):
     generator = ast.parse((REPO / "scripts" / "build_notebooks.py").read_text())
     bootstrap = next(ast.literal_eval(node.value).strip() for node in generator.body
                      if isinstance(node, ast.Assign)
                      and any(isinstance(target, ast.Name) and target.id == "BOOTSTRAP"
                              for target in node.targets))
+    monkeypatch.syspath_prepend(str(REPO / 'scripts'))
+    from build_reference_spline_notebook import fresh_bootstrap
     for path in (REPO / "notebooks").glob("*.ipynb"):
         notebook = json.loads(path.read_text())
         first_code = next(cell for cell in notebook["cells"] if cell["cell_type"] == "code")
-        assert "".join(first_code["source"]).strip() == bootstrap, path.name
+        expected = fresh_bootstrap(bootstrap) if path.name.startswith('09_') else bootstrap
+        assert "".join(first_code["source"]).strip() == expected, path.name

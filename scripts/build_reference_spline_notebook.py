@@ -1,6 +1,80 @@
-"""Rebuild notebook 09 only; preserve bootstrap, model selection and controls."""
+"""Rebuild notebook 09 with a fresh pinned checkout; preserve study controls."""
+import ast
+import textwrap
+
 import nbformat
-from build_notebooks import REPO
+from build_notebooks import BOOTSTRAP, REPO
+
+# This revision contains both u methods and their validated implementation.
+# Pin code independently of notebook-output commits for reproducible reruns.
+SOURCE_COMMIT = "7ac571c99b47dabcb027fadfb33916582a7f8790"
+
+
+def fresh_bootstrap(previous):
+    """Use the shared installer with an isolated source download on every run."""
+    source = BOOTSTRAP.strip()
+    # Retain user settings, including multiline CONFIG_OVERRIDES dictionaries.
+    for node in ast.parse(previous).body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        name = getattr(node.targets[0], 'id', None)
+        if name not in ('RUN_NAME', 'MODE', 'CONFIG_OVERRIDES', 'JAX_BACKEND'):
+            continue
+        replacement = previous.splitlines()[node.lineno - 1:node.end_lineno]
+        target = next(n for n in ast.parse(source).body if isinstance(n, ast.Assign)
+                      and getattr(n.targets[0], 'id', None) == name)
+        lines = source.splitlines()
+        lines[target.lineno - 1:target.end_lineno] = replacement
+        source = '\n'.join(lines)
+    source = source.replace('\ntry:\n    import google.colab',
+                            f'\nSOURCE_COMMIT = "{SOURCE_COMMIT}"\n\ntry:\n    import google.colab', 1)
+    source = source.replace('    REPO_DIR = Path("/content/poodemo")', '''    import tempfile
+    # Download afresh even in a reused runtime; do not alter older checkouts.
+    REPO_DIR = Path(tempfile.mkdtemp(prefix="poodemo-09-", dir="/content"))
+    print(f"Notebook 09 source: {SOURCE_COMMIT} (fresh download)")''')
+    # An older uploaded ZIP must not override this notebook's tested revision.
+    start = source.index('        uploaded_zip = ')
+    end = source.index('\n\n        # Validate archive paths', start)
+    download = source[source.index('            archive_url = ', start):end]
+    download = textwrap.indent(textwrap.dedent(download), '        ')
+    download = download.replace('"https://api.github.com/repos/rafaellopesdesa/poodemo/tarball/main"',
+                                'f"https://api.github.com/repos/rafaellopesdesa/poodemo/tarball/{SOURCE_COMMIT}"')
+    download = download.replace('Upload /content/poodemo_source.zip or provide read access.',
+                                'Provide a GitHub token with read access to download the pinned notebook 09 source.')
+    source = source[:start] + download + source[end:]
+    # Only tar downloads remain in this bootstrap, so remove the ZIP branch.
+    start = source.index('            if archive_kind == "zip":')
+    end = source.index('            candidates = ', start)
+    extraction = source[source.index('                with tarfile.open', start):end]
+    source = source[:start] + textwrap.indent(textwrap.dedent(extraction), '            ') + source[end:]
+    source = source.replace('        import zipfile\n', '').replace('        archive_kind = "tar"\n', '')
+    source = source.replace('        import tempfile\n', '')
+    source = source.replace('The uploaded archive must contain', 'The downloaded archive must contain')
+    start = source.index('    cached_package = sys.modules.get("poodemo")')
+    end = source.index('\nelse:\n    # Locally:', start)
+    source = source[:start] + '''    # Run from the top: subsequent cells recreate objects from this checkout.
+    # Clear all poodemo submodules, including old plotting and fit functions.
+    for module_name in list(sys.modules):
+        if module_name == "poodemo" or module_name.startswith("poodemo."):
+            del sys.modules[module_name]
+''' + source[end:]
+    return source
+
+
+SOURCE_CHECK = '''import poodemo.reference_splines as _reference_splines
+
+_expected_methods = ("cdf_u", "ecdf_u")
+_loaded_methods = tuple(getattr(_reference_splines, "METHODS", ()))
+if _loaded_methods != _expected_methods:
+    raise RuntimeError(
+        f"Old interpolation code is loaded: {_loaded_methods}. "
+        "Run this notebook from the setup cell at the top before starting the study.")
+if IN_COLAB:
+    _expected_source = (REPO_DIR / "poodemo" / "reference_splines.py").resolve()
+    if Path(_reference_splines.__file__).resolve() != _expected_source:
+        raise RuntimeError("The interpolation module was not loaded from this run's fresh checkout.")
+print("Verified interpolation methods:", ", ".join(_loaded_methods))
+print("Interpolation module:", _reference_splines.__file__)'''
 
 DESCRIPTION = r'''# 9. Reference-ratio interpolation and likelihood closure
 
@@ -145,20 +219,38 @@ def spline_cells(cells):
     by_id = {c.id: c for c in cells}
     runtime = next(c for c in cells if c.source.startswith('### Runtime and persistent run'))
     bootstrap = next(c for c in cells if 'RUN_NAME =' in c.source and 'IN_COLAB' in c.source)
+    bootstrap.source = fresh_bootstrap(bootstrap.source)
     setup = next(c for c in cells if 'run = create_run(ROOT,' in c.source)
     definition = next(c for c in cells if c.source.startswith('### Ratio to the fixed physical reference'))
     definition.source = definition.source.replace(
         'The matched no-floor study below measures local widths at fixed truth $\\mu_*=1$;',
         'Notebook 08\'s matched no-floor study measures local widths at fixed truth $\\mu_*=1$;')
-    runtime.source = runtime.source.split('For the 36-bin/floored-observable update')[0].rstrip()
-    note = 'For this interpolation comparison'
-    runtime.source = runtime.source.split(note)[0].rstrip() + '\n\n' + r'''For this interpolation comparison, refresh the temporary checkout or start a
-fresh Colab runtime, then run **09 from the top**. Notebook 08 must already have
+    runtime.source = r'''### Runtime and persistent run
+
+Run **all cells from the top**. Notebook 09 downloads the tested source revision
+into a fresh temporary Colab directory on every setup run and clears cached
+`poodemo` imports. The next cell must print **Verified interpolation methods:
+cdf_u, ecdf_u** before model loading or interpolation begins. Existing temporary
+checkouts and previously uploaded ZIPs are not used by this notebook.
+
+If GitHub requires authentication, setup uses the Colab secret `GITHUB_TOKEN`
+or a hidden token prompt. Only repository Contents read access is needed.
+The token is sent in an HTTP header and is not saved or printed.
+
+Keep the existing `RUN_NAME`, `MODE`, and Drive model directory. Samples,
+models and results remain under the selected Drive evaluation. This update
+does not require sample generation, retraining, or a new physics run name.
+The source revision and module path are printed so each run can be identified.
+
+For this interpolation comparison, notebook 08 must already have
 completed with the same Unity directory, filtering policy, floor, power and bin
 count. Its saved unbinned curves are reused from that evaluation. The two
 $u$ interpolation comparisons run on CPU and can take appreciable time; progress
-and bounded refinement budgets are printed. No training or regeneration is needed.'''
-    return [md(DESCRIPTION, 'spline-title'), runtime, bootstrap, setup,
+and bounded refinement budgets are printed. No rerun of 08 is needed when those
+settings match. Local execution uses the local checkout and checks the methods
+before proceeding.'''
+    return [md(DESCRIPTION, 'spline-title'), runtime, bootstrap,
+            code(SOURCE_CHECK, 'spline-source-check'), setup,
             by_id['reference-model-intro'], by_id['reference-model-source'], definition,
             md(THEORY, 'spline-theory'), md(VALIDATION, 'spline-validation-intro'),
             by_id.get('spline-controls', code(CONTROLS, 'spline-controls')),
