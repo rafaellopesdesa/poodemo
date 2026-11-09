@@ -15,7 +15,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Study the floored reference ratio with 36-bin displays and a resolution sweep | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
-| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Compare smooth and exact weighted empirical CDFs in $u$ with direct fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
+| [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Validate empirical CDFs in $u$; study the floor, binning and nuisance morph order | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
@@ -626,67 +626,67 @@ they do not change the saved generation/training configuration. A matching
 `RUN_NAME` alone does not select these outputs in downstream notebooks: those
 must also use the same ensemble/filter evaluation before consuming 08 results.
 
-Notebook 09 reuses the matching 08 unbinned curves and compares two methods
-against direct fills, both in the rescaled coordinate $(u,\eta)$:
+Notebook 09 retains only the **exact weighted empirical CDF in $u$** (`ecdf_u`):
 
 $$
 u_\eta(x)=\frac{\log R_\eta(x)}{\eta_{\rm eff}-1},\qquad
 u_1(x)=\left.\partial_\mu\log p(x;\mu,0)\right|_{\mu=1}.
 $$
 
-- **Smooth CDF in $u$ (`cdf_u`):** monotone PCHIP through weighted mid-mass
-  CDF values at all distinct event coordinates.
-- **Exact weighted empirical CDF in $u$ (`ecdf_u`):** raw cumulative event
-  weights, grouped ties and binary searches; no coordinate smoothing or
-  renormalization. At its own anchors it reproduces direct fills up to
-  floating-point precision. It is exact for the finite event bank; interpolation
-  between anchors still requires validation.
+Raw cumulative event weights, grouped ties and binary searches reproduce direct
+fills at anchors up to roundoff, without coordinate smoothing or renormalization.
+Convex linear interpolation in $\eta$ integrates over the **original $z$ bins**,
+mapped into $u$ with reversed order and endpoint conventions below $1$.
+Infinite endpoints retain the full bank. The equality collapse and floor plateau
+remain exact. Physical coefficients, truth and nuisance constraints are unchanged.
+Only interpolation between anchors remains approximate.
 
-Both use convex linear interpolation in $\eta$ to preserve monotonicity and
-normalization. They integrate over the **original $z$ bins**, mapped into $u$
-with the order and interval endpoint conventions reversed below $1$. The
-infinite limits retain the full bank. No fixed score bins are introduced.
-The equality collapse at $\eta=1$ and the plateau below the floor remain exact;
-physical coefficients are unchanged. Coordinate errors at anchors and
-interpolation errors at reserved points have separate check/failure counts and
-separate plot panels. The smooth version remains a control for the empirical
-CDF; the independent-bin and raw-$z$ interpolators are no longer part of 09.
+`SPLINE_SETTINGS` now refines using both midpoint template checks and actual
+fixed/profiled likelihood discrepancies (default $|\Delta q|\leq0.01$).
+The displayed scan and 32 additional predeclared points participate in refinement;
+they are **not independent validation**. Failing likelihood points request nearby
+anchors without inserting the checked point itself. Direct reference fits are
+cached. The defaults allow 4,801 anchors and 12 refinement rounds. Reaching a
+budget is reported as a failure, not silently accepted.
 
-`SPLINE_SETTINGS` controls the initial grid focused around $1$, separate adaptive
-budgets, per-bin diagnostic error and physical-mixture Poisson-deviance tolerances,
-and off-anchor likelihood tolerance (default $|\Delta q|\leq0.01$). Midpoints
-drive refinement; separate golden-fraction points are reserved for validation.
-Asimov counts are always refilled. The summary reports `heldout_checks` and
-`heldout_failures`, `anchor_checks` and `anchor_failures`, fit failures,
-refinement limits and MLE shifts. The `q_failures` count and `max_abs_delta_q`
-cover all `fit_checks`; `off_anchor_fits` gives the subset between anchors.
-Full $(\mu,\alpha_{NI})$ surfaces at the worst points use a common likelihood
-offset. Same-parameter NLL and small/empty-bin
-checks accompany the profiled comparisons; morph-order differences remain separate.
-No positive means or pseudo-counts are added. A failed optimizer can be certified
-only when a feasible point attains the known nonnegative NLL lower bound within
-$10^{-10}$; both its original status and the certificate are recorded.
+Separate golden-fraction points are reserved for validation after refinement.
+The summary reports `heldout_fit_checks` and `heldout_q_failures`, as well as
+anchor/template checks, all fit failures, refinement limits and MLE shifts.
+Full $(\mu,\alpha_{NI})$ surfaces use a common likelihood offset; fixed-parameter
+NLL and sparse-bin checks remain. No positive means or pseudo-counts are added.
+A failed optimizer can be certified only when a feasible point attains the known
+nonnegative NLL bound within $10^{-10}$; raw statuses are saved. Near $\eta=1$,
+a rate-only interval can have multiple equally good physical-strength MLEs.
 
-Run **09 from the top**. Its Colab setup automatically downloads tested revision
-`7ac571c99b47dabcb027fadfb33916582a7f8790` into a fresh temporary directory on
-every setup run and clears cached `poodemo` imports. The next cell verifies
-`cdf_u, ecdf_u` before loading models or starting the study. Older checkouts and
-uploaded source ZIPs are not reused. GitHub authentication, if needed, uses the
-Colab secret `GITHUB_TOKEN` or a hidden prompt. Drive data and models are reused.
-Local runs use their local checkout and must pass the same method check.
+A second **direct-fill** study compares floor 0 with the configured baseline
+floor (normally 0.2), standard and four-times-finer binning (36/144 by default),
+and both nuisance morph orders over the full scan. Morph-then-bin is compression
+of the analytic unbinned model; bin-then-morph adds a distinct model approximation.
+Every variant reuses the same generating bank, physical truth and constraints.
+The plots include the secondary minimum, conditional nuisance shifts, and the
+morph-order effect. `FLOOR_SETTINGS` controls the finer resolution and the
+one-dimensional conditional profile search. Its grid resolves candidate basins,
+which are refined individually; endpoints, invalid searches and boundaries are
+recorded. Direct Asimov fits certify the unrestricted denominator at the checked
+nonnegative NLL bound. This shortcut is not used for approximate templates.
 
-The interpolation and fits run on CPU and print progress. Only two full-event CDFs are cached at a
-time; no new training or event generation is needed. Saved 08 metadata must match
-the selected evaluation, floor, power, bin edges and requested bin count.
+Run **09 from the top**. Colab automatically downloads the tested revision in
+`SOURCE_COMMIT` into a fresh temporary directory and clears cached `poodemo`
+imports. The next cell verifies **study version 3** and **ecdf_u**. Older checkouts
+and uploaded source ZIPs are not reused. If needed, authentication uses the Colab
+secret `GITHUB_TOKEN` or a hidden prompt. Drive models and samples are reused;
+no training or event generation is needed. Saved 08 metadata must match the
+selected baseline evaluation, floor, power and bin count. Only the dedicated
+controls vary those compression settings; the baseline config is unchanged.
 
-New products are isolated in `results/reference_ratio_interpolation/` and
-`plots/09_interpolation/` under the selected filtered evaluation. They include
-per-method anchor NPZ files, refinement histories, independent validation tables,
-fits, bin errors, common-parameter NLL comparisons and surfaces. Metadata records
-the model selection, interpolation settings and quadrature fingerprint. The $u$
-CDFs can be rebuilt from that existing bank and their saved recipes; the bank is not
-duplicated. Legacy spline products and notebook 08 results are not overwritten,
-and no method is automatically promoted to downstream inference.
+Both studies run on CPU with progress updates. Morphing before binning is more
+expensive because nuisance evaluations operate on the full event bank. Only two
+full-event CDFs are cached. Products are isolated in
+`results/reference_ratio_interpolation/` and `plots/09_interpolation/`, and
+`results/reference_ratio_floor_study/` and `plots/09_floor_study/` under the selected
+evaluation. Metadata records the settings and quadrature fingerprint. The event
+bank is not duplicated. Historical spline products and notebook 08 results are
+not overwritten, and no interpolation is automatically promoted downstream.
 
 The builders preserve current study and plotting controls while refreshing
 these notebooks and clearing their stale outputs. Use

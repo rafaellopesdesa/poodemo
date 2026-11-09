@@ -1,4 +1,5 @@
 """Exercise notebook 09's actual setup with a stale Colab checkout and imports."""
+import ast
 import json
 from pathlib import Path
 import subprocess
@@ -22,6 +23,8 @@ def test_fresh_download_replaces_cached_modules_without_touching_drive(tmp_path,
     content = tmp_path / 'content'
     content.mkdir()
     bootstrap = bootstrap.replace('/content', str(content))
+    source_commit = next(ast.literal_eval(node.value) for node in ast.parse(bootstrap).body
+                         if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == 'SOURCE_COMMIT')
     check = cells['spline-source-check']
     # Exercise the real archive handling, path activation, module clearing and
     # early check. Stub only Colab, installation and the HTTP response.
@@ -56,7 +59,7 @@ with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
     for name, source in {{
         "pyproject.toml": "[project]",
         "poodemo/__init__.py": "",
-        "poodemo/reference_splines.py": "METHODS = ('cdf_u', 'ecdf_u')",
+        "poodemo/reference_splines.py": "METHODS = ('ecdf_u',); STUDY_VERSION = 3",
         "poodemo/pipeline.py": "VERSION = 'new'",
     }}.items():
         data = source.encode()
@@ -66,7 +69,7 @@ with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
 downloads = []
 def urlopen(request, timeout):
     downloads.append(request.full_url)
-    assert request.full_url.endswith('/tarball/7ac571c99b47dabcb027fadfb33916582a7f8790')
+    assert request.full_url.endswith('/tarball/{source_commit}')
     if {download_fails!r}:
         raise urllib.error.HTTPError(request.full_url, 500, "unavailable", {{}}, None)
     return io.BytesIO(archive_bytes.getvalue())
