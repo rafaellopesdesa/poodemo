@@ -231,7 +231,11 @@ def plot_reference_floor_study(run, study, *, scan_xlim=(.02, 1.15), scan_ylim=(
                                    & (scans.morph_order == "before") & scans.systematics].sort_values("eta")
                 axes[0].plot(frame.eta, frame.alpha_null.where(frame.valid), color=colors[floor],
                              ls="-" if count == bins[0] else "--", label=f"Floor {floor:g}, {count} bins")
-                morph = study["morph_comparison"].query("floor == @floor and n_bins == @count and systematics").sort_values("eta")
+                comparison = study["morph_comparison"]
+                # `floor` is also a NumExpr built-in; boolean selection works
+                # whether or not pandas enables that optional query engine.
+                morph = comparison.loc[(comparison["floor"] == floor)
+                    & (comparison.n_bins == count) & comparison.systematics].sort_values("eta")
                 axes[1].semilogy(morph.eta, np.maximum(abs(morph.delta_q_after_minus_before), 1e-12),
                                  color=colors[floor], ls="-" if count == bins[0] else "--", label=f"Floor {floor:g}, {count} bins")
         axes[0].set(xlabel=r"Tested $\mu_0=\eta$", ylabel=r"Conditional $\hat\alpha_{NI}$", xlim=secondary_xlim,
