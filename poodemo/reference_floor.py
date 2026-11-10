@@ -13,11 +13,14 @@ from .reference_splines import TemplateBank, _fingerprint, _safe_nll
 
 @dataclass(frozen=True)
 class FloorStudySettings:
+    comparison_floor: float = .2
     resolution_multiplier: int = 4
     alpha_grid_points: int = 17
     alpha_xtol: float = 1e-7
 
     def __post_init__(self):
+        if not np.isfinite(self.comparison_floor) or not 0 <= self.comparison_floor < 1:
+            raise ValueError("comparison_floor must lie in [0, 1)")
         for name, minimum in (("resolution_multiplier", 2), ("alpha_grid_points", 5)):
             value = getattr(self, name)
             if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < minimum:
@@ -110,7 +113,7 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
     if isinstance(n_bins, (bool, np.bool_)) or not isinstance(n_bins, (int, np.integer)) or n_bins < 2:
         raise ValueError("n_bins must be an integer >= 2")
     observable = pipeline.observable_configuration(run, "reference_ratio")
-    floors = np.unique([0., observable["reference_ratio_eta_floor"]])
+    floors = np.unique([0., observable["reference_ratio_eta_floor"], settings.comparison_floor])
     bins = [n_bins, settings.resolution_multiplier*n_bins]
     scan = pipeline._positive_study_grid(run)
     unbinned = pipeline._saved_unbinned(run)
@@ -119,7 +122,7 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
     output = run.path("results", "reference_ratio_floor_study")
     output.mkdir(parents=True, exist_ok=True)
     bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"))
-    metadata = dict(schema_version=1, settings=asdict(settings), observable=observable,
+    metadata = dict(schema_version=2, comparison_floor=settings.comparison_floor, settings=asdict(settings), observable=observable,
                     floors=floors.tolist(), bin_counts=bins, scan=scan.tolist(),
                     bin_edges={str(n): pipeline.observable_bin_edges(n, "reference_ratio").tolist() for n in bins},
                     asimov_mu=run.config["asimov_mu"], mu_fit_bounds=run.config["mu_fit_bounds"],
@@ -163,7 +166,7 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
     before = scans.loc[scans.morph_order == "before"]
     morph = after.merge(before, on=["eta", "mu", "floor", "n_bins", "systematics"], suffixes=("_after", "_before"))
     morph["delta_q_after_minus_before"] = morph.q_after-morph.q_before
-    floored = scans.loc[scans.floor == observable["reference_ratio_eta_floor"]]
+    floored = scans.loc[scans.floor == settings.comparison_floor]
     no_floor = scans.loc[scans.floor == 0.]
     floor_effect = no_floor.merge(floored, on=["eta", "mu", "n_bins", "morph_order", "systematics"], suffixes=("_no_floor", "_floor"))
     floor_effect["delta_q_no_floor_minus_floor"] = floor_effect.q_no_floor-floor_effect.q_floor
