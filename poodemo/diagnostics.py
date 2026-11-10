@@ -121,7 +121,8 @@ def _estimator_record(run, likelihood, information, systematics, *, fit=None,
         fit = likelihood.fit(initial_mu=truth, initial_alpha=np.zeros(likelihood.n_nuisance),
                              systematics=systematics, mu_bounds=bounds,
                              alpha_bounds=tuple(run.config["nuisance_bounds"]), mu_starts=starts)
-    width = local_width(information["matrix"], systematics=systematics)
+    matrix = information["matrix"] if systematics else information["matrix"][:1, :1]
+    width = local_width(matrix, systematics=systematics)
     if nll_at_truth is None:
         nll_at_truth = likelihood.nll(truth, np.zeros(likelihood.n_nuisance))
     fit_valid = bool(fit.success and np.isfinite(fit.nll) and fit.nll <= nll_at_truth + 1e-6)
@@ -237,6 +238,10 @@ def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None
     quad = prepare_quadrature(run)
     parent = TemplateLikelihood(quad["nominal"], quad["down"], quad["up"],
                                 quad["weights"], quad["truth"])
+    from .practical import prepare_binning_bank
+    from .pipeline import _template_likelihood
+    bin_quad = prepare_binning_bank(run) if run.config.get("practical_inference") else quad
+    bin_parent = _template_likelihood(bin_quad)
     truth = float(run.config["asimov_mu"])
     if not run.config["mu_fit_bounds"][0] < truth < run.config["mu_fit_bounds"][1]:
         raise ValueError("A local Asimov width requires truth inside the mu fit bounds")
@@ -247,12 +252,13 @@ def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None
     baselines = _unbinned_baselines(run, parent, full_information)
     rows = []
     for eta in etas:
-        z = observable_values(run, quad, float(eta), observable=observable)
-        histogram = parent.binned(z, edges, morph_order="after", eta=float(eta))
-        information = local_asimov_information(histogram, truth)
+        z = observable_values(run, bin_quad, float(eta), observable=observable)
+        histogram = bin_parent.binned(z, edges, morph_order="after", eta=float(eta))
+        from .practical import local_information
+        information = local_information(histogram, truth)
         for syst in (False, True):
             rows.append({"eta": float(eta), "model": options["direct_label"], "n_bins": n_bins,
-                         "morph_order": "after", **_estimator_record(run, histogram, information, syst)})
+                         "morph_order": "after", "incomplete_NI_support_bins": getattr(histogram, "incomplete_support_bins", 0), **_estimator_record(run, histogram, information, syst)})
             rows.append({"eta": float(eta), "model": "analytic unbinned", "n_bins": 0,
                          "morph_order": "unbinned", **baselines[syst]})
         print(f"Estimator and local-width study at eta={eta:.3g} ready", flush=True)

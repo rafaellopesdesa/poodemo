@@ -363,6 +363,9 @@ def observable_configuration(run, observable="score"):
     """Reproducible compression settings, independent of the saved physics run."""
     observable_metadata(observable)
     settings = dict(observable=observable, binning_policy="uniform_v1")
+    if run.config.get("practical_inference"):
+        settings.update(observable_source="filtered_learned", template_source="simulation_v1",
+                        simulation_per_sample=run.config.get("simulation_per_sample", run.config.get("quadrature_per_process", 250_000)))
     if observable == "reference_ratio":
         power = run.config.get("reference_ratio_power", 1.)
         try:
@@ -449,7 +452,7 @@ def _validate_reference_binning_configuration(run, observable, fisher):
 
 
 def observable_values(run, quad, eta, observable="score"):
-    """Return the bounded analytical observable on the selected quadrature.
+    """Return the bounded observable: learned on MC banks, analytical in legacy runs.
 
     ``score`` is the existing logistic transform of the shape score. ``ratio``
     is r/(1+r), with r = p_selected(x; eta, alpha_NI=0) / p_selected_S(x).
@@ -464,6 +467,11 @@ def observable_values(run, quad, eta, observable="score"):
     the score and the common Fisher-information study require positive eta.
     """
     settings = observable_configuration(run, observable)
+    if quad.get("practical"):
+        if observable != "reference_ratio":
+            raise ValueError("Practical studies use the learned reference ratio")
+        return quad["learned_map"].coordinate(quad["learned_fields"], eta,
+            settings["reference_ratio_power"], settings["reference_ratio_eta_floor"])
     eta = float(eta)
     if not np.isfinite(eta) or eta < 0 or (observable == "score" and eta == 0):
         requirement = "strictly positive" if observable == "score" else "nonnegative"
@@ -504,6 +512,9 @@ def _record_scan_result(result, *, mu, model, systematics, **extra):
 
 
 def _template_likelihood(quad, systematics=True):
+    if quad.get("practical"):
+        from .practical import SimulationParent
+        return SimulationParent(quad, systematics)
     from .inference import TemplateLikelihood
     n = len(quad["weights"])
     down = quad["down"] if systematics else np.empty((0, 4, n))
@@ -512,6 +523,9 @@ def _template_likelihood(quad, systematics=True):
 
 
 def _fit_test(run, model, mu, systematics):
+    if run.config.get("practical_inference"):
+        from .practical import fit_direct_asimov
+        return fit_direct_asimov(run, model, mu, systematics)
     result = model.test_statistic(mu, systematics=systematics,
                                  mu_bounds=tuple(run.config["mu_fit_bounds"]),
                                  alpha_bounds=tuple(run.config["nuisance_bounds"]),
@@ -546,18 +560,20 @@ def run_binning_study(run, *, observable="score"):
     options = observable_metadata(observable)
     settings = observable_configuration(run, observable)
     scan_grid = _positive_study_grid(run)
-    quad = prepare_quadrature(run)
+    from .practical import prepare_binning_bank
+    quad = prepare_binning_bank(run)
+    analytic_quad = prepare_quadrature(run) if quad.get("practical") else quad
     parent = _template_likelihood(quad, systematics=False)
     records, fidelity = [], []
     for mu in scan_grid:
         eta = float(mu)
         z = observable_values(run, quad, eta, observable)
-        density = component_coefficients(eta) @ quad["nominal"]
-        s, sbi, b, _ = quad["nominal"]
+        density = component_coefficients(eta) @ analytic_quad["nominal"]
+        s, sbi, b, _ = analytic_quad["nominal"]
         derivative = s+(sbi-s-b)/(2*np.sqrt(eta))
-        rate = density @ quad["weights"]
-        drate = derivative @ quad["weights"]
-        full_info = np.sum(quad["weights"]*derivative**2/density)
+        rate = density @ analytic_quad["weights"]
+        drate = derivative @ analytic_quad["weights"]
+        full_info = np.sum(analytic_quad["weights"]*derivative**2/density)
         rate_info = drate**2/rate
         for nbins in run.config["bin_counts"]:
             edges = observable_bin_edges(nbins, observable)
@@ -567,9 +583,11 @@ def run_binning_study(run, *, observable="score"):
                                                model=options["direct_label"], systematics=False))
             expected = component_coefficients(eta) @ hist.nominal
             # Signed derivative weights are valid; only event means must be nonnegative.
-            dbin = np.histogram(z, edges, weights=quad["weights"]*derivative)[0]
-            info = np.sum(np.divide(dbin**2, expected, out=np.zeros_like(expected), where=expected>0))
-            fidelity.append(dict(eta=eta, n_bins=nbins, information_fraction=info/full_info,
+            dbin = np.array([1-.5/np.sqrt(eta), .5/np.sqrt(eta), -.5/np.sqrt(eta), 0.]) @ hist.nominal
+            information_valid = bool(np.all(expected >= 0) and not np.any((expected == 0) & (dbin != 0)))
+            info = (np.sum(np.divide(dbin**2, expected, out=np.zeros_like(expected), where=expected>0))
+                    if information_valid else np.nan)
+            fidelity.append(dict(eta=eta, n_bins=nbins, information_valid=information_valid, information_fraction=info/full_info,
                                  shape_information_fraction=(info-rate_info)/(full_info-rate_info),
                                  full_information=full_info, binned_information=info,
                                  occupied_bins=int(np.count_nonzero(expected))))
@@ -606,8 +624,10 @@ def _histogram_anchors(quad, z, edges):
     return np.stack([histogram_components(z, value, quad["weights"], edges) for value in fields])
 
 
-def _histogram_model(anchors, counts):
+def _histogram_model(anchors, counts, *, practical=False):
     from .inference import TemplateLikelihood
+    if practical:
+        from .practical import SimulationHistogram as TemplateLikelihood
     nominal = anchors[0]
     down, up = anchors[[1]], anchors[[2]]
     return TemplateLikelihood(nominal, down, up, np.ones(len(counts)), counts)

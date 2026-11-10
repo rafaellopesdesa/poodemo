@@ -1,8 +1,8 @@
 """Fixed process-ratio compression versus the moving physical likelihood ratio.
 
-All templates and Asimov data use the same analytical integration bank.  The
-optional learned mode changes only the axes, keeping density-estimation error
-separate from the information lost by compression.  No network is trained.
+Practical runs use learned coordinates and labelled MC templates, with an
+analytical unbinned benchmark. Legacy calls retain the analytical-bank modes
+for historical studies. No network is trained.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pandas as pd
 from scipy.special import expit
 
 from . import pipeline
-from .data import PROCESSES, Run, save_json
+from .data import PROCESSES, save_json
 from .diagnostics import local_asimov_information, local_width
 
 
@@ -40,6 +40,11 @@ def process_ratio_values(quad, powers=None, *, nominal=None):
             raise ValueError("Each discriminator power must be finite and positive") from None
         if not np.isfinite(powers[name]) or powers[name] <= 0:
             raise ValueError("Each discriminator power must be finite and positive")
+    if quad.get("practical"):
+        fields = quad["learned_fields"]
+        rates = quad["learned_map"].rates
+        return {name: expit(powers[name]*(np.log(fields[PROCESSES.index(name)]/rates[PROCESSES.index(name)])
+                                        - np.log(fields[0]/rates[0]))) for name in AXES}
     fields = np.asarray(quad["nominal"] if nominal is None else nominal, dtype=float)
     weights = np.asarray(quad["weights"], dtype=float)
     if fields.shape != (4, len(weights)) or weights.ndim != 1:
@@ -103,6 +108,7 @@ def _occupancy(histogram, *, label, eta=np.nan):
     ess = np.divide(counts**2, squares, out=np.zeros_like(counts), where=squares > 0)
     occupied = counts > 0
     return dict(model=label, eta=eta, total_cells=len(counts),
+                incomplete_NI_support_bins=getattr(histogram, "incomplete_support_bins", 0),
                 occupied_cells=int(occupied.sum()), empty_cells=int((~occupied).sum()),
                 expected_events=float(counts.sum()),
                 minimum_cell_bank_ess=float(ess[occupied].min()),
@@ -111,8 +117,10 @@ def _occupancy(histogram, *, label, eta=np.nan):
 
 
 def _information(model, *, label, truth, systematics, baseline, eta=np.nan):
-    information = local_asimov_information(model, truth)
-    width = local_width(information["matrix"], systematics=systematics)
+    from .practical import local_information
+    information = local_information(model, truth)
+    matrix = information["matrix"] if systematics else information["matrix"][:1, :1]
+    width = local_width(matrix, systematics=systematics)
     denominator = baseline["information_mu_effective"]
     return dict(model=label, eta=eta, information_mu=truth, systematics=bool(systematics),
                 information_fraction=width["information_mu_effective"]/denominator,
@@ -175,7 +183,7 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
         raise ValueError("output_tag must be a nonempty directory name")
     config = {**run.config, "reference_ratio_power": reference_power,
               "reference_ratio_eta_floor": reference_eta_floor}
-    current = Run(run.root, config, run.model)
+    current = run.with_config(**config)
     settings = pipeline.observable_configuration(current, "reference_ratio")
     truth = float(run.config["asimov_mu"])
     if not np.isfinite(truth) or truth <= 0:
@@ -186,9 +194,13 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
             or np.any(grid < max(0., low)) or np.any(grid > high)):
         raise ValueError("scan_grid must be finite, nonnegative and inside mu_fit_bounds")
     grid = np.unique(np.r_[grid, truth])
-    quad = pipeline.prepare_quadrature(run)
+    from .practical import prepare_binning_bank
+    quad = prepare_binning_bank(current)
+    analytic_quad = pipeline.prepare_quadrature(run) if quad.get("practical") else quad
+    if quad.get("practical") and (ratio_source != "learned" or morph_order != "after"):
+        raise ValueError("Practical studies require learned axes and morph-after-bin MC templates")
     axis_fields = None
-    if ratio_source == "learned":
+    if ratio_source == "learned" and not quad.get("practical"):
         axis_fields = pipeline._learned_fields(run, quad)[0]
     values = process_ratio_values(quad, powers, nominal=axis_fields)
     powers = {name: float(powers[name]) for name in AXES}
@@ -217,10 +229,11 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
     scans, information, occupancy, templates = [], [], [], {}
     for syst in modes:
         parent = pipeline._template_likelihood(quad, systematics=syst)
-        baseline = local_width(local_asimov_information(parent, truth)["matrix"], systematics=syst)
-        information.append(_information(parent, label="analytic unbinned", truth=truth,
+        analytic_parent = pipeline._template_likelihood(analytic_quad, systematics=syst)
+        baseline = local_width(local_asimov_information(analytic_parent, truth)["matrix"], systematics=syst)
+        information.append(_information(analytic_parent, label="analytic unbinned", truth=truth,
                                          systematics=syst, baseline=baseline))
-        scans.extend(_analytic_scan(current, parent, grid, syst))
+        scans.extend(_analytic_scan(current, analytic_parent, grid, syst))
         for dimension, label in enumerate(FIXED_LABELS, 1):
             coordinates = np.column_stack([values[name] for name in AXES[:dimension]])
             histogram = multidimensional_histogram(parent, coordinates, edges, morph_order=morph_order)
@@ -257,7 +270,8 @@ def run_discriminator_study(run, n_bins=12, powers=None, reference_power=100.,
                          output_tag=output_tag,
                          binning_policy=settings["binning_policy"], bin_edges=edges.tolist(),
                          asimov_mu=truth, scan_grid=grid.tolist(), systematics=list(map(bool, modes)),
-                         morph_order=morph_order, likelihood_source="analytic", asimov_source="analytic",
+                         morph_order=morph_order, likelihood_source="simulation" if quad.get("practical") else "analytic",
+                         asimov_source="same MC templates" if quad.get("practical") else "analytic",
                          nuisance_note="After-integration morphing is an additional approximation to the unbinned nuisance model.",
                          information_note="Local information is evaluated at the fixed Asimov truth, not at eta.")
     result = dict(scans=pd.DataFrame(scans), information=pd.DataFrame(information),

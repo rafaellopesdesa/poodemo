@@ -17,7 +17,7 @@ from . import pipeline
 from .data import PROCESSES, save_json
 from .inference import FitResult, component_coefficients, poisson_asimov_nll
 
-STUDY_VERSION = 3
+STUDY_VERSION = 4
 METHODS = ("ecdf_u",)
 LABELS = {"direct": "Direct fills", "ecdf_u": "Exact weighted empirical CDF in u"}
 VARIATIONS = ("nominal", "NI_down", "NI_up")
@@ -64,6 +64,8 @@ def rescaled_log_ratio(quad, eta):
     of eta=1. Densities and their total rates are normalized on the same bank.
     The caller applies the observable floor before calling this function.
     """
+    if quad.get("practical"):
+        return quad["learned_map"].u(quad["learned_fields"], eta)
     eta = float(eta)
     if not np.isfinite(eta) or eta < 0:
         raise ValueError("eta must be finite and nonnegative")
@@ -97,6 +99,9 @@ class TemplateBank:
         self.central = np.searchsorted(self.edges, .5, side="right") - 1
         if not self.edges[self.central] < .5 < self.edges[self.central + 1]:
             raise ValueError("The equality collapse must lie strictly inside a bin")
+
+    def model(self, anchors, counts):
+        return pipeline._histogram_model(anchors, counts, practical=self.quad.get("practical", False))
 
     def exact(self, eta):
         eta = max(float(eta), self.floor)
@@ -223,15 +228,18 @@ def template_metrics(exact, predicted, probe_mus):
     pull = float(np.max(np.abs(predicted - exact) / np.sqrt(exact + 1.))) if valid else np.inf
     deviation = 0.
     support_mismatch = 0
+    direct_invalid_bins = 0
     for mu in probe_mus:
         coeff = component_coefficients(mu)
         for expected, approximate in zip(exact, predicted):
             data, model = coeff @ expected, coeff @ approximate
             if np.any(data < 0):
-                raise ValueError("Direct physical template is negative on a validation probe")
+                direct_invalid_bins += int(np.count_nonzero(data < 0))
+                continue
             deviation = max(deviation, 2. * poisson_asimov_nll(model, data))
             support_mismatch += int(np.count_nonzero((data > 0) & (model <= 0)))
-    return dict(max_bin_pull=pull, max_deviance=deviation, support_mismatch=support_mismatch)
+    return dict(max_bin_pull=pull, max_deviance=deviation, support_mismatch=support_mismatch,
+                direct_invalid_bins=direct_invalid_bins)
 
 
 def metric_pass(metrics, settings):
@@ -286,9 +294,9 @@ def adapt_templates(bank, grid, method, settings, probe_mus, progress=print, *, 
                 progress(f"  {index+1} midpoint checks complete")
         for index, eta in enumerate(likelihood_points):
             if eta not in direct_fits:
-                direct = pipeline._histogram_model(bank.exact(eta), bank.counts(eta))
+                direct = bank.model(bank.exact(eta), bank.counts(eta))
                 direct_fits[eta] = {s: _fit(bank.run, direct, eta, s) for s in (False, True)}
-            approximate = pipeline._histogram_model(model(eta), bank.counts(eta))
+            approximate = bank.model(model(eta), bank.counts(eta))
             for syst in (False, True):
                 reference = direct_fits[eta][syst]
                 fit = _fit(bank.run, approximate, eta, syst)
@@ -394,7 +402,8 @@ def _safe_nll(model, mu, alpha):
 
 def _fingerprint(bank):
     digest = hashlib.sha256()
-    for value in (bank.quad["x"], bank.quad["weights"], bank.weighted, bank.quad["truth"]):
+    for value in (bank.quad["x"], bank.quad["weights"], bank.weighted, bank.quad["truth"],
+                  bank.quad.get("learned_fields", np.empty(0))):
         data = np.ascontiguousarray(value)
         digest.update(str((data.shape, data.dtype.str)).encode())
         digest.update(memoryview(data).cast("B"))
@@ -420,7 +429,8 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     if n_bins not in set(fisher.n_bins):
         raise ValueError("Include the requested bin count in notebook 08 first")
     unbinned = pipeline._saved_unbinned(run)  # Fail before costly interpolation if missing.
-    quad = pipeline.prepare_quadrature(run)
+    from .practical import prepare_binning_bank
+    quad = prepare_binning_bank(run)
     bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"), settings.cdf_cache_size)
     grid = initial_eta_grid(run, settings)
     optimization_points = likelihood_refinement_grid(run, grid, bank.floor, settings.likelihood_refine_points)
@@ -430,7 +440,8 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     probe_mus = np.unique(np.r_[np.linspace(*bounds, 5), run.config["asimov_mu"]])
     output = run.path("results", "reference_ratio_interpolation")
     output.mkdir(parents=True, exist_ok=True)
-    metadata = dict(schema_version=3, settings=asdict(settings),
+    metadata = dict(schema_version=4, template_source="simulation" if quad.get("practical") else "analytic",
+                    observable_source="learned" if quad.get("practical") else "analytic", settings=asdict(settings),
                     observable=pipeline.observable_configuration(run, "reference_ratio"),
                     bin_edges=bank.edges.tolist(), n_bins=n_bins,
                     quadrature_fingerprint=_fingerprint(bank),
@@ -493,10 +504,10 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     alpha_probes = np.unique(np.r_[run.config['nuisance_bounds'], -1.5, -1., -.5, 0., .5, 1., 1.5])
     for point_number, eta in enumerate(fit_etas, start=1):
         exact, counts = bank.exact(eta), bank.counts(eta)
-        direct = pipeline._histogram_model(exact, counts)
+        direct = bank.model(exact, counts)
         for method in ("direct", *METHODS):
             prediction = exact if method == "direct" else models[method](eta)
-            model = direct if method == "direct" else pipeline._histogram_model(prediction, counts)
+            model = direct if method == "direct" else bank.model(prediction, counts)
             is_anchor = method != "direct" and bool(np.any(np.abs(models[method].etas - eta) < 1e-13))
             for systematic in (False, True):
                 scans.append(dict(method=method, eta=eta, mu=eta, systematics=systematic,
@@ -550,7 +561,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
         alpha_mesh = np.unique(np.r_[base_alpha_mesh, fitted.alpha_hat, fitted.alpha_null])
         for method in ("direct", *METHODS):
             anchors = bank.exact(eta) if method == "direct" else models[method](eta)
-            model = pipeline._histogram_model(anchors, counts)
+            model = bank.model(anchors, counts)
             for alpha in alpha_mesh:
                 for mu in mu_mesh:
                     surfaces.append(dict(method=method, eta=eta, mu=mu, alpha_NI=alpha,
@@ -561,7 +572,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     # interpolation; this comparison uses direct histograms only.
     parent = pipeline._template_likelihood(quad, systematics=True)
     morph = []
-    for eta in scan_grid[[0, len(scan_grid)//2, -1]]:
+    for eta in ([] if quad.get("practical") else scan_grid[[0, len(scan_grid)//2, -1]]):
         z = pipeline.observable_values(run, quad, eta, "reference_ratio")
         before, after = parent.binned(z, bank.edges, "before", eta), parent.binned(z, bank.edges, "after", eta)
         for alpha in (-1., -.5, .5, 1., 1.5):
@@ -587,6 +598,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
                             stop_reason=history.stop_reason.iloc[-1],
                             heldout_checks=len(heldout), heldout_failures=int((~heldout.passed).sum()),
                             anchor_checks=len(anchors), anchor_failures=int((~anchors.passed).sum()),
+                            direct_physical_failures=int((v.direct_invalid_bins > 0).sum()),
                             fit_checks=len(all_fits), off_anchor_fits=len(c),
                             q_failures=int((~all_fits.q_passed).sum()),
                             heldout_fit_checks=len(reserved_fits),
@@ -596,14 +608,14 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
                             mle_shift_flags=int(all_fits.mle_shift_flag.sum()),
                             domain_mismatches=domain_mismatches, max_truth_nll=truth_nll,
                             passed=bool(history.stop_reason.iloc[-1] == "tolerances_met"
-                                        and v.passed.all() and len(c) and all_fits.q_passed.all()
+                                        and v.passed.all() and (v.direct_invalid_bins == 0).all() and len(c) and all_fits.q_passed.all()
                                         and domain_mismatches == 0 and truth_nll <= settings.max_deviance)))
     frames = dict(summary=pd.DataFrame(summary), validation=validation, scans=scans,
                   comparison=comparison, fixed_checks=fixed_frame,
                   bin_errors=pd.DataFrame(bin_errors), surfaces=pd.DataFrame(surfaces),
                   refinement=pd.concat(histories, ignore_index=True),
                   likelihood_refinement=pd.concat([m.refinement_checks for m in models.values()], ignore_index=True),
-                  morph_comparison=pd.DataFrame(morph),
+                  morph_comparison=pd.DataFrame(morph, columns=["eta", "alpha_NI", "l1_relative_difference", "nll_difference"]),
                   unbinned=unbinned)
     for name, frame in frames.items():
         frame.to_csv(output / f"{name}.csv", index=False)

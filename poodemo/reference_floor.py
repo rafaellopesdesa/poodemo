@@ -105,8 +105,8 @@ def direct_asimov_fits(run, model, mu, settings):
 def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None, progress=print):
     """Matched direct scans; vary only compression, reuse the selected bank.
 
-    Morph-before-bin is the actual compression of the saved analytic unbinned
-    model. Bin-before-morph is the extra template approximation used by 08/09.
+    Practical runs use MC templates morphed after binning. Legacy analytical
+    runs additionally compare morph-before-bin compression of the saved model.
     Every variant retains the same physical model, Asimov truth and constraint.
     """
     settings = settings or FloorStudySettings()
@@ -117,12 +117,13 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
     bins = [n_bins, settings.resolution_multiplier*n_bins]
     scan = pipeline._positive_study_grid(run)
     unbinned = pipeline._saved_unbinned(run)
-    quad = pipeline.prepare_quadrature(run) if quadrature is None else quadrature
+    from .practical import prepare_binning_bank
+    quad = prepare_binning_bank(run) if quadrature is None else quadrature
     parent = pipeline._template_likelihood(quad, systematics=True)
     output = run.path("results", "reference_ratio_floor_study")
     output.mkdir(parents=True, exist_ok=True)
     bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"))
-    metadata = dict(schema_version=2, comparison_floor=settings.comparison_floor, settings=asdict(settings), observable=observable,
+    metadata = dict(template_source="simulation" if quad.get("practical") else "analytic", schema_version=2, comparison_floor=settings.comparison_floor, settings=asdict(settings), observable=observable,
                     floors=floors.tolist(), bin_counts=bins, scan=scan.tolist(),
                     bin_edges={str(n): pipeline.observable_bin_edges(n, "reference_ratio").tolist() for n in bins},
                     asimov_mu=run.config["asimov_mu"], mu_fit_bounds=run.config["mu_fit_bounds"],
@@ -146,7 +147,7 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
             z = pipeline.observable_values(variant, quad, eta, "reference_ratio")
             for count in bins:
                 edges = pipeline.observable_bin_edges(count, "reference_ratio")
-                for order in ("before", "after"):
+                for order in (("after",) if quad.get("practical") else ("before", "after")):
                     key = (effective, count, order)
                     if key not in cached:
                         model = parent.binned(z, edges, order, eta)
@@ -207,6 +208,8 @@ def plot_reference_floor_study(run, study, *, scan_xlim=(.02, 1.15), scan_ylim=(
     colors = {floor: color for floor, color in zip(floors, ("#0072B2", "#D55E00"))}
     with plt.style.context(hep.style.ATLAS):
         for order, title in (("before", "Morph then bin"), ("after", "Bin then morph")):
+            if order not in set(scans.morph_order):
+                continue
             fig, axes = plt.subplots(2, 2, figsize=(14, 10))
             for column, syst in enumerate((False, True)):
                 for floor in floors:
@@ -231,7 +234,7 @@ def plot_reference_floor_study(run, study, *, scan_xlim=(.02, 1.15), scan_ylim=(
         for floor in floors:
             for count in bins:
                 frame = scans.loc[(scans.floor == floor) & (scans.n_bins == count)
-                                   & (scans.morph_order == "before") & scans.systematics].sort_values("eta")
+                                   & (scans.morph_order == ("before" if "before" in set(scans.morph_order) else "after")) & scans.systematics].sort_values("eta")
                 axes[0].plot(frame.eta, frame.alpha_null.where(frame.valid), color=colors[floor],
                              ls="-" if count == bins[0] else "--", label=f"Floor {floor:g}, {count} bins")
                 comparison = study["morph_comparison"]
@@ -247,5 +250,9 @@ def plot_reference_floor_study(run, study, *, scan_xlim=(.02, 1.15), scan_ylim=(
                     xlim=scan_xlim, title="Profiled effect of morph order")
         for ax in axes:
             ax.legend(fontsize=9)
+        if "before" not in set(scans.morph_order):
+            axes[0].set_title("MC templates: nuisance response")
+            axes[1].set_axis_off()
+            axes[1].text(.5, .5, "MC templates morph after binning.\nNo analytical binned comparison.", ha="center", va="center")
         save(fig, "floor_nuisance_and_morph_order")
     return figures

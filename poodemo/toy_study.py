@@ -66,7 +66,7 @@ def _rng(seed, mu, toy_id, stream):
 
 
 def reference_observable(fields, rates, eta, power, reference_eta_floor=0.):
-    """Apply the analytic observable with frozen selected-rate normalizers.
+    """Apply a component-ratio observable with frozen selected-rate normalizers.
 
     Rates MUST come from the original integration bank, not the toy events.
     The returned coordinates agree with notebook 08's reference-ratio bins.
@@ -97,7 +97,7 @@ def reference_observable(fields, rates, eta, power, reference_eta_floor=0.):
 def _direct_templates(quad, mus, n_bins, power, reference_eta_floor=0.):
     """Integrate process yields directly in the frozen observable bins.
 
-    Each eta gets its own histogram of the original analytical quadrature,
+    Each eta gets its own histogram of the MC bank (legacy: analytical quadrature),
     including eta=0. As in notebook 08, these process yields remain fixed
     throughout a fit; only the exact physical mu coefficients change.
     No notebook 09 output or interpolated template is read.
@@ -105,10 +105,11 @@ def _direct_templates(quad, mus, n_bins, power, reference_eta_floor=0.):
     edges = observable_bin_edges(n_bins, "reference_ratio")
     rates = np.asarray(quad["nominal"]) @ quad["weights"]
     templates, rows, provenance = {}, [], {}
-    source = "direct analytical quadrature histogram (notebook 08 method)"
+    source = "direct simulation histogram with learned coordinates" if quad.get("practical") else "direct analytical quadrature histogram (notebook 08 method)"
     for mu in mus:
-        z = reference_observable(quad["nominal"], rates, mu, power,
-                                 reference_eta_floor=reference_eta_floor)
+        z = (quad["learned_map"].coordinate(quad["learned_fields"], mu, power, reference_eta_floor)
+             if quad.get("practical") else reference_observable(quad["nominal"], rates, mu, power,
+                                                               reference_eta_floor=reference_eta_floor))
         yields = histogram_components(z, quad["nominal"], quad["weights"], edges)
         templates[mu] = yields
         provenance[str(mu)] = source
@@ -120,7 +121,7 @@ def _direct_templates(quad, mus, n_bins, power, reference_eta_floor=0.):
                     row["eta_effective"] = reference_ratio_eta(mu, eta_floor=reference_eta_floor)
                 rows.append(row)
     return templates, edges, pd.DataFrame(rows), {
-        "template_method": "direct_quadrature", "template_sources": provenance,
+        "template_method": "direct_simulation" if quad.get("practical") else "direct_quadrature", "template_sources": provenance,
     }
 
 
@@ -229,18 +230,30 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
     if not re.fullmatch(r"[A-Za-z0-9_-]+", output_tag):
         raise ValueError("output_tag must contain only letters, digits, underscores or hyphens")
     quad = prepare_quadrature(run)
+    from .practical import prepare_binning_bank
+    bin_quad = prepare_binning_bank(run) if run.config.get("practical_inference") else quad
     templates, edges, bin_yields, template_metadata = _direct_templates(
-        quad, mus, n_bins, reference_power, reference_eta_floor=reference_eta_floor)
+        bin_quad, mus, n_bins, reference_power, reference_eta_floor=reference_eta_floor)
     labels = _case_labels(n_bins)
     selector, threshold, selection_provenance = load_frozen_selector(run)
-    workspace = make_frozen_workspace(run, quad)
-    learned = np.asarray(workspace.learned_quadrature[0])
-    rates = np.asarray(quad["nominal"]) @ quad["weights"]
-    learned_rates = learned @ quad["weights"]
+    rates = np.asarray(quad["nominal"]) @ quad["weights"]  # analytical unbinned reference only
+    source_quad = quad
+    if bin_quad.get("practical"):
+        from types import SimpleNamespace
+        learned_map = bin_quad["learned_map"]
+        signal_slice = bin_quad["sample_slices"]["S"]
+        learned = np.asarray(bin_quad["learned_fields"][:, signal_slice])
+        source_quad = dict(x=bin_quad["x"][signal_slice], weights=np.full(learned.shape[1], 1./learned.shape[1]))
+        workspace = SimpleNamespace(evaluate=lambda x: (learned_map.evaluate(x),))
+        learned_rates = learned_map.rates
+    else:
+        workspace = make_frozen_workspace(run, quad)
+        learned = np.asarray(workspace.learned_quadrature[0])
+        learned_rates = learned @ quad["weights"]
     sources, source_diagnostics, source_errors = {}, {}, {}
     for mu in mus:
         try:
-            sources[mu] = QuadraturePoissonSource(quad, learned, mu, exposure=exposure)
+            sources[mu] = QuadraturePoissonSource(source_quad, learned, mu, exposure=exposure)
             source_diagnostics[str(mu)] = sources[mu].diagnostics
         except (ValueError, FloatingPointError) as error:
             # An invalid learned density cannot define a toy generator. Keep
@@ -263,6 +276,12 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                          selection=selection_provenance, model_artifacts=dependencies,
                          bank_hashes={key: _array_digest(quad[key]) for key in ("x", "weights", "nominal")},
                          learned_bank_sha256=_array_digest(learned), **template_metadata)
+    if bin_quad.get("practical"):
+        configuration.update(version=3, observable_source="filtered learned ratios",
+                             template_source="independent component MC",
+                             simulation_bank_fingerprint=bin_quad["fingerprint"],
+                             learned_normalizers=learned_map.normalizers.tolist(),
+                             model_evaluation=str(run.path("models", "ratios")))
     # The zero-floor configuration is intentionally byte-for-byte compatible
     # with historical notebook-11 fingerprints used by notebook 12.
     if reference_eta_floor:
@@ -295,6 +314,11 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
             "The numerator uses eta_effective=max(mu_test, reference_eta_floor); "
             "the denominator remains mu=1. Physical generation, q_mu and the "
             "free-fit parameter retain their unfloored values.")
+    if bin_quad.get("practical"):
+        metadata.update(
+            normalization_note="Learned rate constants and ratio mean normalizers are frozen on MC. Only the analytical unbinned reference uses analytical quadrature integrals.",
+            learned_source_note="Poisson resampling of the empirical S integration sample, weighted by learned intensity relative to S. This finite-bank approximation is not a continuous neural sampler.",
+            template_note="Direct weighted component MC fills in learned coordinates; no analytical density weights. Fits condition on estimated templates without MC-statistical nuisance parameters.")
     save_json(config_path, metadata)
     records = pd.read_csv(result_path).to_dict("records") if result_path.exists() else []
     keys = [(float(row["mu_test"]), int(row["toy_id"]), row["case"]) for row in records]
@@ -334,8 +358,9 @@ def run_toy_study(run, *, n_toys=5000, mu_values=(0., 1.4), n_bins=12,
                             likelihood = StatOnlyLikelihood(workspace.evaluate(x)[0], learned_rates,
                                                             exposure=exposure, validity_intervals=learned_guard.negative_intervals)
                         else:
-                            z = reference_observable(analytic_events, rates, mu, reference_power,
-                                                     reference_eta_floor=reference_eta_floor)
+                            z = (learned_map.coordinate(learned_map.evaluate(x), mu, reference_power, reference_eta_floor)
+                                 if bin_quad.get("practical") else reference_observable(analytic_events, rates, mu, reference_power,
+                                                                                     reference_eta_floor=reference_eta_floor))
                             counts = np.histogram(z, edges)[0]
                             likelihood = StatOnlyLikelihood.from_binned(bin_fields, counts, exposure=exposure)
                     elif case == "learned_model":
