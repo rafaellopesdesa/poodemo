@@ -7,7 +7,7 @@ from build_notebooks import BOOTSTRAP, REPO
 
 # Tested empirical-CDF refinement and direct floor controls.
 # Pin code independently of notebook-output commits for reproducible reruns.
-SOURCE_COMMIT = "69e8fdcff7e761bbd843418a1e10f779ffba77c7"
+SOURCE_COMMIT = "d88a9d90b6f124624430046fbd3d624fca2b3779"
 
 
 def fresh_bootstrap(previous):
@@ -321,6 +321,37 @@ print("Direct fills: floor 0 and the baseline floor; standard/finer bins; both m
 print("This full-scan CPU control can take appreciable time, especially morphing before binning.")"""
 
 
+FLOOR_PLOTS = '''# This cell can reload the completed direct study without repeating any fits.
+import json
+import pandas as pd
+from poodemo.reference_floor import plot_reference_floor_study
+
+if "floor_study" not in globals():
+    _floor_output = run.path("results", "reference_ratio_floor_study")
+    floor_study = {name: pd.read_csv(_floor_output / f"{name}.csv", float_precision="round_trip")
+                   for name in ("scans", "summary", "morph_comparison", "floor_comparison",
+                                "reference_comparison", "unbinned")}
+    floor_study["metadata"] = json.loads((_floor_output / "metadata.json").read_text())
+    if floor_study["metadata"].get("status") != "complete":
+        raise RuntimeError("The saved direct study is incomplete; run its fit cell first.")
+    floor_study["output"] = _floor_output
+    print("Reloaded completed direct study:", _floor_output)
+
+# Also supports an already-running runtime that imported the older plot function.
+with pd.option_context("compute.use_numexpr", False):
+    floor_figures = plot_reference_floor_study(
+        run, floor_study, scan_xlim=SCAN_XLIM, scan_ylim=SCAN_YLIM, secondary_xlim=SECONDARY_XLIM)
+plt.show()
+print("Largest profiled effects of removing the floor:")
+floor_effect = floor_study["floor_comparison"].query("systematics")
+display(floor_effect.assign(abs_delta_q=floor_effect.delta_q_no_floor_minus_floor.abs()).nlargest(15, "abs_delta_q"))
+print("Largest profiled effects of morph order:")
+morph_effect = floor_study["morph_comparison"].query("systematics")
+display(morph_effect.assign(abs_delta_q=morph_effect.delta_q_after_minus_before.abs()).nlargest(15, "abs_delta_q"))
+print("Direct controls all valid:", floor_study["metadata"]["all_fits_valid"])
+print("Saved figures:", run.path("plots", "09_floor_study"))'''
+
+
 def floor_cells(by_id):
     def md(source, ident):
         return nbformat.v4.new_markdown_cell(source.strip(), id=ident)
@@ -359,17 +390,7 @@ morph-order effect. No interpolation is used anywhere in these controls.
 display(floor_study["summary"])
 display(floor_study["scans"].loc[~floor_study["scans"].valid | floor_study["scans"].alpha_boundary])
 print("Results:", floor_study["output"])''', 'floor-run'),
-            code('''floor_figures = plot_reference_floor_study(
-    run, floor_study, scan_xlim=SCAN_XLIM, scan_ylim=SCAN_YLIM, secondary_xlim=SECONDARY_XLIM)
-plt.show()
-print("Largest profiled effects of removing the floor:")
-floor_effect = floor_study["floor_comparison"].query("systematics")
-display(floor_effect.assign(abs_delta_q=floor_effect.delta_q_no_floor_minus_floor.abs()).nlargest(15, "abs_delta_q"))
-print("Largest profiled effects of morph order:")
-morph_effect = floor_study["morph_comparison"].query("systematics")
-display(morph_effect.assign(abs_delta_q=morph_effect.delta_q_after_minus_before.abs()).nlargest(15, "abs_delta_q"))
-print("Direct controls all valid:", floor_study["metadata"]["all_fits_valid"])
-print("Saved figures:", run.path("plots", "09_floor_study"))''', 'floor-plots'),
+            code(FLOOR_PLOTS, 'floor-plots'),
             md(r"""### What these comparisons establish
 
 - **Interpolation:** use independent empirical-CDF closure checks to judge the remaining approximation in $\eta$.

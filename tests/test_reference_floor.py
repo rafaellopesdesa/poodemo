@@ -54,7 +54,7 @@ def test_direct_certificate_and_profile_agree_with_full_fit(selected_quadrature)
     assert not any(row['truth_certified'] or row['valid'] for row in wrong)
 
 
-def test_complete_direct_controls_preserve_run_and_match_above_floor(tmp_path, selected_quadrature):
+def test_complete_direct_controls_preserve_run_and_match_above_floor(tmp_path, selected_quadrature, monkeypatch):
     original, quad = selected_quadrature
     run = original.with_config(reference_ratio_eta_floor=.2, reference_ratio_power=100.,
         asimov_mu=1., mu_fit_bounds=[.001, 2.], nuisance_bounds=[-3., 3.],
@@ -86,8 +86,37 @@ def test_complete_direct_controls_preserve_run_and_match_above_floor(tmp_path, s
     assert json.loads((result['output']/'metadata.json').read_text())['status'] == 'complete'
     import matplotlib
     matplotlib.use('Agg')
+    # Colab enables NumExpr; the `floor` column must not be sent to query().
+    original_query = pd.DataFrame.query
+    def checked_query(frame, expression, *args, **kwargs):
+        assert 'floor' not in expression
+        kwargs['level'] = kwargs.get('level', 0) + 1
+        return original_query(frame, expression, *args, **kwargs)
+    monkeypatch.setattr(pd.DataFrame, 'query', checked_query)
     figures = plot_reference_floor_study(run, result)
     assert len(figures) == 3
     assert len(list(run.path('plots', '09_floor_study').glob('*.png'))) == 3
     import matplotlib.pyplot as plt
     plt.close('all')
+    # Execute the notebook recovery cell with no in-memory study. It must read
+    # the saved evaluation and plot without calling the expensive fit workflow.
+    from pathlib import Path
+    from poodemo import reference_floor
+    notebook = json.loads((Path(__file__).resolve().parents[1] /
+        'notebooks/09_reference_ratio_spline_templates.ipynb').read_text())
+    cell = next(c for c in notebook['cells'] if c['id'] == 'floor-plots')
+    seen = []
+    def check_reloaded(selected_run, study, **kwargs):
+        assert selected_run is run
+        pd.testing.assert_frame_equal(study['scans'], result['scans'], check_dtype=False)
+        assert study['metadata']['status'] == 'complete'
+        assert not pd.get_option('compute.use_numexpr')
+        seen.append(study['output'])
+        return []
+    monkeypatch.setattr(reference_floor, 'plot_reference_floor_study', check_reloaded)
+    option = pd.get_option('compute.use_numexpr')
+    ns = dict(run=run, SCAN_XLIM=(.02, 1.15), SCAN_YLIM=(0., 8.),
+              SECONDARY_XLIM=(.02, .3), display=lambda _: None, plt=plt)
+    exec(''.join(cell['source']), ns)
+    assert seen == [result['output']]
+    assert pd.get_option('compute.use_numexpr') == option
