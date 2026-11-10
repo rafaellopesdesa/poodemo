@@ -576,12 +576,14 @@ The analytical observable is `sigmoid(a * log(R)) = R**a/(1+R**a)`, with
 ```text
 eta_effective = max(eta, REFERENCE_RATIO_ETA_MIN)
 R = r(x; eta_effective) / r(x; 1)
-REFERENCE_RATIO_ETA_MIN = 0.2
+REFERENCE_RATIO_ETA_MIN = 0.0
 REFERENCE_RATIO_A = 100.0
 ```
 
-Use identical floor and power settings in notebooks 08–11. This is a floor on
-**the compression endpoint only**. Physical hypotheses, generating densities,
+Use identical floor and power settings in notebooks 08 and 09. The baseline
+has no floor, so `eta_effective = eta`. The $0.2$ floor is an explicit control
+only. Rerun 08 first and then 09 after this change. An optional positive floor
+acts on **the compression endpoint only**. Physical hypotheses, generating densities,
 process coefficients, and the parameter varied in each likelihood fit retain
 their original definitions. Below the floor, hypotheses share one observable
 and bin partition but have different expected yields. At and above the floor,
@@ -597,16 +599,17 @@ exactly 0.5 and the frozen histogram retains only the total rate. The shared
 existing half-bin shift of internal edges, with endpoints at 0 and 1. Plots
 show event yields per bin using mplhep typography without an ATLAS label.
 
-Notebook 08 displays the low-end saturation and the separate collapse at 1;
+Notebook 08 displays the low-eta distributions and the separate collapse at 1;
 its Fisher/score scan still uses positive physical eta. The estimator/local-width
 plots overlay **no floor** and **eta_min=0.2** against one analytical unbinned
 reference, with a low-eta width zoom. The two histogram studies use the same
 selected bank, 36 bins, Asimov truth, nuisance treatment, and physical fit bounds.
 The comparison measures local information retained by each frozen observable;
 it does not by itself establish coverage or an optimal floor for every truth.
-The primary estimator CSV and metadata retain the configured positive floor;
-separate `reference_ratio_estimator_eta_no_floor.csv` and
-`reference_ratio_estimator_eta_no_floor_config.json` preserve the unfloored control.
+The primary estimator CSV and metadata now use the no-floor baseline;
+`reference_ratio_estimator_eta_floor_control.csv` and its configuration file
+store the explicit $0.2$ control separately. Historical no-floor control files
+are not needed for this rerun.
 
 Notebooks 08 and 09 default to the **filtered Unity ensembles selected in notebook 03**.
 Keep the same `UNITY_MODEL_DIR` (by default
@@ -639,7 +642,9 @@ Convex linear interpolation in $\eta$ integrates over the **original $z$ bins**,
 mapped into $u$ with reversed order and endpoint conventions below $1$.
 Infinite endpoints retain the full bank. The equality collapse and floor plateau
 remain exact. Physical coefficients, truth and nuisance constraints are unchanged.
-Only interpolation between anchors remains approximate.
+Only interpolation between anchors remains approximate. With the no-floor
+baseline, adaptive anchors and reserved checks also cover $0<\eta<0.2$;
+that region no longer uses a frozen-partition shortcut.
 
 `SPLINE_SETTINGS` now refines using both midpoint template checks and actual
 fixed/profiled likelihood discrepancies (default $|\Delta q|\leq0.01$).
@@ -658,8 +663,8 @@ A failed optimizer can be certified only when a feasible point attains the known
 nonnegative NLL bound within $10^{-10}$; raw statuses are saved. Near $\eta=1$,
 a rate-only interval can have multiple equally good physical-strength MLEs.
 
-A second **direct-fill** study compares floor 0 with the configured baseline
-floor (normally 0.2), standard and four-times-finer binning (36/144 by default),
+A second **direct-fill** study compares floor 0 with the explicit
+`FLOOR_SETTINGS.comparison_floor` (default 0.2), standard and four-times-finer binning (36/144 by default),
 and both nuisance morph orders over the full scan. Morph-then-bin is compression
 of the analytic unbinned model; bin-then-morph adds a distinct model approximation.
 Every variant reuses the same generating bank, physical truth and constraints.

@@ -54,9 +54,10 @@ def test_direct_certificate_and_profile_agree_with_full_fit(selected_quadrature)
     assert not any(row['truth_certified'] or row['valid'] for row in wrong)
 
 
-def test_complete_direct_controls_preserve_run_and_match_above_floor(tmp_path, selected_quadrature, monkeypatch):
+@pytest.mark.parametrize('baseline_floor', [0., .2])
+def test_complete_direct_controls_preserve_run_and_match_above_floor(tmp_path, selected_quadrature, monkeypatch, baseline_floor):
     original, quad = selected_quadrature
-    run = original.with_config(reference_ratio_eta_floor=.2, reference_ratio_power=100.,
+    run = original.with_config(reference_ratio_eta_floor=baseline_floor, reference_ratio_power=100.,
         asimov_mu=1., mu_fit_bounds=[.001, 2.], nuisance_bounds=[-3., 3.],
         mu_min=.1, mu_max=.3, mu_points=3)
     run.path('results').mkdir(parents=True, exist_ok=True)
@@ -67,7 +68,8 @@ def test_complete_direct_controls_preserve_run_and_match_above_floor(tmp_path, s
     sentinel.write_text('baseline untouched')
     result = run_reference_floor_study(run, 4, quadrature=quad,
         settings=FloorStudySettings(resolution_multiplier=2, alpha_grid_points=7), progress=lambda _: None)
-    assert run.config['reference_ratio_eta_floor'] == .2
+    assert run.config['reference_ratio_eta_floor'] == baseline_floor
+    assert result['metadata']['comparison_floor'] == .2
     assert sentinel.read_text() == 'baseline untouched'
     assert result['metadata']['all_fits_valid']
     assert len(result['scans']) == len(pipeline._positive_study_grid(run))*2*2*2*2

@@ -96,26 +96,24 @@ this observable is analytical, not learned. The denominator is always at
 $(\mu,\alpha_{NI})=(1,0)$, independent of the fit, anchor and Asimov truth settings.
 The event count retains the Poisson rate information.
 
-Use **36 bins**, **`REFERENCE_RATIO_ETA_MIN = 0.2`** and
-**`REFERENCE_RATIO_A = 100`** throughout notebooks 08–11. The floor changes only
-which observable partitions the events. **Physical test points, generated truth,
-component coefficients and the unrestricted physical-$\mu$ fit are not floored.**
-All $\eta$ below the floor share a partition; their physical bin yields still vary
-with $\mu$. Above the floor the original observable is unchanged. These settings
-require rerunning the downstream studies, without sample generation, retraining
-or changing the saved physics run. The power stays fixed throughout every fit.
+Use **36 bins**, **`REFERENCE_RATIO_ETA_MIN = 0.0`** and
+**`REFERENCE_RATIO_A = 100`** in notebooks 08 and 09. The baseline has no floor:
+$\eta_{\mathrm{eff}}=\eta$. Physical test points, generating truth, coefficients,
+and fit bounds retain their original definitions. The power stays fixed inside
+both likelihood fits. Rerun **08 first, then 09** with matching settings and the
+same filtered ensemble evaluation; no generation or training is needed.
 
-For fixed NI, the continuous ratio retains the comparison between
-$\eta_{\mathrm{eff}}$ and $1$. Below the floor this is not the pairwise-optimal ratio for
-physical $\eta$ versus $1$: the deliberate change targets the competing-minimum
-problem seen in notebook 12. Even above the floor, pairwise sufficiency does
-not imply sufficiency for every freely fitted $\mu$ or for NI profiling. Compare
-to **analytical unbinned**; learned references have separate closure meanings.
+For fixed NI, the continuous ratio preserves its endpoint-pair comparison.
+Finite binning and NI profiling can still lose information, and pairwise
+sufficiency does not imply sufficiency for every freely fitted physical $\mu$.
+Compare to **analytical unbinned**; learned references test a separate closure.
 
-The value $0.2$ is an example-specific regularization, not a universal optimum.
-The matched no-floor study below measures local widths at fixed truth $\mu_*=1$;
-it does not establish competing-branch stability or confidence-interval coverage
-at low physical $\mu$. Those require paired toys with the complete free fit.
+The former floor $0.2$ remains an explicit comparison setting. A positive floor
+changes only the observable: below it, different physical hypotheses share a
+partition but retain their own expected yields. Notebook 08 compares local
+widths at fixed truth $\mu_*=1$; notebook 09 compares complete direct scans.
+Neither comparison establishes confidence-interval coverage or global branch
+stability, which require paired toys with the complete free fit.
 
 At $\eta=1$, $R=1$ and $z=1/2$ exactly for every event. The separate equality
 collapse remains: no jitter, shifted high-eta endpoint or score substitution is
@@ -162,10 +160,10 @@ differ from the directly filled data.
 """
 
 REFERENCE_SETUP = '''
-# Observable-only settings: keep these identical in notebooks 08–11.
+# Observable-only settings: keep these identical in notebooks 08 and 09.
 # The floor changes the observable, never the physical mu or its fit bounds.
 N_BINS = 36
-REFERENCE_RATIO_ETA_MIN = 0.2
+REFERENCE_RATIO_ETA_MIN = 0.0
 REFERENCE_RATIO_A = 100.0
 if not np.isfinite(REFERENCE_RATIO_A) or REFERENCE_RATIO_A <= 0:
     raise ValueError("REFERENCE_RATIO_A must be finite and positive")
@@ -228,9 +226,9 @@ else:
 '''
 
 RUNTIME_NOTE = '''
-For the 36-bin/floored-observable update, keep the completed v4 run and rerun
-**08, then 09**, followed by **10 and 11**. Keep `REFERENCE_RATIO_A` and
-`REFERENCE_RATIO_ETA_MIN` identical throughout. No sample generation,
+For the no-floor baseline, keep the completed v4 run and rerun
+**08, then 09**. Keep `REFERENCE_RATIO_A` and
+`REFERENCE_RATIO_ETA_MIN` identical in these two notebooks. No sample generation,
 retraining, or new physics run name is required. Old notebook outputs are
 cleared because they used a different observable or resolution.
 '''
@@ -240,22 +238,27 @@ ESTIMATOR_STUDY_CODE = '''
 from poodemo.diagnostics import run_estimator_study
 
 print("Estimator-study bin count:", N_BINS)
-# Primary study: keep the configured floor and its usual downstream outputs.
+# Primary study uses the configured baseline (no floor by default).
 estimator_study = run_estimator_study(run, observable="reference_ratio", n_bins=N_BINS)
-# Matched control: only the observable floor changes. Truth, integration bank,
-# eta grid, bin edges, power, physical coefficients and free-fit bounds stay fixed.
+# Explicit floor control; it must remain distinct when the baseline is zero.
+COMPARISON_ETA_MIN = 0.2
 no_floor_run = run.with_config(reference_ratio_eta_floor=0.0)
-estimator_no_floor = run_estimator_study(
-    no_floor_run, observable="reference_ratio", n_bins=N_BINS,
-    output_tag="reference_ratio_estimator_eta_no_floor")
-np.testing.assert_array_equal(np.sort(estimator_study["eta"].unique()),
+estimator_no_floor = (estimator_study if REFERENCE_RATIO_ETA_MIN == 0.0 else
+    run_estimator_study(no_floor_run, observable="reference_ratio", n_bins=N_BINS,
+                        output_tag="reference_ratio_estimator_eta_no_floor"))
+floor_run = run.with_config(reference_ratio_eta_floor=COMPARISON_ETA_MIN)
+estimator_floor = (estimator_study if REFERENCE_RATIO_ETA_MIN == COMPARISON_ETA_MIN else
+    run_estimator_study(floor_run, observable="reference_ratio", n_bins=N_BINS,
+                        output_tag="reference_ratio_estimator_eta_floor_control"))
+np.testing.assert_array_equal(np.sort(estimator_floor["eta"].unique()),
                               np.sort(estimator_no_floor["eta"].unique()))
-FLOOR_LABEL = f"{N_BINS} bins, floor={REFERENCE_RATIO_ETA_MIN:g}"
+FLOOR_LABEL = f"{N_BINS} bins, floor={COMPARISON_ETA_MIN:g}"
 NO_FLOOR_LABEL = f"{N_BINS} bins, no floor"
 # Include a single analytical baseline per eta and NI treatment.
 is_unbinned = estimator_study["model"].eq("analytic unbinned")
 estimator_comparison = pd.concat([
-    estimator_study.loc[~is_unbinned].assign(observable_variant=FLOOR_LABEL),
+    estimator_floor.loc[~estimator_floor["model"].eq("analytic unbinned")]
+        .assign(observable_variant=FLOOR_LABEL),
     estimator_no_floor.loc[~estimator_no_floor["model"].eq("analytic unbinned")]
         .assign(observable_variant=NO_FLOOR_LABEL),
     estimator_study.loc[is_unbinned].assign(observable_variant="Analytical unbinned"),
@@ -268,8 +271,8 @@ if len(invalid_rows):
     display(invalid_rows)
 estimator_comparison.to_csv(
     run.path("results", "reference_ratio_estimator_eta_floor_comparison.csv"), index=False)
-print("Primary floored estimator table:", run.path("results", "reference_ratio_estimator_eta.csv"))
-print("Independent no-floor control:", run.path("results", "reference_ratio_estimator_eta_no_floor.csv"))
+print("Primary baseline estimator table:", run.path("results", "reference_ratio_estimator_eta.csv"))
+print("Floor control (when different from baseline):", run.path("results", "reference_ratio_estimator_eta_floor_control.csv"))
 '''
 
 ESTIMATOR_PLOT_CODE = r'''
@@ -280,8 +283,8 @@ import mplhep as hep
 
 truth_mu = float(estimator_study["truth"].iloc[0])
 estimator_styles = {
-    FLOOR_LABEL: dict(color="#0072B2", linestyle="-", linewidth=2.2),
-    NO_FLOOR_LABEL: dict(color="#D55E00", linestyle="--", linewidth=1.8),
+    FLOOR_LABEL: dict(color="#D55E00", linestyle="--", linewidth=1.8),
+    NO_FLOOR_LABEL: dict(color="#0072B2", linestyle="-", linewidth=2.2),
     "Analytical unbinned": dict(color="black", linestyle=":", linewidth=2.0),
 }
 
@@ -292,9 +295,9 @@ def estimator_curves(systematic):
         yield label, values, style
 
 def mark_estimator_floor(ax):
-    if REFERENCE_RATIO_ETA_MIN > 0:
-        ax.axvline(REFERENCE_RATIO_ETA_MIN, color="0.55", ls="--", lw=1,
-                   label=fr"Floor position $\eta={REFERENCE_RATIO_ETA_MIN:g}$")
+    if COMPARISON_ETA_MIN > 0:
+        ax.axvline(COMPARISON_ETA_MIN, color="0.55", ls="--", lw=1,
+                   label=fr"Control floor $\eta={COMPARISON_ETA_MIN:g}$")
     ax.grid(False)
 
 with plt.style.context(hep.style.ATLAS), plt.rc_context({"font.size": 14}):
@@ -378,13 +381,15 @@ def configure_reference_cells(cells, number):
                 end = source.index("plt.rcParams.update", begin)
                 source = source[:begin] + "\n" + setup + "\n" + source[end:]
             if "HIST_BINS =" in source:
+                source = source.replace("# The observable is floored; the physical coherent coefficients below are not.",
+                                        "# The optional floor affects only the observable, not the physical coefficients.")
                 source = re.sub(r"^HIST_BINS = .+$", "HIST_BINS = N_BINS", source, flags=re.M)
                 source = source.replace(
                     '"eta": eta, "coherent_SBI_yield"',
                     '"eta": eta, "eta_effective": max(eta, REFERENCE_RATIO_ETA_MIN), "coherent_SBI_yield"')
                 source = source.replace(
-                    "    z_eta = observable_values", "    # The observable is floored; the physical coherent coefficients below are not.\n    z_eta = observable_values"
-                ) if "# The observable is floored" not in source else source
+                    "    z_eta = observable_values", "    # The optional floor affects only the observable, not the physical coefficients.\n    z_eta = observable_values"
+                ) if "# The optional floor affects" not in source and "# The observable is floored" not in source else source
             if "collapse_rows = []" in source:
                 source = COLLAPSE_CODE.strip()
             if "run_estimator_study(run," in source:
@@ -414,9 +419,9 @@ def configure_reference_cells(cells, number):
             cell.execution_count = None
             cell.metadata.pop("execution", None)
         elif source.startswith("# 8."):
-            source = r'''# 8. Floored reference-ratio histograms
+            source = r'''# 8. Reference-ratio histograms without a floor
 
-Use $R_\eta=r(x;\max(\eta,0.2))/r(x;1)$, with power $a=100$ and a primary
+Use $R_\eta=r(x;\eta)/r(x;1)$, with no floor, power $a=100$ and a primary
 resolution of **36 bins**. The binning sweep remains available to compare
 coarsening. Physical $\mu$, Asimov truth and free fits retain their full domains.
 Reuse the completed run from notebooks 01–03; no generation or training is
@@ -435,25 +440,27 @@ Tables use `reference_ratio_` and figures `09_`.'''
             source = SPLINE_WARNING.strip()
         elif source.startswith("### Runtime and persistent run"):
             for marker in ("For the reference-ratio stretch/bin-edge update alone",
-                           "For the 36-bin/floored-observable update", "For this refresh"):
+                           "For the 36-bin/floored-observable update", "For the no-floor baseline", "For this refresh"):
                 if marker in source:
                     source = source[:source.index(marker)].rstrip()
             source += "\n\n" + RUNTIME_NOTE.strip()
             if number == 8:
-                source = source[:source.index("For the 36-bin/floored-observable update")].rstrip()
+                source = source[:source.index("For the no-floor baseline")].rstrip()
                 source += "\n\n" + r'''For this refresh, keep the completed v4 run and rerun **08 from the top**.
 Select the same Unity directory and member-filter policy as notebook 03 below.
-Keep the observable floor at $0.2$, power at $100$, and primary bin count at $36$.
+Use no observable floor ($0.0$), power $100$, and primary bin count $36$.
+After this run, rerun notebook 09 with the same settings.
 No sample generation, retraining, or new physics run name is required. Stale
 notebook outputs have been cleared. Before continuing to downstream notebooks,
 select the same ensemble/filter evaluation there as well; matching only the
 base run name does not select these new results.'''
         elif source.startswith("### How the observable changes with eta"):
-            source = source.replace("observable constructed at $\\eta$",
-                                    "observable constructed at $\\eta_{\\mathrm{eff}}=\\max(\\eta,0.2)$")
-            source = source.replace(r"\max(\eta,0.1)", r"\max(\eta,0.2)")
-            source = source.replace("Edit `ETA_VALUES` and `HIST_BINS` below", "Edit `ETA_VALUES` and `N_BINS` below")
-            source = source.replace("Eta=0 is supported", r"$\eta=0$ is supported")
+            source = r'''### How the observable changes with eta
+
+Each curve uses the observable constructed at $\eta$ itself in the no-floor
+baseline. Edit `ETA_VALUES` and `N_BINS` below. $\eta=0$ is supported for these
+distribution plots; likelihood and information scans use positive test points.
+The separate exact collapse at $\eta=1$ remains.'''
         elif number == 8 and source.startswith("Next: **09_reference_ratio_spline_templates.ipynb**"):
             source = '''Next: **09_reference_ratio_spline_templates.ipynb**. Before using these
 results there, configure the same ensemble/filter evaluation and observable
@@ -487,23 +494,20 @@ unbinned`, separately from the learned closure references.'''
         elif source.startswith(("Keep the same estimator resolution", "Use the primary 36-bin estimator resolution")):
             source = r'''Use the primary 36-bin estimator resolution, explicitly passed as `N_BINS`.
 The independent `BIN_COUNTS` sweep does not change this estimator setting.
-The truth stays fixed while $\eta$ changes; below the floor the partition is
-constant. At $\eta=1$ this is a rate-only measurement: multiple physical $\mu$ values
+The truth stays fixed while $\eta$ changes. The baseline uses no floor. At $\eta=1$ this is a rate-only measurement: multiple physical $\mu$ values
 can have equal rates. A different fitted branch need not indicate optimizer
 failure. Local widths do not describe global ambiguity; invalid widths are
 reported rather than floored.
 
-The next cells explicitly compare this floor with an otherwise identical
-**no-floor control** ($\eta_{\mathrm{eff}}=\eta$), using the same 36 bins, quadrature events,
-Asimov truth, $\eta$ grid, nuisance treatments and free-fit settings. They show
-both binned variants and one analytical unbinned reference. The control writes
-its own `reference_ratio_estimator_eta_no_floor` files, preserving the primary
-floored estimator outputs. A low-eta zoom highlights the region affected by
-the floor; the vertical line marks $\eta_{\min}$.
-
+The next cells compare **no floor** with an explicit **$0.2$ floor control**,
+using the same 36 bins, quadrature, Asimov truth, $\eta$ grid, nuisance treatments
+and physical fit bounds. Primary estimator outputs retain the baseline settings;
+the positive-floor control writes separate `reference_ratio_estimator_eta_floor_control`
+files. A low-$\eta$ zoom highlights the affected region; the vertical line marks
+the comparison floor.
 These are **local widths at the fixed Asimov truth**, not confidence-interval
 coverage or a proof of improved global likelihood fits. The free-fit MLE panels
-remain a separate diagnostic. Values at $\eta\geq\eta_{\min}$ should agree between
+remain a separate diagnostic. Values at $\eta\geq0.2$ should agree between
 the two binned prescriptions because their partitions are then identical.'''
         elif source.startswith("### Read the comparisons separately"):
             source = source.replace(

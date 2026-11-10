@@ -58,9 +58,10 @@ def cells(request, monkeypatch):
 
 
 @pytest.mark.parametrize('ratio_source', ['unity', 'drive'])
-def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path, monkeypatch):
+@pytest.mark.parametrize('baseline_floor', [0., .2])
+def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path, monkeypatch, baseline_floor):
     """Execute actual notebook cells, stubbing only expensive model/study calls."""
-    base = Run(tmp_path/'run', {'reference_ratio_eta_floor': .2, 'bin_counts': [36]}, object())
+    base = Run(tmp_path/'run', {'reference_ratio_eta_floor': baseline_floor, 'bin_counts': [36]}, object())
     bundle_dir = tmp_path/'bundle'
     save_json(bundle_dir/'bundle.json', {})
     monkeypatch.setenv('POODEMO_UNITY_MODEL_DIR', str(bundle_dir))
@@ -87,7 +88,7 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
     monkeypatch.setattr(ensemble_bundle, 'use_bundle', use_bundle)
     monkeypatch.setattr(member_filter, 'filter_ratio_ensembles', screen)
     ns = {'run': base, 'ROOT': base.root, 'pd': pd, 'np': np, 'display': lambda x: None,
-          'N_BINS': 36, 'REFERENCE_RATIO_ETA_MIN': .2}
+          'N_BINS': 36, 'REFERENCE_RATIO_ETA_MIN': baseline_floor}
     source = next(c for c in cells if 'run = filter_ratio_ensembles(' in c)
     source = source.replace('RATIO_SOURCE = "unity"', f'RATIO_SOURCE = "{ratio_source}"')
     exec(source, ns)
@@ -126,7 +127,8 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
         assert observable == 'reference_ratio' and n_bins == 36
         assert view.config['bin_counts'] == [36]
         floor = view.config['reference_ratio_eta_floor']
-        assert floor == (0. if output_tag else .2)
+        assert floor == ({'reference_ratio_estimator_eta_no_floor': 0.,
+                          'reference_ratio_estimator_eta_floor_control': .2}.get(output_tag, baseline_floor))
         events.append(('estimator', floor))
         return pd.DataFrame({'eta': [.02, .02], 'model': ['direct reference_ratio histogram',
                             'analytic unbinned'], 'fit_valid': [True, True], 'width_valid': [True, True]})
@@ -139,8 +141,9 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
                                              'binning = run_binning_study(',
                                              'estimator_study = run_estimator_study(')):
             exec(code, ns)
-    assert events[-4:] == ['unbinned', 'binning', ('estimator', .2), ('estimator', 0.)]
-    assert ns['run'].config['reference_ratio_eta_floor'] == .2
+    other_floor = .2 if baseline_floor == 0. else 0.
+    assert events[-4:] == ['unbinned', 'binning', ('estimator', baseline_floor), ('estimator', other_floor)]
+    assert ns['run'].config['reference_ratio_eta_floor'] == baseline_floor
     assert selected.path('results', 'reference_ratio_estimator_eta_floor_comparison.csv').is_file()
     assert not base.path('results').exists()
 

@@ -359,3 +359,25 @@ def test_likelihood_refinement_requests_neighbor_anchors_and_caches_direct_fits(
     reserved = heldout_eta_grid(model, .2, 3)
     assert all(not np.isclose(e, .925, atol=1e-13, rtol=0.) for e in reserved)
     assert set(model.refinement_checks.eta) == {.925}
+
+
+def test_no_floor_interpolates_and_validates_low_eta_without_plateau_fallback(bank, monkeypatch):
+    from poodemo.reference_splines import likelihood_refinement_grid
+    run = bank.run.with_config(reference_ratio_eta_floor=0., mu_points=5)
+    no_floor = TemplateBank(run, bank.quad, bank.edges)
+    anchors = [0., .05, .1, .2, 1., 1.4]
+    direct = {eta: no_floor.exact(eta).copy() for eta in anchors}
+    model = CumulativeTemplates(no_floor, anchors)
+    original = no_floor.exact
+    def endpoints_only(eta):
+        assert eta in (0., 1.), 'Positive low eta must use the empirical CDF'
+        return original(eta)
+    monkeypatch.setattr(no_floor, 'exact', endpoints_only)
+    for eta in anchors:
+        np.testing.assert_allclose(model(eta), direct[eta], rtol=2e-11, atol=1e-9)
+    expected = .5*no_floor.cdf_u_bins(.05, .075)+.5*no_floor.cdf_u_bins(.1, .075)
+    np.testing.assert_allclose(model(.075), expected, rtol=1e-12, atol=1e-10)
+    assert not np.allclose(model(.075), model(.2))
+    assert np.any(heldout_eta_grid(model, 0., 20) < .2)
+    checks = likelihood_refinement_grid(run, anchors, 0., 20)
+    assert np.any((checks > 0.) & (checks < .2))

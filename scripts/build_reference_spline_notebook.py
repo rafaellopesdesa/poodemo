@@ -7,7 +7,7 @@ from build_notebooks import BOOTSTRAP, REPO
 
 # Tested empirical-CDF refinement and direct floor controls.
 # Pin code independently of notebook-output commits for reproducible reruns.
-SOURCE_COMMIT = "d88a9d90b6f124624430046fbd3d624fca2b3779"
+SOURCE_COMMIT = "b78eab767528e22d84782ba57b4902d210258a36"
 
 
 def fresh_bootstrap(previous):
@@ -85,8 +85,8 @@ validate at reserved points. Next compare **direct fills** with and without the
 observable floor, at standard and finer binning, and with both nuisance-morph
 orders. These are separate tests of interpolation and compression.
 
-The baseline uses the same filtered Unity evaluation, floor, power and bin count
-as notebook 08. No new samples or network training are needed. Numerical limits,
+The baseline uses **no floor**, with the same filtered Unity evaluation, power
+and bin count as the rerun notebook 08. No new samples or network training are needed. Numerical limits,
 invalid fits and failed closure checks stay visible; a method is not accepted
 merely because it reproduces its anchors.'''
 
@@ -150,7 +150,9 @@ and denominator. A numerical optimizer failure is accepted only if a feasible
 candidate certifies the nonnegative NLL bound within $10^{-10}$; raw statuses
 are saved. Other failures remain invalid.
 
-The baseline floor, power and binning are fixed during this interpolation test.
+The baseline has **no floor**. Adaptive anchors and reserved checks now cover
+the region below $0.2$ as well; it is no longer an exact frozen plateau.
+Power and binning remain fixed during this interpolation test.
 Nuisance morphing is applied after bin integration, with the original Gaussian
 constraint. No method is automatically promoted to downstream inference.'''
 
@@ -200,15 +202,6 @@ def spline_cells(cells):
     bootstrap.source = fresh_bootstrap(bootstrap.source)
     setup = next(c for c in cells if 'run = create_run(ROOT,' in c.source)
     definition = next(c for c in cells if c.source.startswith('### Ratio to the fixed physical reference'))
-    definition.source = definition.source.replace(
-        'The matched no-floor study below measures local widths at fixed truth $\\mu_*=1$;',
-        'Notebook 08\'s matched no-floor study measures local widths at fixed truth $\\mu_*=1$;')
-    definition.source = definition.source.replace(
-        '**`REFERENCE_RATIO_A = 100`** throughout notebooks 08–11.',
-        '**`REFERENCE_RATIO_A = 100`** for the baseline comparison. The direct controls below vary the floor and bin count explicitly.')
-    definition.source = definition.source.replace(
-        'These settings\nrequire rerunning the downstream studies, without sample generation, retraining\nor changing the saved physics run.',
-        'The baseline must match the completed notebook 08 evaluation. The controls below reuse that bank and do not change the baseline configuration.')
     runtime.source = r'''### Runtime and persistent run
 
 Run **all cells from the top**. Notebook 09 downloads the tested source revision
@@ -229,8 +222,9 @@ The source revision and module path are printed so each run can be identified.
 For this interpolation comparison, notebook 08 must already have
 completed with the same Unity directory, filtering policy, floor, power and bin
 count. Its saved unbinned curves are reused from that evaluation. The interpolation and direct floor controls run on CPU and can take appreciable time; progress
-and bounded refinement budgets are printed. No rerun of 08 is needed when those
-settings match. Local execution uses the local checkout and checks the methods
+and bounded refinement budgets are printed. For this baseline change, rerun
+**08 first with floor 0.0**, then run 09 from the top. Old floor-0.2 metadata
+is rejected. Local execution uses the local checkout and checks the methods
 before proceeding.'''
     controls = by_id.get('spline-controls', code(CONTROLS, 'spline-controls'))
     if 'likelihood_refine_points=' not in controls.source:
@@ -279,7 +273,7 @@ for name, interpolator in splines["models"].items():
     collapsed = interpolator(1.)
     assert np.count_nonzero(collapsed.sum(axis=(0, 1))) == 1
     np.testing.assert_allclose(collapsed.sum(axis=-1), splines["bank"].totals, rtol=1e-12)
-print("Exact floor plateau, equality collapse and component totals verified.")''', 'spline-exact-limits'),
+print("Equality collapse, component totals, and any enabled floor plateau verified.")''', 'spline-exact-limits'),
             by_id.get('spline-plots', code(PLOTS, 'spline-plots')),
             md(r'''### Reading interpolation closure
 
@@ -312,12 +306,13 @@ print("Saved figures:", run.path("plots", "09_interpolation"))''', 'spline-finis
 FLOOR_CONTROLS = """from poodemo.reference_floor import FloorStudySettings, run_reference_floor_study, plot_reference_floor_study
 
 FLOOR_SETTINGS = FloorStudySettings(
+    comparison_floor=0.2,     # Control only; the primary observable has no floor.
     resolution_multiplier=4,  # 36 and 144 bins at the notebook default.
     alpha_grid_points=17,     # Refine each resolved conditional-NI basin.
     alpha_xtol=1e-7,
 )
 SECONDARY_XLIM = (0.02, 0.30)
-print("Direct fills: floor 0 and the baseline floor; standard/finer bins; both morph orders.")
+print("Direct fills: floor 0 and the explicit comparison floor; standard/finer bins; both morph orders.")
 print("This full-scan CPU control can take appreciable time, especially morphing before binning.")"""
 
 
@@ -334,6 +329,9 @@ if "floor_study" not in globals():
     floor_study["metadata"] = json.loads((_floor_output / "metadata.json").read_text())
     if floor_study["metadata"].get("status") != "complete":
         raise RuntimeError("The saved direct study is incomplete; run its fit cell first.")
+    from poodemo.pipeline import observable_configuration
+    if floor_study["metadata"].get("observable") != observable_configuration(run, "reference_ratio"):
+        raise RuntimeError("Saved direct-study settings differ from the current baseline; rerun the direct study.")
     floor_study["output"] = _floor_output
     print("Reloaded completed direct study:", _floor_output)
 
@@ -357,11 +355,15 @@ def floor_cells(by_id):
         return nbformat.v4.new_markdown_cell(source.strip(), id=ident)
     def code(source, ident):
         return nbformat.v4.new_code_cell(source.strip(), id=ident)
+    controls = by_id.get('floor-controls', code(FLOOR_CONTROLS, 'floor-controls'))
+    if 'comparison_floor=' not in controls.source:
+        controls.source = controls.source.replace('FloorStudySettings(', 'FloorStudySettings(\n    comparison_floor=0.2,', 1)
+    controls.source = controls.source.replace('floor 0 and the baseline floor', 'floor 0 and the explicit comparison floor')
     return [md(r"""### Direct controls: floor, bin resolution and nuisance morph order
 
-The visible secondary-minimum discrepancy lies below the baseline floor, where
-the interpolation already returns exact direct fills. We therefore compare the
-full physical scan at floor $0$ and the baseline floor (normally $0.2$), with
+The previous floor-$0.2$ run showed a secondary-minimum discrepancy even with
+exact direct fills. The primary baseline now has no floor. We retain an explicit
+comparison at floor $0.2$ through `FLOOR_SETTINGS.comparison_floor`, with
 $36$ and $144$ bins by default. At every point $\eta=\mu_0$ selects and freezes
 the observable; the fit varies the original physical parameters.
 
@@ -384,7 +386,7 @@ unbinned curve, for fixed and profiled NI, including a secondary-region zoom.
 The final plots show conditional nuisance shifts and the magnitude of the
 morph-order effect. No interpolation is used anywhere in these controls.
 """, 'floor-intro'),
-            by_id.get('floor-controls', code(FLOOR_CONTROLS, 'floor-controls')),
+            controls,
             code('''floor_study = run_reference_floor_study(
     run, n_bins=SPLINE_BINS, quadrature=splines["bank"].quad, settings=FLOOR_SETTINGS)
 display(floor_study["summary"])
