@@ -59,7 +59,7 @@ with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
     for name, source in {{
         "pyproject.toml": "[project]",
         "poodemo/__init__.py": "",
-        "poodemo/reference_splines.py": "METHODS = ('ecdf_u',); STUDY_VERSION = 3",
+        "poodemo/reference_splines.py": "METHODS = ('ecdf_u',); STUDY_VERSION = 4",
         "poodemo/pipeline.py": "VERSION = 'new'",
     }}.items():
         data = source.encode()

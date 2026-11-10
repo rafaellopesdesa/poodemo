@@ -139,6 +139,7 @@ def test_point_mass_cdf_and_shared_nuisance_support():
 
 
 class SmoothBank:
+    model = staticmethod(pipeline._histogram_model)
     floor = .2
     totals = np.tile([10., 20., 20., 40.], (3, 1))
     def cdf_u_bins(self, anchor, eta):
@@ -243,7 +244,7 @@ def test_complete_workflow_with_real_fits_and_output_roundtrip(tmp_path, monkeyp
         assert len(saved) == len(study[name])
     metadata = json.loads((study['output']/'metadata.json').read_text())
     assert metadata['status'] == 'complete'
-    assert metadata['schema_version'] == 3
+    assert metadata['schema_version'] == 4
     assert set(metadata['cdf_recipes']) == set(METHODS)
     assert len(metadata['quadrature_fingerprint']) == 64
     for method in METHODS:

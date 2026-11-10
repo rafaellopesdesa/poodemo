@@ -18,20 +18,24 @@ Run notebook 03 with the transferred Unity models first. Keep the same
 `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`; it contains
 `bundle.json`, `campaign.json`, and `ratios/` directly inside it.
 
-The next cell verifies the transferred bundle and applies the same pointwise
-outlier policy to all five ensembles. With unchanged inputs and policy it
-reuses notebook 03's cached retained-member lists. Changed inputs require a
-new screening pass; no networks are trained. `RATIO_SOURCE = "drive"` explicitly
+The next cell verifies the transferred bundle and reuses notebook 03's frozen
+retained-member lists for all five ensembles, including the pointwise outlier
+rules. It verifies input, policy and artifact hashes without re-screening or
+evaluating analytical densities. Changed inputs require a completed matching
+filter run in notebook 03 first; no networks are trained here. `RATIO_SOURCE = "drive"` explicitly
 selects the original Drive models instead, with the same filtering rules.
 
-All tables, figures, and refreshed unbinned workspaces go to the selected
-evaluation's directory, printed below. The base Drive samples, preselection,
-and quadrature remain the inputs. The reference-ratio observable and histogram
-templates are **analytical**; the new neural ratios update the learned unbinned
-comparison. Changing the ensembles does not change the rationale for the floor.
+All tables and figures go to the selected evaluation's directory, printed
+below. The existing Drive samples and frozen preselection remain the inputs. Every coordinate uses the filtered learned ratios. Bin yields
+come from labelled held-out simulation events with generated-yield and selection
+weights. Only the analytical unbinned curve uses density-oracle evaluations.
+The new `practical_v1` output directory preserves notebook 03 and older studies.
+Finite MC errors are present in both rates and templates; Asimov data use the
+same MC templates, so this tests compression/interpolation, not independent MC
+closure. Notebook 11 adds independent simulator experiments.
 
-Start a fresh Colab runtime to load the updated repository. Run this notebook
-from the top; an existing `/content/poodemo` checkout must be refreshed first.
+Run from the top. Setup downloads the pinned source afresh, even in a reused
+runtime; existing temporary checkouts are not reused.
 """
 
 MODEL_SOURCE_CODE = '''
@@ -39,7 +43,9 @@ import os
 from pathlib import Path
 from poodemo.data import save_json
 from poodemo.ensemble_bundle import use_bundle, BundleEvaluationRun
-from poodemo.member_filter import MemberFilterPolicy, filter_ratio_ensembles, unfiltered_run
+from poodemo.member_filter import MemberFilterPolicy, unfiltered_run
+from poodemo.practical import (PracticalRun, use_practical_run,
+                               reuse_filtered_ensembles as filter_ratio_ensembles)
 
 RATIO_SOURCE = "unity"  # "drive" explicitly selects the original saved models.
 UNITY_MODEL_DIR = Path(os.environ.get(
@@ -51,7 +57,8 @@ ENSEMBLE_FILTER_POLICY = MemberFilterPolicy(
 )  # Match notebook 03, including any custom policy settings.
 
 # Unwrap a previous selection so rerunning this cell never nests evaluations.
-source_run = unfiltered_run(run)
+source_run = run.base_run if isinstance(run, PracticalRun) else run
+source_run = unfiltered_run(source_run)
 source_run = source_run.base_run if isinstance(source_run, BundleEvaluationRun) else source_run
 if RATIO_SOURCE == "unity":
     if not (UNITY_MODEL_DIR / "bundle.json").is_file():
@@ -78,12 +85,19 @@ save_json(run.path("results", "reference_ratio_model_source.json"), {
     "filter_policy": run.filter_manifest["inputs"]["policy"],
     "evaluation_root": str(run.evaluation_root),
 })
+# Cap selected integration events per source; all events estimate acceptance.
+SIMULATION_EVENTS_PER_SAMPLE = 250_000
+_filtered_run = run
+run = use_practical_run(run).with_config(simulation_per_sample=SIMULATION_EVENTS_PER_SAMPLE)
+save_json(run.path("results", "reference_ratio_model_source.json"),
+          __import__("json").loads(_filtered_run.path("results", "reference_ratio_model_source.json").read_text()))
+print("Practical study outputs:", run.evaluation_root)
 '''
 
 DEFINITION = r"""
 ### Ratio to the fixed physical reference
 
-At nominal NI nuisance, use the analytical **selected, normalized** densities:
+At nominal NI nuisance, use the filtered learned **selected, normalized** ratios:
 $$
 \eta_{\mathrm{eff}}=\max(\eta,\eta_{\min}),\qquad
 R_\eta(x)=\frac{r(x;\eta_{\mathrm{eff}})}{r(x;1)}
@@ -91,8 +105,12 @@ R_\eta(x)=\frac{r(x;\eta_{\mathrm{eff}})}{r(x;1)}
 \qquad z_\eta(x)=\frac{R_\eta(x)^a}{1+R_\eta(x)^a}
 =\operatorname{sigmoid}\!\left(a\log R_\eta(x)\right).
 $$
-The $S$ reference cancels. Both normalizations use the same final quadrature;
-this observable is analytical, not learned. The denominator is always at
+Here $p$ denotes the learned model: $\hat r_S=1$ and
+$\hat f_\eta(x)=\sum_j c_j(\eta)\nu_j\hat r_j(x)/Z_j$, with
+$Z_j=\langle\hat r_j\rangle_{S,\mathrm{MC}}$ and selected MC rates $\nu_j$.
+Then $\hat p_\eta/\hat p_1=(\hat f_\eta/\nu_\eta)/(\hat f_1/\nu_1)$;
+the unknown common $S$ density cancels. No analytical PDF enters this map.
+The rates and $Z_j$ are frozen once on the integration samples, never on data. The denominator is always at
 $(\mu,\alpha_{NI})=(1,0)$, independent of the fit, anchor and Asimov truth settings.
 The event count retains the Poisson rate information.
 
@@ -103,10 +121,10 @@ and fit bounds retain their original definitions. The power stays fixed inside
 both likelihood fits. Rerun **08 first, then 09** with matching settings and the
 same filtered ensemble evaluation; no generation or training is needed.
 
-For fixed NI, the continuous ratio preserves its endpoint-pair comparison.
+An exact ratio would preserve its fixed-NI endpoint-pair comparison; learned ratios need not.
 Finite binning and NI profiling can still lose information, and pairwise
 sufficiency does not imply sufficiency for every freely fitted physical $\mu$.
-Compare to **analytical unbinned**; learned references test a separate closure.
+Compare to **analytical unbinned** as the sole oracle benchmark.
 
 The former floor $0.2$ remains an explicit comparison setting. A positive floor
 changes only the observable: below it, different physical hypotheses share a
@@ -530,7 +548,8 @@ uses direct yields and pseudo-experiments, independently of spline precision.'''
     if number == 9:
         from build_reference_spline_notebook import spline_cells
         cells = spline_cells(cells)
-    return cells
+    from build_practical_notebooks import practical_cells
+    return practical_cells(cells, number)
 
 
 def build_reference_notebooks():

@@ -60,9 +60,9 @@ from poodemo.discriminator_study import run_discriminator_study, plot_discrimina
 N_BINS = 36  # Per coordinate: 36, 36**2, and 36**3 cells.
 POWERS = {"NI": 1.0, "SBI": 2.0, "B": 2.0}
 REFERENCE_RATIO_A = 100.0
-REFERENCE_RATIO_ETA_MIN = 0.2  # Floor only the numerator endpoint of the moving ratio.
-OUTPUT_TAG = "10_discriminator_study_36_floor02"  # Preserve the previous floor-0.1 study.
-RATIO_SOURCE = "analytic"  # Optional alternative: "learned".
+REFERENCE_RATIO_ETA_MIN = 0.0  # Floor only the numerator endpoint of the moving ratio.
+OUTPUT_TAG = "10_learned_mc_36_no_floor"  # Preserve the previous floor-0.1 study.
+AXIS_SOURCE = "learned"  # Filtered ratios; templates use simulation.
 SYSTEMATICS = (False, True)  # Compare both fixed and profiled NI.
 MORPH_ORDER = "after"  # Interpolate the binned NI templates, as in 09.
 MU_GRID = None  # None uses the saved run scan; e.g. np.linspace(0.02, 2., 101).
@@ -70,13 +70,13 @@ MU_GRID = None  # None uses the saved run scan; e.g. np.linspace(0.02, 2., 101).
 print(f"Fixed grids: {N_BINS}, {N_BINS**2}, {N_BINS**3} cells")
 print("Process powers:", POWERS, "| physical-reference power:", REFERENCE_RATIO_A)
 print("Moving numerator floor:", REFERENCE_RATIO_ETA_MIN)
-print("Observable axes:", RATIO_SOURCE, "| Asimov truth:", run.config["asimov_mu"])
+print("Observable axes:", AXIS_SOURCE, "| Asimov truth:", run.config["asimov_mu"])
 '''
 
 DISCRIMINATOR_RUN = r'''
 study = run_discriminator_study(
     run, n_bins=N_BINS, powers=POWERS, reference_power=REFERENCE_RATIO_A,
-    ratio_source=RATIO_SOURCE, systematics=SYSTEMATICS,
+    ratio_source=AXIS_SOURCE, systematics=SYSTEMATICS,
     scan_grid=MU_GRID, morph_order=MORPH_ORDER,
     reference_eta_floor=REFERENCE_RATIO_ETA_MIN, output_tag=OUTPUT_TAG,
 )
@@ -211,7 +211,8 @@ def discriminator_cells():
         expectations with repeated experiments and measures calibration.
         """),
     ]
-    return cells
+    from build_practical_notebooks import practical_cells
+    return practical_cells(cells, 10 if "discriminator" in cells[0].source.lower() else 11)
 
 
 TOY_SETTINGS = r'''
@@ -221,12 +222,12 @@ MU_VALUES = (0.0, 1.4)  # In each ensemble, mu_true = mu_test.
 N_TOYS = 12 if MODE == "smoke" else 5000
 N_BINS = 36
 REFERENCE_RATIO_A = 100.0
-REFERENCE_RATIO_ETA_MIN = 0.2  # max(eta, 0.2) in the numerator; denominator stays at 1.
+REFERENCE_RATIO_ETA_MIN = 0.0  # max(eta, 0.2) in the numerator; denominator stays at 1.
 EXPOSURE = 1.0  # Scale all selected expected yields together.
 SEED = 110923
 MU_BOUNDS = (0.0, 3.0)  # Full physical fit range used in notebook 12.
 FIT_GRID_SIZE = 129  # Grid in kappa=sqrt(mu), followed by local refinement.
-OUTPUT_TAG = "toy_study_direct_36_floor02"  # Preserve 12-bin and floor-0.1 toys.
+OUTPUT_TAG = "toy_learned_mc_36_no_floor"  # Preserve 12-bin and floor-0.1 toys.
 PROGRESS_EVERY = 10
 
 print(f"{N_TOYS} toys per case at each of {MU_VALUES}; five comparisons")
@@ -273,7 +274,7 @@ def toy_cells():
     process yields directly in the bins; it does not use notebook 09's spline
     parametrizations. No training or rerun of earlier notebooks is needed.
     Saved progress makes the toy study resumable. The default output tag
-    `toy_study_direct_36_floor02` keeps these results separate from historical
+    `toy_learned_mc_36_no_floor` keeps these results separate from historical
     12-bin toys, the previous floor-0.1 study, and notebook-12 diagnostic files.
     """, setup_intro=TOY_SETUP_INTRO)
     cells += [
@@ -361,7 +362,7 @@ def toy_cells():
 
         The production default is **5000 toys per case and hypothesis**.
         `MODE="smoke"` keeps 12 toys to check execution only. Keep the same
-        `OUTPUT_TAG="toy_study_direct_36_floor02"` to resume this new study;
+        `OUTPUT_TAG="toy_learned_mc_36_no_floor"` to resume this new study;
         deterministic seeds and saved rows reuse its matching toys and generate
         only the missing ones. Historical 12-bin and floor-0.1 results cannot be
         reused with this observable configuration. Increasing `N_TOYS` does not require
@@ -435,7 +436,8 @@ def toy_cells():
         insufficient histogram resolution, or inaccurate numerical integration.
         """),
     ]
-    return cells
+    from build_practical_notebooks import practical_cells
+    return practical_cells(cells, 10 if "discriminator" in cells[0].source.lower() else 11)
 
 
 def build_comparison_notebooks():

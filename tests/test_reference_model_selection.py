@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from poodemo.data import Run, save_json
+from poodemo import practical
 from poodemo import diagnostics, ensemble_bundle, member_filter, pipeline
 
 REPO = Path(__file__).resolve().parents[1]
@@ -68,7 +69,7 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
     events = []
 
     def use_bundle(source, directory):
-        assert source is base and directory == bundle_dir
+        assert source.root == base.root and directory == bundle_dir
         events.append('bundle')
         return ensemble_bundle.BundleEvaluationRun(
             source, directory, {'name': 'unity100', 'campaign_id': 'campaign'})
@@ -86,7 +87,7 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
         return selected
 
     monkeypatch.setattr(ensemble_bundle, 'use_bundle', use_bundle)
-    monkeypatch.setattr(member_filter, 'filter_ratio_ensembles', screen)
+    monkeypatch.setattr(practical, 'reuse_filtered_ensembles', screen)
     ns = {'run': base, 'ROOT': base.root, 'pd': pd, 'np': np, 'display': lambda x: None,
           'N_BINS': 36, 'REFERENCE_RATIO_ETA_MIN': baseline_floor}
     source = next(c for c in cells if 'run = filter_ratio_ensembles(' in c)
@@ -103,7 +104,8 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
     assert provenance['ratio_source'] == ratio_source and provenance['filter_identity'] == 'filter'
 
     def check(view):
-        assert isinstance(view, member_filter.FilteredEvaluationRun)
+        assert isinstance(view, practical.PracticalRun)
+        assert isinstance(view.base_run, member_filter.FilteredEvaluationRun)
         assert view.path('models', 'ratios') == selected.path('models', 'ratios')
         assert view.path('results') == selected.path('results')
         assert view.path('quadrature') == base.path('quadrature')
@@ -113,7 +115,7 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
         events.append('unbinned')
         # This sentinel must be read from the selected evaluation by the sweep.
         pd.DataFrame({'q': [3.14]}).to_csv(view.path('results', 'unbinned_scans.csv'), index=False)
-        return {'scans': pd.DataFrame(), 'diagnostics': pd.DataFrame()}
+        return pd.DataFrame()
 
     def binning(view, **kwargs):
         check(view)
@@ -133,11 +135,11 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
         return pd.DataFrame({'eta': [.02, .02], 'model': ['direct reference_ratio histogram',
                             'analytic unbinned'], 'fit_valid': [True, True], 'width_valid': [True, True]})
 
-    monkeypatch.setattr(pipeline, 'run_unbinned', unbinned)
+    monkeypatch.setattr(practical, 'refresh_analytic_reference', unbinned)
     monkeypatch.setattr(pipeline, 'run_binning_study', binning)
     monkeypatch.setattr(diagnostics, 'run_estimator_study', estimator)
     for code in cells:
-        if any(marker in code for marker in ('unbinned = run_unbinned(run)',
+        if any(marker in code for marker in ('unbinned = refresh_analytic_reference(run)',
                                              'binning = run_binning_study(',
                                              'estimator_study = run_estimator_study(')):
             exec(code, ns)

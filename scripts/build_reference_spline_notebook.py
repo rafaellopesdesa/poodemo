@@ -7,7 +7,7 @@ from build_notebooks import BOOTSTRAP, REPO
 
 # Tested empirical-CDF refinement and direct floor controls.
 # Pin code independently of notebook-output commits for reproducible reruns.
-SOURCE_COMMIT = "b78eab767528e22d84782ba57b4902d210258a36"
+SOURCE_COMMIT = "18e7fae7714387da787af1cf06695f97fc7d529b"
 
 
 def fresh_bootstrap(previous):
@@ -65,7 +65,7 @@ SOURCE_CHECK = '''import poodemo.reference_splines as _reference_splines
 
 _expected_methods = ("ecdf_u",)
 _loaded_methods = tuple(getattr(_reference_splines, "METHODS", ()))
-if _loaded_methods != _expected_methods or getattr(_reference_splines, "STUDY_VERSION", 0) != 3:
+if _loaded_methods != _expected_methods or getattr(_reference_splines, "STUDY_VERSION", 0) != 4:
     raise RuntimeError(
         f"Old interpolation code is loaded: {_loaded_methods}. "
         "Run this notebook from the setup cell at the top before starting the study.")
@@ -82,8 +82,7 @@ DESCRIPTION = r'''# 9. Empirical CDF closure and direct floor controls
 Keep the **exact weighted empirical CDF in $u$** as the sole interpolation
 method. First refine it using both template and likelihood accuracy, then
 validate at reserved points. Next compare **direct fills** with and without the
-observable floor, at standard and finer binning, and with both nuisance-morph
-orders. These are separate tests of interpolation and compression.
+observable floor, at standard and finer binning, and with nuisance interpolation of the MC bin yields. These are separate tests of interpolation and compression.
 
 The baseline uses **no floor**, with the same filtered Unity evaluation, power
 and bin count as the rerun notebook 08. No new samples or network training are needed. Numerical limits,
@@ -207,7 +206,7 @@ def spline_cells(cells):
 Run **all cells from the top**. Notebook 09 downloads the tested source revision
 into a fresh temporary Colab directory on every setup run and clears cached
 `poodemo` imports. The next cell must print **Verified interpolation methods:
-ecdf_u**, with **study version 3** before model loading or interpolation begins. Existing temporary
+ecdf_u**, with **study version 4** before model loading or interpolation begins. Existing temporary
 checkouts and previously uploaded ZIPs are not used by this notebook.
 
 If GitHub requires authentication, setup uses the Colab secret `GITHUB_TOKEN`
