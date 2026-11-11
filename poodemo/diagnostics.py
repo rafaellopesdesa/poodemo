@@ -194,7 +194,7 @@ def _unbinned_baselines(run, parent, information):
     return results
 
 
-def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None):
+def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None, template_bank=None):
     """Save/return mu_hat(eta) and local sigma_mu(eta) for one Asimov truth.
 
     Uses ``n_bins`` when specified, otherwise the finest configured
@@ -240,8 +240,9 @@ def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None
                                 quad["weights"], quad["truth"])
     from .practical import prepare_binning_bank
     from .pipeline import _template_likelihood
-    bin_quad = prepare_binning_bank(run) if run.config.get("practical_inference") else quad
-    bin_parent = _template_likelihood(bin_quad)
+    bin_quad = ((prepare_binning_bank(run) if run.config.get("practical_inference") else quad)
+                if template_bank is None else None)
+    bin_parent = _template_likelihood(bin_quad) if bin_quad is not None else None
     truth = float(run.config["asimov_mu"])
     if not run.config["mu_fit_bounds"][0] < truth < run.config["mu_fit_bounds"][1]:
         raise ValueError("A local Asimov width requires truth inside the mu fit bounds")
@@ -252,8 +253,12 @@ def run_estimator_study(run, *, observable="score", n_bins=None, output_tag=None
     baselines = _unbinned_baselines(run, parent, full_information)
     rows = []
     for eta in etas:
-        z = observable_values(run, bin_quad, float(eta), observable=observable)
-        histogram = bin_parent.binned(z, edges, morph_order="after", eta=float(eta))
+        if template_bank is None:
+            z = observable_values(run, bin_quad, float(eta), observable=observable)
+            histogram = bin_parent.binned(z, edges, morph_order="after", eta=float(eta))
+        else:
+            effective = max(float(eta), settings.get('reference_ratio_eta_floor', 0.))
+            histogram = template_bank.model(effective, n_bins, truth=truth)
         from .practical import local_information
         information = local_information(histogram, truth)
         for syst in (False, True):

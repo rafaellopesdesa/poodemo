@@ -364,7 +364,7 @@ def observable_configuration(run, observable="score"):
     observable_metadata(observable)
     settings = dict(observable=observable, binning_policy="uniform_v1")
     if run.config.get("practical_inference"):
-        settings.update(observable_source="filtered_learned", template_source="simulation_v1",
+        settings.update(observable_source="filtered_learned", template_source=run.config.get("template_source", "simulation_v1"),
                         simulation_per_sample=run.config.get("simulation_per_sample", run.config.get("quadrature_per_process", 250_000)))
     if observable == "reference_ratio":
         power = run.config.get("reference_ratio_power", 1.)
@@ -550,7 +550,7 @@ def _saved_unbinned(run, systematics=None):
     return scans
 
 
-def run_binning_study(run, *, observable="score"):
+def run_binning_study(run, *, observable="score", template_bank=None):
     """Refill and freeze each matched-eta histogram before BOTH likelihood fits.
 
     Ratio-observable results use a separate ``ratio_`` artifact namespace.
@@ -561,13 +561,18 @@ def run_binning_study(run, *, observable="score"):
     settings = observable_configuration(run, observable)
     scan_grid = _positive_study_grid(run)
     from .practical import prepare_binning_bank
-    quad = prepare_binning_bank(run)
-    analytic_quad = prepare_quadrature(run) if quad.get("practical") else quad
-    parent = _template_likelihood(quad, systematics=False)
+    quad = prepare_binning_bank(run) if template_bank is None else None
+    analytic_quad = prepare_quadrature(run) if quad is None or quad.get("practical") else quad
+    parent = _template_likelihood(quad, systematics=False) if quad is not None else None
+    def histogram(eta, nbins, z):
+        if template_bank is not None:
+            effective = max(float(eta), settings.get('reference_ratio_eta_floor', 0.))
+            return template_bank.model(effective, nbins, truth=run.config['asimov_mu'], systematics=False)
+        return parent.binned(z, observable_bin_edges(nbins, observable), eta=eta)
     records, fidelity = [], []
     for mu in scan_grid:
         eta = float(mu)
-        z = observable_values(run, quad, eta, observable)
+        z = observable_values(run, quad, eta, observable) if quad is not None else None
         density = component_coefficients(eta) @ analytic_quad["nominal"]
         s, sbi, b, _ = analytic_quad["nominal"]
         derivative = s+(sbi-s-b)/(2*np.sqrt(eta))
@@ -577,7 +582,7 @@ def run_binning_study(run, *, observable="score"):
         rate_info = drate**2/rate
         for nbins in run.config["bin_counts"]:
             edges = observable_bin_edges(nbins, observable)
-            hist = parent.binned(z, edges, eta=eta)
+            hist = histogram(eta, nbins, z)
             result = _fit_test(run, hist, mu, systematics=False)
             records.append(_record_scan_result(result, mu=mu, eta=eta, n_bins=nbins,
                                                model=options["direct_label"], systematics=False))
@@ -587,16 +592,19 @@ def run_binning_study(run, *, observable="score"):
             information_valid = bool(np.all(expected >= 0) and not np.any((expected == 0) & (dbin != 0)))
             info = (np.sum(np.divide(dbin**2, expected, out=np.zeros_like(expected), where=expected>0))
                     if information_valid else np.nan)
+            full_shape_info = full_info-rate_info
+            shape_fraction = ((info-rate_info)/full_shape_info
+                              if full_shape_info > 1e-12*max(full_info, np.finfo(float).tiny) else np.nan)
             fidelity.append(dict(eta=eta, n_bins=nbins, information_valid=information_valid, information_fraction=info/full_info,
-                                 shape_information_fraction=(info-rate_info)/(full_info-rate_info),
+                                 shape_information_fraction=shape_fraction,
                                  full_information=full_info, binned_information=info,
                                  occupied_bins=int(np.count_nonzero(expected))))
-        print(f"Matched {observable} eta={eta:.3g}: all binnings fitted", flush=True)
+        print(f"Matched {observable} eta={eta:.3g}: fits checked (inspect valid flags)", flush=True)
     # A fixed observable makes the distinction from moving eta visible.
     eta = run.config["asimov_mu"]
-    z = observable_values(run, quad, eta, observable)
+    z = observable_values(run, quad, eta, observable) if quad is not None else None
     nbins = max(run.config["bin_counts"])
-    hist = parent.binned(z, observable_bin_edges(nbins, observable), eta=eta)
+    hist = histogram(eta, nbins, z)
     for mu in scan_grid:
         result = _fit_test(run, hist, mu, systematics=False)
         records.append(_record_scan_result(result, mu=mu, eta=eta, n_bins=nbins,
