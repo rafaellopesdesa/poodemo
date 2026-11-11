@@ -78,6 +78,9 @@ def practical_cells(cells, number):
     code = lambda s, ident: nbformat.v4.new_code_cell(s.strip(), id=ident)
     old_path = next((REPO/'notebooks').glob(f'{number:02}_*.ipynb'))
     old = nbformat.read(old_path, as_version=4).cells
+    if number == 8 and any(c.get('id') == 'colab-sampling-setup' for c in old):
+        from build_colab_08 import configure_colab_08
+        return configure_colab_08(old)
     previous_model = next((c.source for c in cells if c.get('id') == 'reference-model-source'),
                           next((c.source for c in old if c.get('id') == 'reference-model-source'), ''))
     model = _preserve_assignments(MODEL_SOURCE_CODE, previous_model,

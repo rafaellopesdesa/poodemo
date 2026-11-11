@@ -14,7 +14,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [01_generate_amplitudes.ipynb](notebooks/01_generate_amplitudes.ipynb) | Generate coherent S/B amplitudes, SBI and NI samples, and nuisance variations | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/01_generate_amplitudes.ipynb) |
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
-| [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Study the floored reference ratio with 36-bin displays and a resolution sweep | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
+| [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Generate 10M selected events per source in Colab; validate no-floor learned histograms and MC convergence | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Validate empirical CDFs in $u$; study the floor, binning and nuisance morph order | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
@@ -564,13 +564,16 @@ The full 165-million-event generation and production ratio training are separate
 
 ## Practical learned observables and MC templates (08–11)
 
-Run **08, then 09**, from the top with the completed
+Run **08** from the top with the completed
 `RUN_NAME="paper-distinct-s-v4"`, the original `MODE`/`CONFIG_OVERRIDES`, and
 notebook 03's Unity directory and filtering policy. Notebooks 10 and 11 can run
-independently after 01–03. All four download the same pinned backend into fresh
+independently after 01–03. Each downloads its pinned backend into a fresh
 Colab checkouts and clear cached package imports. No new training, event
 transfer, or physics run name is required. The default bundle directory is
 `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`.
+The current 08 generates a new 10M-selected-event campaign in Colab. Validate
+that result before migrating 09; 09 still uses its earlier MC bank and does not
+automatically consume the new cache.
 
 The notebooks verify and reuse **all five frozen member selections from 03**,
 including its pointwise outlier filtering. They verify input and artifact hashes
@@ -579,7 +582,8 @@ changes, complete a matching notebook-03 filter first. `RATIO_SOURCE="unity"`
 selects the transferred bundle; `"drive"` selects the original Drive models.
 Both require a matching completed filter. All new products live in
 `practical_v1/results/` and `practical_v1/plots/` within the selected filter
-instance; notebook 03 and historical 08–12 results remain separate.
+instance; notebook 03 and historical 08–12 results remain separate. Notebook 08's
+larger campaign has its own sample and histogram fingerprints beneath this tree.
 
 ### What supplies each input
 
@@ -616,7 +620,7 @@ At $\eta=1$ the coordinate is exactly $1/2$; the shared bin edges place it
 strictly inside one bin. Physical hypotheses and fit domains remain unchanged.
 Learned ratios do not have an exact sufficiency guarantee.
 
-`SIMULATION_EVENTS_PER_SAMPLE=250_000` caps **selected** integration events used
+In 09–11, `SIMULATION_EVENTS_PER_SAMPLE=250_000` caps **selected** integration events used
 per source. All selected events determine its acceptance. A retained event in
 source $j$ receives weight $\nu_j/n_j$, where
 
@@ -625,9 +629,8 @@ $$
 $$
 
 The MC bank records source counts, rates, effective statistics, input hashes and
-filter identity. NN predictions are cached. Increase this cap consistently in
-08 and 09 for MC convergence studies; it changes an analysis setting without
-changing `run.json` or retraining. Same-template Asimov closure does not test
+filter identity. NN predictions are cached. Notebook 08 now generates fresh
+selected samples instead of increasing this cap. Same-template Asimov closure does not test
 independent MC closure, and the fits currently condition on the estimated MC
 templates rather than profiling finite-MC uncertainty. Information fractions
 above one can reflect MC noise, not a gain over the full likelihood.
@@ -643,6 +646,40 @@ invalid likelihood points, not clipped means. The practical studies do not
 include an analytical morph-before-bin control.
 
 ### Notebook 08
+
+Use a **Colab GPU** and Run all. `SELECTED_EVENTS_PER_SOURCE=10_000_000` targets
+ten million events **after the frozen preselection for each of the six sources**
+(60 million selected events total). This is independent inference simulation,
+not additional training. The existing filtered ensembles are evaluated in
+8192-event GPU batches, with 250k-event selected chunks saved on Drive.
+
+Generation, neural predictions and compact histogram counts resume after a
+runtime interruption. Keep the seed, chunk and inference-batch controls fixed
+when resuming; changing them creates a distinct cache. Increase
+`SELECTED_EVENTS_PER_SOURCE` to extend the same streams. Three raw learned ratios
+and selected coordinates are stored in chunks, requiring about 2.2 GB on Drive
+at the default target; local model staging uses additional Colab disk. No array
+containing all 60M events is allocated. No cluster job is submitted.
+
+The 250k, 1M and 10M nested prefixes share frozen selected process yields and
+learned-map normalizers from the original integration samples. Weights are
+$w_j=\nu_j/N$, so larger MC statistics do not increase experimental exposure.
+This controls **shape MC precision**; the original acceptance-rate uncertainty
+is unchanged. The selected-target stopping count is never used to estimate
+acceptance. Predictions use learned ratios; analytical densities only enter the
+simulator and the explicit analytical unbinned benchmark.
+
+Before fitting, the notebook reports negative physical yields and nonregular
+points at truth, plus per-bin MC errors. Physical minima are checked exactly in
+$\sqrt{\mu}$ at a declared NI grid; nuisance behaviour between those grid points
+is not certified. No means are clipped, no bins are automatically merged, and
+the baseline remains 36 bins, power 100, and no floor. Convergence plots include
+both fixed and profiled NI, with invalid fits marked explicitly.
+
+Cache locations are printed. Selected samples and predictions live under
+`practical_v1/results/colab_mc/<sample fingerprint>/`; histogram counts and new
+results/plots live under its `histograms/<histogram fingerprint>/` directory.
+Notebook 09 is unchanged and requires a subsequent migration to these inputs.
 
 Inspect learned-coordinate distributions, the exact equality collapse, bin-count
 scans, and local-width comparisons at fixed truth. The sole oracle overlay is
