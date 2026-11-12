@@ -7,7 +7,7 @@ from build_notebooks import BOOTSTRAP, REPO
 
 # Tested empirical-CDF refinement and direct floor controls.
 # Pin code independently of notebook-output commits for reproducible reruns.
-SOURCE_COMMIT = "18e7fae7714387da787af1cf06695f97fc7d529b"
+SOURCE_COMMIT = "81153be9b15241529ac040a7447421779d80e766"
 
 
 def fresh_bootstrap(previous):

@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 import nbformat
 
-SOURCE_COMMIT = 'c567cfaee8c8cf6b70ae747646c2b7c3f89e7cc6'
+SOURCE_COMMIT = "81153be9b15241529ac040a7447421779d80e766"
 
 SETUP = '''from poodemo.colab_mc import (prepare_colab_samples, fill_colab_histograms,
                                template_diagnostics, convergence_scans)
