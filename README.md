@@ -571,9 +571,9 @@ independently after 01–03. Each downloads its pinned backend into a fresh
 Colab checkouts and clear cached package imports. No new training, event
 transfer, or physics run name is required. The default bundle directory is
 `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`.
-The current 08 generates a new 10M-selected-event campaign in Colab. Validate
-that result before migrating 09; 09 still uses its earlier MC bank and does not
-automatically consume the new cache.
+Notebook 08 generates/reuses a 10M-selected-event campaign in Colab. Its final
+cell exports a baseline manifest; notebook 09 requires that manifest and reuses
+the exact same bank, rates, learned-map normalizers and yield-zeroing policy.
 
 The notebooks verify and reuse **all five frozen member selections from 03**,
 including its pointwise outlier filtering. They verify input and artifact hashes
@@ -620,7 +620,7 @@ At $\eta=1$ the coordinate is exactly $1/2$; the shared bin edges place it
 strictly inside one bin. Physical hypotheses and fit domains remain unchanged.
 Learned ratios do not have an exact sufficiency guarantee.
 
-In 09–11, `SIMULATION_EVENTS_PER_SAMPLE=250_000` caps **selected** integration events used
+In 10–11, `SIMULATION_EVENTS_PER_SAMPLE=250_000` caps **selected** integration events used
 per source. All selected events determine its acceptance. A retained event in
 source $j$ receives weight $\nu_j/n_j$, where
 
@@ -641,8 +641,13 @@ linear between $-1,0,+1$ and holds its boundary shape beyond that interval;
 the rate still follows exp-poly extrapolation. This documented sparse-support
 convention introduces no pseudo-counts or positive floor. Such bins are counted
 in diagnostics; nonregular profiled Fisher widths are marked invalid. More MC
-or coarser bins may be necessary. Negative signed physical predictions produce
-invalid likelihood points, not clipped means. The practical studies do not
+or coarser bins may be necessary. In 08/09, tiny negative **total** bin predictions
+are set to zero only if the largest correction is at most 0.01 expected events
+and the sum of corrections is at most 0.05 events at that parameter point.
+Larger deficits remain invalid. These opt-in limits never clip signed components,
+and the same corrected total enters both Poisson terms. Raw values and corrections
+are retained. A zero predicted mean with a positive observation still gives zero
+likelihood. Clipped/nonregular Fisher points remain invalid. The practical studies do not
 include an analytical morph-before-bin control.
 
 ### Notebook 08
@@ -672,14 +677,22 @@ simulator and the explicit analytical unbinned benchmark.
 Before fitting, the notebook reports negative physical yields and nonregular
 points at truth, plus per-bin MC errors. Physical minima are checked exactly in
 $\sqrt{\mu}$ at a declared NI grid; nuisance behaviour between those grid points
-is not certified. No means are clipped, no bins are automatically merged, and
-the baseline remains 36 bins, power 100, and no floor. Convergence plots include
+is not certified. Raw domain minima and bounded-zeroing corrections are reported
+separately. No bins are merged. The baseline remains 36 bins, power 100, and no
+observable-eta floor. Convergence plots include
 both fixed and profiled NI, with invalid fits marked explicitly.
+
+Paired controls compare powers 50/100/150 on the full cached bank, focused on
+low strengths and the secondary minimum. They report endpoint-bin occupancy,
+exact numerical saturation and likelihood scans. Power 100 remains the baseline;
+these controls do not automatically tune against the analytical reference.
+Counts checkpoint after each chunk; neither generation nor NN evaluation repeats.
 
 Cache locations are printed. Selected samples and predictions live under
 `practical_v1/results/colab_mc/<sample fingerprint>/`; histogram counts and new
-results/plots live under its `histograms/<histogram fingerprint>/` directory.
-Notebook 09 is unchanged and requires a subsequent migration to these inputs.
+results/plots live under its `histograms/<histogram fingerprint>/` directory,
+with a separate `inference_<policy fingerprint>/` for each zeroing policy.
+The final cell publishes `practical_v1/results/colab_08_baseline.json` for 09.
 
 Inspect learned-coordinate distributions, the exact equality collapse, bin-count
 scans, and local-width comparisons at fixed truth. The sole oracle overlay is
@@ -691,7 +704,7 @@ branch. Local-width estimator fits still report their optimizer results.
 
 ### Notebook 09
 
-Only **exact weighted empirical CDF in $u$** (`ecdf_u`, study version 4) remains:
+Only **exact weighted empirical CDF in $u$** (`ecdf_u`, study version 5) remains:
 
 $$
 u_\eta(x)=\frac{\log\hat R_\eta(x)}{\eta-1},\qquad
@@ -702,7 +715,16 @@ Stable algebra evaluates the score limit. Raw MC cumulative weights, grouped
 ties and correctly ordered boundaries reproduce direct fills of **the same
 learned map** at anchors. Convex linear interpolation in $\eta$ uses the original
 $z$ bin boundaries mapped into $u$. It preserves component totals and the exact
-equality collapse without smoothing or a bin-yield floor.
+equality collapse without smoothing or changing component templates. The shared
+bounded-zeroing policy is applied only to the final physical mixture. Raw component
+and mixture interpolation errors remain available before that correction.
+
+Run 08 through its final cell first. Notebook 09 checks its completed manifest
+against the selected ensembles and compression/zeroing settings, then stages
+about 1.4 GB of cached ratios on Colab local disk. It builds source CDFs separately;
+two anchors need about 1 GB of coordinate arrays at 10M events per source.
+No dense 60M-event/component matrix is created. Sorting/refinement can take
+appreciable CPU time, but no simulation, neural inference or training is required.
 
 Refinement uses template and likelihood checks on predeclared optimization
 points. Reserved points then test interpolation independently. The existing

@@ -9,6 +9,7 @@ from scipy.optimize import minimize_scalar
 from . import pipeline
 from .data import save_json
 from .reference_splines import TemplateBank, _fingerprint, _safe_nll
+from .mc_yields import yield_diagnostics
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,8 @@ def direct_asimov_fits(run, model, mu, settings):
         valid = bool(certified and np.isfinite(nll) and nll-truth_nll >= -1e-8
                      and (not systematics or profiled["valid"]))
         records.append(dict(systematics=systematics, valid=valid,
+            **(yield_diagnostics(model, mu, [profiled['alpha'] if systematics else 0.])
+               if not systematics or np.isfinite(profiled['alpha']) else {}),
             q=max(0., float(nll-truth_nll)) if valid else np.nan,
             nll_null=nll, nll_best=truth_nll, truth_certified=certified,
             alpha_null=profiled["alpha"] if systematics else 0.,
@@ -102,7 +105,7 @@ def direct_asimov_fits(run, model, mu, settings):
     return records
 
 
-def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None, progress=print):
+def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None, progress=print, template_bank=None):
     """Matched direct scans; vary only compression, reuse the selected bank.
 
     Practical runs use MC templates morphed after binning. Legacy analytical
@@ -118,11 +121,12 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
     scan = pipeline._positive_study_grid(run)
     unbinned = pipeline._saved_unbinned(run)
     from .practical import prepare_binning_bank
-    quad = prepare_binning_bank(run) if quadrature is None else quadrature
-    parent = pipeline._template_likelihood(quad, systematics=True)
+    quad = ((prepare_binning_bank(run) if quadrature is None else quadrature)
+            if template_bank is None else template_bank.quad)
+    parent = pipeline._template_likelihood(quad, systematics=True) if template_bank is None else None
     output = run.path("results", "reference_ratio_floor_study")
     output.mkdir(parents=True, exist_ok=True)
-    bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"))
+    bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio")) if template_bank is None else template_bank
     metadata = dict(template_source="simulation" if quad.get("practical") else "analytic", schema_version=2, comparison_floor=settings.comparison_floor, settings=asdict(settings), observable=observable,
                     floors=floors.tolist(), bin_counts=bins, scan=scan.tolist(),
                     bin_edges={str(n): pipeline.observable_bin_edges(n, "reference_ratio").tolist() for n in bins},
@@ -137,6 +141,7 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
         metadata["model_source"] = json.loads(provenance.read_text())
     save_json(output/"metadata.json", metadata)
     rows = []
+    variants = {}
     for index, eta in enumerate(scan):
         # Floor choices have identical partitions above the floor. Reuse those
         # exact results, but never reuse a fit at a different physical mu.
@@ -144,13 +149,20 @@ def run_reference_floor_study(run, n_bins=36, *, quadrature=None, settings=None,
         for floor in floors:
             variant = run.with_config(reference_ratio_eta_floor=float(floor))
             effective = max(float(eta), float(floor))
-            z = pipeline.observable_values(variant, quad, eta, "reference_ratio")
+            z = pipeline.observable_values(variant, quad, eta, "reference_ratio") if template_bank is None else None
             for count in bins:
                 edges = pipeline.observable_bin_edges(count, "reference_ratio")
                 for order in (("after",) if quad.get("practical") else ("before", "after")):
                     key = (effective, count, order)
                     if key not in cached:
-                        model = parent.binned(z, edges, order, eta)
+                        if template_bank is None:
+                            model = parent.binned(z, edges, order, eta)
+                        else:
+                            variant_key = (float(floor),count)
+                            if variant_key not in variants:
+                                variants[variant_key] = template_bank.with_binning(variant,count)
+                            source = variants[variant_key]
+                            model = source.model(source.exact(eta), source.counts(eta))
                         cached[key] = direct_asimov_fits(run, model, float(eta), settings)
                     for fit in cached[key]:
                         rows.append(dict(eta=float(eta), mu=float(eta), eta_effective=effective,

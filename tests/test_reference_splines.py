@@ -244,7 +244,7 @@ def test_complete_workflow_with_real_fits_and_output_roundtrip(tmp_path, monkeyp
         assert len(saved) == len(study[name])
     metadata = json.loads((study['output']/'metadata.json').read_text())
     assert metadata['status'] == 'complete'
-    assert metadata['schema_version'] == 4
+    assert metadata['schema_version'] == 5
     assert set(metadata['cdf_recipes']) == set(METHODS)
     assert len(metadata['quadrature_fingerprint']) == 64
     for method in METHODS:
@@ -296,15 +296,18 @@ def test_notebook_runs_study_with_selected_evaluation(monkeypatch, tmp_path):
     bundle = BundleEvaluationRun(base, tmp_path/'bundle', {'campaign_id': 'campaign', 'name': 'unity100'})
     selected = FilteredEvaluationRun(bundle, tmp_path/'evaluation', {'identity': 'filter'})
     seen = []
-    def study(run, *, n_bins, settings):
+    cached_bank = object()
+    def study(run, *, n_bins, settings, template_bank):
         assert run is selected and n_bins == 36
+        assert template_bank is cached_bank
         seen.append(run.path('results'))
         return dict(summary=pd.DataFrame(), output=run.path('results', 'reference_ratio_interpolation'))
     monkeypatch.setattr(reference_splines, 'run_reference_spline_comparison', study)
     notebook = nbformat.read(NOTEBOOK, as_version=4)
     ids = [c.id for c in notebook.cells]
     assert ids.index('reference-model-source') < ids.index('spline-run')
-    ns = dict(run=selected, N_BINS=36, display=lambda _: None)
+    ns = dict(run=selected, N_BINS=36, display=lambda _: None, samples_08={},
+              ColabTemplateBank=lambda *args: cached_bank)
     for ident in ('spline-controls', 'spline-run'):
         exec(next(c.source for c in notebook.cells if c.id == ident), ns)
     assert seen == [selected.path('results')]

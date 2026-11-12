@@ -16,8 +16,9 @@ from scipy.special import logit
 from . import pipeline
 from .data import PROCESSES, save_json
 from .inference import FitResult, component_coefficients, poisson_asimov_nll
+from .mc_yields import YieldPolicy, yield_policy, yield_diagnostics
 
-STUDY_VERSION = 4
+STUDY_VERSION = 5
 METHODS = ("ecdf_u",)
 LABELS = {"direct": "Direct fills", "ecdf_u": "Exact weighted empirical CDF in u"}
 VARIATIONS = ("nominal", "NI_down", "NI_up")
@@ -92,6 +93,7 @@ class TemplateBank:
         settings = pipeline.observable_configuration(run, "reference_ratio")
         self.floor = settings["reference_ratio_eta_floor"]
         self.power = settings["reference_ratio_power"]
+        self.yield_policy = yield_policy(run.config) if quad.get('practical') else YieldPolicy()
         self.weighted = np.stack([quad["nominal"], quad["down"][0], quad["up"][0]]) * quad["weights"]
         self.totals = self.weighted.sum(axis=-1)
         self.cache_size = cdf_cache_size
@@ -101,7 +103,8 @@ class TemplateBank:
             raise ValueError("The equality collapse must lie strictly inside a bin")
 
     def model(self, anchors, counts):
-        return pipeline._histogram_model(anchors, counts, practical=self.quad.get("practical", False))
+        return pipeline._histogram_model(anchors, counts, practical=self.quad.get("practical", False),
+                                         yield_policy=self.yield_policy)
 
     def exact(self, eta):
         eta = max(float(eta), self.floor)
@@ -222,24 +225,35 @@ def make_interpolator(bank, etas, method):
     return CumulativeTemplates(bank, etas)
 
 
-def template_metrics(exact, predicted, probe_mus):
-    """No mean floors: the +1 only defines a diagnostic error scale in counts."""
+def template_metrics(exact, predicted, probe_mus, policy=None):
+    """Raw component errors and bounded-zeroing deviances; +1 is diagnostic only."""
     valid = np.all(np.isfinite(predicted)) and np.all(predicted >= 0)
     pull = float(np.max(np.abs(predicted - exact) / np.sqrt(exact + 1.))) if valid else np.inf
     deviation = 0.
     support_mismatch = 0
     direct_invalid_bins = 0
+    policy = policy or YieldPolicy()
+    direct_zeroed_bins = interpolated_zeroed_bins = 0
+    raw_mixture_max_abs_error = max_zeroed_total = 0.
     for mu in probe_mus:
         coeff = component_coefficients(mu)
         for expected, approximate in zip(exact, predicted):
             data, model = coeff @ expected, coeff @ approximate
-            if np.any(data < 0):
+            raw_mixture_max_abs_error = max(raw_mixture_max_abs_error, float(np.max(np.abs(model-data))))
+            data, audit_data = policy.apply(data)
+            model, audit_model = policy.apply(model)
+            direct_zeroed_bins += audit_data['zeroed_bins']
+            interpolated_zeroed_bins += audit_model['zeroed_bins']
+            max_zeroed_total = max(max_zeroed_total, audit_data['zeroed_total'], audit_model['zeroed_total'])
+            if audit_data['rejected_negative']:
                 direct_invalid_bins += int(np.count_nonzero(data < 0))
                 continue
             deviation = max(deviation, 2. * poisson_asimov_nll(model, data))
             support_mismatch += int(np.count_nonzero((data > 0) & (model <= 0)))
     return dict(max_bin_pull=pull, max_deviance=deviation, support_mismatch=support_mismatch,
-                direct_invalid_bins=direct_invalid_bins)
+                direct_invalid_bins=direct_invalid_bins, direct_zeroed_bins=direct_zeroed_bins,
+                interpolated_zeroed_bins=interpolated_zeroed_bins, max_zeroed_total=max_zeroed_total,
+                raw_mixture_max_abs_error=raw_mixture_max_abs_error)
 
 
 def metric_pass(metrics, settings):
@@ -283,7 +297,7 @@ def adapt_templates(bank, grid, method, settings, probe_mus, progress=print, *, 
             if high <= bank.floor:
                 continue
             eta = (low + high) / 2
-            metrics = template_metrics(bank.exact(eta), model(eta), probe_mus)
+            metrics = template_metrics(bank.exact(eta), model(eta), probe_mus, getattr(bank, 'yield_policy', None))
             score = max(metrics["max_bin_pull"] / settings.max_bin_pull,
                         metrics["max_deviance"] / settings.max_deviance)
             worst_score = max(worst_score, score)
@@ -378,7 +392,12 @@ def _fit(run, model, mu, systematics):
         valid = bool(null.success and best.success and np.isfinite(null.nll)
                      and np.isfinite(best.nll) and difference >= -1e-6)
         bounds = np.asarray(run.config["mu_fit_bounds"])
+        audits = {}
+        for label, fit in [('null', null), ('best', best)]:
+            audits.update({label+'_'+key: value for key, value in
+                           yield_diagnostics(model, fit.mu, fit.alpha).items()})
         return dict(q=max(0., float(difference)) if valid else np.nan, valid=valid,
+                    **audits,
                     mu_hat=best.mu, alpha_hat=float(best.alpha[0]),
                     alpha_null=float(null.alpha[0]), nll_best=best.nll, nll_null=null.nll,
                     null_optimizer_success=null_optimizer_success, best_optimizer_success=best_optimizer_success,
@@ -401,6 +420,10 @@ def _safe_nll(model, mu, alpha):
 
 
 def _fingerprint(bank):
+    if hasattr(bank, 'samples'):
+        return hashlib.sha256(json.dumps(dict(sample=bank.samples['fingerprint'],
+            target=bank.samples['target'], edges=bank.edges.tolist(), power=bank.power,
+            floor=bank.floor, normalizers=bank.samples['normalizers'].tolist()), sort_keys=True).encode()).hexdigest()
     digest = hashlib.sha256()
     for value in (bank.quad["x"], bank.quad["weights"], bank.weighted, bank.quad["truth"],
                   bank.quad.get("learned_fields", np.empty(0))):
@@ -410,7 +433,7 @@ def _fingerprint(bank):
     return digest.hexdigest()
 
 
-def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=print):
+def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=print, template_bank=None):
     """Run notebook 09's benchmark without changing notebook 08 or legacy splines.
 
     Artifacts live in reference_ratio_interpolation/ within the selected model
@@ -430,8 +453,11 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
         raise ValueError("Include the requested bin count in notebook 08 first")
     unbinned = pipeline._saved_unbinned(run)  # Fail before costly interpolation if missing.
     from .practical import prepare_binning_bank
-    quad = prepare_binning_bank(run)
-    bank = TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"), settings.cdf_cache_size)
+    quad = prepare_binning_bank(run) if template_bank is None else template_bank.quad
+    bank = (TemplateBank(run, quad, pipeline.observable_bin_edges(n_bins, "reference_ratio"), settings.cdf_cache_size)
+            if template_bank is None else template_bank)
+    if not np.array_equal(bank.edges, pipeline.observable_bin_edges(n_bins, 'reference_ratio')):
+        raise ValueError('CDF bank binning differs from the requested study')
     grid = initial_eta_grid(run, settings)
     optimization_points = likelihood_refinement_grid(run, grid, bank.floor, settings.likelihood_refine_points)
     # Probe exact physical coefficients at both fit bounds, the rate turnover,
@@ -440,7 +466,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
     probe_mus = np.unique(np.r_[np.linspace(*bounds, 5), run.config["asimov_mu"]])
     output = run.path("results", "reference_ratio_interpolation")
     output.mkdir(parents=True, exist_ok=True)
-    metadata = dict(schema_version=4, template_source="simulation" if quad.get("practical") else "analytic",
+    metadata = dict(schema_version=5, yield_policy=bank.yield_policy.metadata(), template_source="simulation" if quad.get("practical") else "analytic",
                     observable_source="learned" if quad.get("practical") else "analytic", settings=asdict(settings),
                     observable=pipeline.observable_configuration(run, "reference_ratio"),
                     bin_edges=bank.edges.tolist(), n_bins=n_bins,
@@ -473,7 +499,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
         points += [(e, "anchor_coordinate_check") for e in model.etas]
         for point_number, (eta, role) in enumerate(sorted(points), start=1):
             exact, prediction = bank.exact(eta), model(eta)
-            metrics = template_metrics(exact, prediction, probe_mus)
+            metrics = template_metrics(exact, prediction, probe_mus, bank.yield_policy)
             row = dict(method=method, eta=eta, role=role, **metrics,
                        passed=metric_pass(metrics, settings))
             validation.append(row)
@@ -570,7 +596,7 @@ def run_reference_spline_comparison(run, n_bins=36, *, settings=None, progress=p
 
     # Preserve the previous separation of nuisance-morph order from template
     # interpolation; this comparison uses direct histograms only.
-    parent = pipeline._template_likelihood(quad, systematics=True)
+    parent = pipeline._template_likelihood(quad, systematics=True) if not quad.get('practical') else None
     morph = []
     for eta in ([] if quad.get("practical") else scan_grid[[0, len(scan_grid)//2, -1]]):
         z = pipeline.observable_values(run, quad, eta, "reference_ratio")

@@ -80,7 +80,7 @@ def practical_cells(cells, number):
     old = nbformat.read(old_path, as_version=4).cells
     if number == 8 and any(c.get('id') == 'colab-sampling-setup' for c in old):
         from build_colab_08 import configure_colab_08
-        return configure_colab_08(old)
+        return configure_colab_08(cells)
     previous_model = next((c.source for c in cells if c.get('id') == 'reference-model-source'),
                           next((c.source for c in old if c.get('id') == 'reference-model-source'), ''))
     model = _preserve_assignments(MODEL_SOURCE_CODE, previous_model,
@@ -210,4 +210,7 @@ simulator toys and vary the MC cap to investigate these effects.'''
             s = s.replace('The existing quadrature is fingerprinted and reused, not duplicated.', 'The simulation bank and learned fields are fingerprinted and reused.')
             s = s.replace('Analytical-versus-learned unbinned curves remain a separate test\nof density-ratio learning.', 'Notebook 03 retains its separate density-ratio learning checks.')
         cell.source = s.strip()
+    if number == 9:
+        from refresh_mc_reference_notebooks import configure_review_notebook
+        return configure_review_notebook(cells, 9)
     return cells

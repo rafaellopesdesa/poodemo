@@ -294,7 +294,8 @@ that every rare bin becomes valid.
     cells[where:where]=[md('### MC convergence at fixed map and yields','colab-convergence-note'),code(CONVERGENCE,'colab-convergence')]
     for c in cells:
         if c.cell_type=='code': c.outputs=[];c.execution_count=None
-    return cells
+    from refresh_mc_reference_notebooks import configure_review_notebook
+    return configure_review_notebook(cells, 8)
 
 
 if __name__=='__main__':

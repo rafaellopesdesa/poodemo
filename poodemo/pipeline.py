@@ -364,6 +364,8 @@ def observable_configuration(run, observable="score"):
     observable_metadata(observable)
     settings = dict(observable=observable, binning_policy="uniform_v1")
     if run.config.get("practical_inference"):
+        from .mc_yields import yield_policy
+        settings.update(yield_policy(run.config).metadata())
         settings.update(observable_source="filtered_learned", template_source=run.config.get("template_source", "simulation_v1"),
                         simulation_per_sample=run.config.get("simulation_per_sample", run.config.get("quadrature_per_process", 250_000)))
     if observable == "reference_ratio":
@@ -632,13 +634,14 @@ def _histogram_anchors(quad, z, edges):
     return np.stack([histogram_components(z, value, quad["weights"], edges) for value in fields])
 
 
-def _histogram_model(anchors, counts, *, practical=False):
+def _histogram_model(anchors, counts, *, practical=False, yield_policy=None):
     from .inference import TemplateLikelihood
     if practical:
         from .practical import SimulationHistogram as TemplateLikelihood
     nominal = anchors[0]
     down, up = anchors[[1]], anchors[[2]]
-    return TemplateLikelihood(nominal, down, up, np.ones(len(counts)), counts)
+    kwargs = {'yield_policy': yield_policy} if practical else {}
+    return TemplateLikelihood(nominal, down, up, np.ones(len(counts)), counts, **kwargs)
 
 
 def spline_eta_grid(run, quad):

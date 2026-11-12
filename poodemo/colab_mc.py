@@ -220,11 +220,12 @@ class ColabStudyRun(PracticalRun):
 
 class HistogramBank:
     """Compact direct counts for frozen eta/edge specifications and MC prefixes."""
-    def __init__(self, samples, specifications, prefixes, counts, ranges, directory):
+    def __init__(self, samples, specifications, prefixes, counts, ranges, directory, yield_policy=None):
         self.samples, self.specifications, self.prefixes = samples, specifications, prefixes
         self.counts, self.ranges, self.directory = counts, ranges, directory
         self.lookup = {(s['eta'], s['n_bins']): i for i,s in enumerate(specifications)}
         self.target = max(prefixes)
+        self.yield_policy = yield_policy
 
     def raw_counts(self, eta, n_bins, size=None):
         key = (float(eta), int(n_bins))
@@ -244,10 +245,14 @@ class HistogramBank:
         a = self.anchors(eta, n_bins, size)
         variations = a[1:2] if systematics else np.empty((0,4,n_bins))
         up = a[2:3] if systematics else np.empty((0,4,n_bins))
-        return SimulationHistogram(a[0], variations, up, np.ones(n_bins), component_coefficients(truth)@a[0])
+        return SimulationHistogram(a[0], variations, up, np.ones(n_bins), component_coefficients(truth)@a[0],
+                                   yield_policy=self.yield_policy)
 
     def study_run(self, run):
-        return ColabStudyRun(run, self.directory, self.target)
+        from .mc_yields import yield_policy
+        policy = yield_policy(run.config)
+        root = self.directory / ('inference_' + _digest(policy.metadata())[:12])
+        return ColabStudyRun(run, root, self.target)
 
     def collapse_table(self, etas, n_bins):
         from .pipeline import observable_bin_edges
@@ -325,7 +330,8 @@ def fill_colab_histograms(run, samples, *, etas, bin_counts=(4,12,24,36,60),
     for pi,size in enumerate(prefixes):
         if not np.all(counts[pi].sum(axis=-1)==size):
             raise ValueError('Histogram totals do not equal the selected-event prefix')
-    return HistogramBank(samples,specs,prefixes,counts,ranges,directory)
+    from .mc_yields import yield_policy
+    return HistogramBank(samples,specs,prefixes,counts,ranges,directory,yield_policy(run.config))
 
 
 def template_diagnostics(run, bank, *, etas, n_bins=36):
@@ -357,6 +363,7 @@ def template_diagnostics(run, bank, *, etas, n_bins=36):
             inv=.5/np.sqrt(truth)
             derivative=np.array([1-inv,inv,-inv,0.])@nominal
             tested=component_coefficients(eta)@nominal
+            used, audit = model.yield_policy.apply(tested)
             p=bank.raw_counts(eta,n_bins,size)[:4]/size
             variance=np.sum(component_coefficients(eta)[:,None]**2*bank.samples['rates'][:4,None]**2*p*(1-p)/(size-1),axis=0)
             for b in range(n_bins):
@@ -365,12 +372,16 @@ def template_diagnostics(run, bank, *, etas, n_bins=36):
                     negative=bool(minimum[b]<0),truth_mean=truth_means[b],
                     nonregular_mu_at_truth=bool(truth_means[b]==0 and derivative[b]!=0),
                     expected_at_test=tested[b],mc_sigma_at_test=np.sqrt(variance[b]),
+                    expected_used_at_test=used[b],zeroed_at_test=bool(used[b]!=tested[b]),
+                    test_zeroing_accepted=audit['zeroing_accepted'],test_negative_total=audit['negative_total'],
+                    test_zeroed_total=audit['zeroed_total'],
                     incomplete_NI_support_bins=model.incomplete_support_bins))
     frame=pd.DataFrame(rows)
     frame.to_csv(run.path('results','reference_ratio_mc_bin_diagnostics.csv'),index=False)
     save_json(run.path('results','reference_ratio_mc_diagnostic_grid.json'),
               dict(mu_bounds=run.config['mu_fit_bounds'],alpha_grid=alphas.tolist(),
-                   note='Exact quadratic mu minimum at sampled NI values; no clipping or bin merging'))
+                   yield_policy=model.yield_policy.metadata(),
+                   note='Raw quadratic mu minimum at sampled NI values; separately report bounded total-yield zeroing'))
     return frame
 
 

@@ -89,7 +89,8 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
     monkeypatch.setattr(ensemble_bundle, 'use_bundle', use_bundle)
     monkeypatch.setattr(practical, 'reuse_filtered_ensembles', screen)
     ns = {'run': base, 'ROOT': base.root, 'pd': pd, 'np': np, 'display': lambda x: None,
-          'N_BINS': 36, 'REFERENCE_RATIO_ETA_MIN': baseline_floor}
+          'N_BINS': 36, 'REFERENCE_RATIO_ETA_MIN': baseline_floor,
+          'templates': object(), 'BIN_COUNTS': [4,12,24,36,60], 'COMPARISON_ETA_MIN': .2}
     source = next(c for c in cells if 'run = filter_ratio_ensembles(' in c)
     source = source.replace('RATIO_SOURCE = "unity"', f'RATIO_SOURCE = "{ratio_source}"')
     exec(source, ns)
@@ -120,13 +121,15 @@ def test_notebook_studies_use_the_selected_models(cells, ratio_source, tmp_path,
     def binning(view, **kwargs):
         check(view)
         events.append('binning')
-        assert view.config['bin_counts'] == list(range(4, 61, 4))
+        assert view.config['bin_counts'] == ns['BIN_COUNTS']
+        assert kwargs['template_bank'] is ns['templates']
         assert pipeline._saved_unbinned(view)['q'].item() == 3.14
-        return {'scans': pd.DataFrame(), 'fidelity': pd.DataFrame()}
+        return {'scans': pd.DataFrame(dict(model=['direct'],n_bins=[36],valid=[True])), 'fidelity': pd.DataFrame()}
 
-    def estimator(view, *, observable, n_bins, output_tag=None):
+    def estimator(view, *, observable, n_bins, output_tag=None, template_bank=None):
         check(view)
         assert observable == 'reference_ratio' and n_bins == 36
+        assert template_bank is ns['templates']
         assert view.config['bin_counts'] == [36]
         floor = view.config['reference_ratio_eta_floor']
         assert floor == ({'reference_ratio_estimator_eta_no_floor': 0.,

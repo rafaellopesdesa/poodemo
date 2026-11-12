@@ -65,7 +65,7 @@ SOURCE_CHECK = '''import poodemo.reference_splines as _reference_splines
 
 _expected_methods = ("ecdf_u",)
 _loaded_methods = tuple(getattr(_reference_splines, "METHODS", ()))
-if _loaded_methods != _expected_methods or getattr(_reference_splines, "STUDY_VERSION", 0) != 4:
+if _loaded_methods != _expected_methods or getattr(_reference_splines, "STUDY_VERSION", 0) != 5:
     raise RuntimeError(
         f"Old interpolation code is loaded: {_loaded_methods}. "
         "Run this notebook from the setup cell at the top before starting the study.")
@@ -206,7 +206,7 @@ def spline_cells(cells):
 Run **all cells from the top**. Notebook 09 downloads the tested source revision
 into a fresh temporary Colab directory on every setup run and clears cached
 `poodemo` imports. The next cell must print **Verified interpolation methods:
-ecdf_u**, with **study version 4** before model loading or interpolation begins. Existing temporary
+ecdf_u**, with **study version 5** before model loading or interpolation begins. Existing temporary
 checkouts and previously uploaded ZIPs are not used by this notebook.
 
 If GitHub requires authentication, setup uses the Colab secret `GITHUB_TOKEN`
@@ -234,7 +234,7 @@ before proceeding.'''
     controls.source = controls.source.replace(
         'Each method has its own refinement limit; reaching it is reported as a failed check.',
         'Template and likelihood checks drive refinement; reaching a limit is a failed check.')
-    return [md(DESCRIPTION, 'spline-title'), runtime, bootstrap,
+    updated = [md(DESCRIPTION, 'spline-title'), runtime, bootstrap,
             code(SOURCE_CHECK, 'spline-source-check'), setup,
             by_id['reference-model-intro'], by_id['reference-model-source'], definition,
             md(THEORY, 'spline-theory'), md(VALIDATION, 'spline-validation-intro'),
@@ -300,6 +300,8 @@ else:
     print("All methods passed the configured finite closure checks; inspect the MLE diagnostics as well.")
 print("Saved tables:", splines["output"])
 print("Saved figures:", run.path("plots", "09_interpolation"))''', 'spline-finish'), *floor_cells(by_id)]
+    from refresh_mc_reference_notebooks import configure_review_notebook
+    return configure_review_notebook(updated, 9)
 
 
 FLOOR_CONTROLS = """from poodemo.reference_floor import FloorStudySettings, run_reference_floor_study, plot_reference_floor_study

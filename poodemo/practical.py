@@ -15,6 +15,7 @@ from scipy.special import expit
 from .data import Run, PROCESSES, SAMPLES, SPLITS, sample_size, selected_split, file_digest, save_json
 from .inference import (TemplateLikelihood, component_coefficients, exp_poly_factor,
                         histogram_components, _bin_indices)
+from .mc_yields import YieldPolicy, yield_policy, yield_diagnostics
 
 VERSION = 1
 
@@ -102,7 +103,8 @@ def prepare_simulation_bank(run):
         raise ValueError("simulation_per_sample must be an integer")
     cached = getattr(run, "_simulation_bank", None)
     if cached is not None and cached.get("cap") == cap:
-        return {**cached, "truth": component_coefficients(run.config["asimov_mu"]) @ cached["nominal"]}
+        return {**cached, "yield_policy": yield_policy(run.config),
+                "truth": component_coefficients(run.config["asimov_mu"]) @ cached["nominal"]}
     if cap < 2:
         raise ValueError("simulation_per_sample must be at least two")
     selection = json.loads(run.path("selected", "selection_state.json").read_text())
@@ -165,7 +167,7 @@ def prepare_simulation_bank(run):
     quad = dict(x=x, nominal=nominal, down=down[None], up=up[None], weights=np.ones(len(x)),
                 truth=component_coefficients(run.config["asimov_mu"]) @ nominal,
                 learned_fields=fields, learned_map=learned_map, sample_slices=offsets,
-                practical=True, fingerprint=fingerprint, cap=cap)
+                practical=True, fingerprint=fingerprint, cap=cap, yield_policy=yield_policy(run.config))
     save_json(directory / "provenance.json", provenance)
     pd.DataFrame(records).to_csv(directory / "sample_counts.csv", index=False)
     print("MC template bank:", directory, "| selected events:", len(x), flush=True)
@@ -187,7 +189,32 @@ class SimulationHistogram(TemplateLikelihood):
     pseudo-events nor a yield floor. Rates still use exp-poly extrapolation.
     Sparse-support bins are counted in diagnostics; this is an approximation
     to validate with more MC, not an analytical density oracle.
+    An optional bounded-zeroing policy acts separately on the final total mean.
     """
+    def __init__(self, *args, yield_policy=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.yield_policy = yield_policy or YieldPolicy()
+        self.zeroing_audit = dict(evaluations=0, zeroed_evaluations=0,
+                                 rejected_evaluations=0, max_zeroed_total=0.,
+                                 max_negative_bin=0., max_negative_total=0.)
+
+    def raw_intensity(self, mu, alpha=None):
+        return super().intensity(mu, alpha)
+
+    def intensity(self, mu, alpha=None):
+        # Component templates and interference are never clipped. The same
+        # corrected total enters both the Poisson rate and logarithmic term.
+        expected, report = self.yield_policy.apply(self.raw_intensity(mu, alpha))
+        audit = self.zeroing_audit
+        audit['evaluations'] += 1
+        audit['zeroed_evaluations'] += int(report['zeroed_bins'] > 0)
+        audit['rejected_evaluations'] += int(report['rejected_negative'])
+        for key, value in [('max_zeroed_total', report['zeroed_total']),
+                           ('max_negative_bin', report['largest_negative']),
+                           ('max_negative_total', report['negative_total'])]:
+            audit[key] = max(audit[key], value)
+        return expected
+
     @property
     def incomplete_support_bins(self):
         if not self.n_nuisance:
@@ -231,7 +258,8 @@ class SimulationParent:
         counts = np.histogram(scores, edges, weights=self.asimov_weights)[0]
         down = anchors[1:2] if self.systematics else np.empty((0, 4, len(counts)))
         up = anchors[2:3] if self.systematics else np.empty((0, 4, len(counts)))
-        model = SimulationHistogram(anchors[0], down, up, np.ones(len(counts)), counts)
+        model = SimulationHistogram(anchors[0], down, up, np.ones(len(counts)), counts,
+                                    yield_policy=self.quad.get('yield_policy'))
         model.parent, model.data_counts, model.eta = self, counts, eta
         model._index = _bin_indices(scores, edges)
         return model
@@ -256,6 +284,10 @@ def local_information(model, mu):
     """Retain invalid MC Fisher points as diagnostics instead of aborting a scan."""
     from .diagnostics import local_asimov_information
     try:
+        if isinstance(model, SimulationHistogram):
+            raw = model.raw_intensity(mu)
+            if np.any(raw < 0):
+                raise ValueError('A clipped intensity is not a regular Fisher point')
         result = local_asimov_information(model, mu)
     except ValueError:
         if not isinstance(model, SimulationHistogram):
@@ -294,7 +326,8 @@ def fit_direct_asimov(run, model, mu, systematics):
         conditional, nuisance = model.nll(mu, alpha), 0.
         valid, message = np.isfinite(conditional), 'NI fixed at zero'
     valid = bool(valid and certified and np.isfinite(conditional) and conditional-nll_truth >= -1e-8)
-    return dict(q=max(0., float(conditional-nll_truth)) if valid else np.nan, valid=valid,
+    audit = yield_diagnostics(model, mu, [nuisance] if model.n_nuisance else []) if np.isfinite(nuisance) else {}
+    return dict(q=max(0., float(conditional-nll_truth)) if valid else np.nan, valid=valid, **audit,
                 mu_hat=truth if certified else np.nan, alpha_NI=nuisance,
                 fit_message=message+'; unrestricted truth attains nonnegative NLL bound' if certified
                             else 'Direct Asimov truth could not be certified', truth_certified=bool(certified))
