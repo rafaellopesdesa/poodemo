@@ -112,9 +112,12 @@ def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_
     cells = {c['id']:''.join(c['source']) for c in notebook['cells']}
     ns = dict(run=run, samples_08=cached, N_BINS=4, POWERS=module.DEFAULT_POWERS,
               RECAP_BIN_COUNTS=[4, 8, 12, 16],
+              CONVERGENCE_3D_BINS=[2, 4], CONVERGENCE_PREFIXES=[4, 8, 13],
+              CONVERGENCE_PROBES=[.2, .8, 1.4],
               OUTPUT_TAG='test10', PRECISION_MUS=[.02, .122, 1.], SOURCE_3D_PLOTS=['NI_down'],
               display=lambda *a:None, plt=plt, pd=pd, np=np)
-    for name in ['study', 'comparison-plots', 'recap-plots', 'precision-plots']:
+    for name in ['study', 'comparison-plots', 'recap-plots', 'convergence-study',
+                 'convergence-plots', 'precision-plots']:
         exec(cells[name], ns)
     result = ns['study']
     assert result['baseline_checks'].passed.all()
@@ -137,6 +140,34 @@ def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_
     assert len(list(ns['FIGURE_DIR'].glob('10_recap_*.png'))) == 3
     precision = pd.read_csv(result['precision_output']/'moving_total.csv.gz')
     assert set(precision.n_bins) == {4, 8, 12, 16}
+    convergence = ns['convergence_3d']
+    assert convergence['baseline_checks'].passed.all()
+    assert len(convergence['scans']) == 2*3*2*len(grid)
+    assert len(convergence['contrast_summary']) == 2*3*3
+    assert set(convergence['scans'].selected_per_source) == {4, 8, 13}
+    assert set(convergence['references'].model) == {'analytic unbinned', unbinned.LEARNED_LABEL}
+    assert convergence['config']['rates'] == cached['rates'].tolist()
+    assert convergence['config']['normalizers'] == cached['normalizers'].tolist()
+    assert len(list(ns['CONVERGENCE_FIGURE_DIR'].glob('*.png'))) == 6
+    assert len(list(ns['CONVERGENCE_FIGURE_DIR'].glob('*.pdf'))) == 6
+    for size in [4, 8, 13]:
+        with np.load(convergence['output']/f'source_counts_{size}.npz') as z:
+            assert np.all(z['counts'].sum(axis=(1, 2, 3)) == size)
+        for bins in [2, 4]:
+            table = pd.read_csv(convergence['output']/f'contrast_{size}_{bins}.csv.gz')
+            assert len(table) == 3*bins**3
+    # Prefixes stop inside the fixture's chunks. Validate their actual events
+    # independently, including a prefix that is NOT a chunk boundary.
+    for size in [4, 8]:
+        with np.load(convergence['output']/f'source_counts_{size}.npz') as z:
+            for si, state in enumerate(cached['manifests'].values()):
+                values = []
+                for axis in module.AXES:
+                    ratios = np.concatenate([module._read_array(cached['ratio_directory'], c['ratios'][axis])
+                                             for c in state['chunks']])[:size]
+                    j = PROCESSES.index(axis)
+                    values.append(expit(module.DEFAULT_POWERS[axis]*np.log(ratios/cached['normalizers'][j]*cached['normalizers'][0])))
+                np.testing.assert_array_equal(z['counts'][si], np.histogramdd(np.column_stack(values), bins=[z['edges']]*3)[0])
     # Corrupted direct counts must never be silently refilled/replaced.
     checkpoint = cached['histogram_directory']/'counts.npz'
     with np.load(checkpoint) as z:

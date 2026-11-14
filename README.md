@@ -758,6 +758,30 @@ truth, with a finite-difference step check, not a coverage guarantee.
 NI morphing and bounded total-yield zeroing are identical to 08/09. The
 comparison retains fixed/profiled NI, invalid-fit reports and local information.
 
+A factorial study crosses **9, 18 and 36 bins per fixed 3D coordinate** with
+**2.5M, 5M and 10M events per source**, all from the existing cached streams.
+The coarse grids merge adjacent cells of the original 36-bin grid, retaining
+its boundaries. Rates and ratio normalizers stay frozen; each case has a
+same-template Asimov sample at the same physical exposure. Full/zoomed scans,
+differences from analytical unbinned, and $q$ versus inverse MC size include
+both unbinned references, with NI fixed and profiled. Prefixes are correlated;
+no independent-point fit, infinite-MC extrapolation or bias subtraction is made.
+NI anchors are merged before morphing, so the profiled comparison also tests
+that approximation. The full-prefix fine-grid scan must reproduce the main
+study. Failures and bounded-zeroing corrections remain visible.
+The scans also identify nonpositive nominal predictions with positive Asimov
+counts: a permitted tiny zeroing can still imply an infinite Poisson penalty,
+and a profiled fit may shift NI to escape that boundary. Plot markers distinguish
+invalid fits from valid fits with this nominal-support warning.
+
+Additional nominal-NI tables record the per-cell hypothesis contrast, its
+MC uncertainty with shared-template correlations, the raw Poisson contribution
+to $q$, and a second-order MC-bias diagnostic on positive-yield cells. A scatter
+plot near the secondary region compares contrast size with its MC uncertainty.
+These are diagnostic quantities, not corrections or bin-selection rules.
+New products are under `3d_convergence_v1/<configuration fingerprint>/` within
+the notebook-10 output directory; count caches can resume interrupted fills.
+
 Per-bin MC precision plots show raw total-yield relative uncertainties at
 $\mu=0.02,0.054,0.122,1$ and every moving scan point at all four recap resolutions. Every fixed 3D cell appears
 in labelled B-coordinate slices. Six-source tables include nominal/up/down NI;
@@ -767,7 +791,7 @@ the learned map, with squared physical coefficients for independent sources.
 They exclude rate and neural-model uncertainty. Empty sampled cells and
 nonpositive raw totals are explicitly marked; zeroing never enters the
 uncertainty denominator. These diagnostics do not add MC nuisance parameters,
-merge cells, change powers or trigger additional events. Full per-cell tables
+adaptively merge cells, change powers or trigger additional events. Full per-cell tables
 are compressed CSVs and raw six-source counts are saved in `source_counts.npz`.
 Products are in `results/10_colab_10M_precision_v1/` beneath the completed 08
 study directory, with PNG/PDF plots under the corresponding `plots/` directory.

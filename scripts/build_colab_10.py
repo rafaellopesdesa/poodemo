@@ -27,13 +27,15 @@ Compare fixed 1D, 2D and 3D learned discriminators with the **36-bin moving
 reference ratio**, using the exact selected-event bank completed in 08.
 The fixed grids contain $36$, $36^2=1296$, and $36^3=46656$ cells. A recap
 compares moving 1D histograms with **36, 72, 108 and 144 bins**.
+A separate factorial study compares **9, 18 and 36 bins per fixed 3D axis**
+with **2.5M, 5M and 10M events per source** from the same bank.
 The process-axis powers remain $a_{NI}=1$ and $a_{SBI}=a_B=2$; the moving
 observable uses $a=100$ and no floor. Likelihood and information comparisons
 show both analytical unbinned and notebook 03's learned unbinned reference.
 
 **No events are generated, and no source may exceed 10M selected events.**
 MC precision is measured and displayed. It never triggers more events,
-rebinning, smoothing, a change of powers, or a new nuisance parameter.
+adaptive rebinning, smoothing, a change of powers, or a new nuisance parameter.
 ''', 'title'), md('''### Run from the top after the completed 08
 
 Use the same run and filtered Unity ensembles as 08/09. This notebook loads
@@ -52,6 +54,9 @@ New results have a separate output tag; completed 08/09 results are preserved.
 ''', 'runtime'), code(bootstrap, 'bootstrap'), code(COMMON_IMPORTS, 'imports'),
         code('''N_BINS = 36
 RECAP_BIN_COUNTS = [36, 72, 108, 144]
+CONVERGENCE_3D_BINS = [9, 18, 36]
+CONVERGENCE_PREFIXES = [2_500_000, 5_000_000, 10_000_000]
+CONVERGENCE_PROBES = [0.02, 0.054, 0.122, 0.344, 1.4]
 POWERS = {"NI": 1.0, "SBI": 2.0, "B": 2.0}
 REFERENCE_RATIO_A = 100.0
 REFERENCE_RATIO_ETA_MIN = 0.0
@@ -133,7 +138,99 @@ for name, figure in plot_resolution_recap(study, output=FIGURE_DIR):
     print(name)
     display(figure)
     plt.close(figure)
-''', 'recap-plots'), md(r'''### Relative MC statistical uncertainty in every cell
+''', 'recap-plots'), md(r'''### Fixed 3D binning versus finite MC statistics
+
+Cross **9, 18 and 36 bins per coordinate** (729, 5,832 and 46,656 cells)
+with **2.5M, 5M and 10M selected events per source**. These are prefixes of
+the existing cached streams. No events are generated or networks evaluated.
+The smaller prefixes have resumable count caches; the full prefix reuses the
+existing 36-bin cache. Frozen rates, powers, ratio normalizers and member
+selection are identical in every case. Changing MC size does not change the
+physical exposure. Each case uses its own templates to construct its Asimov
+sample at $\mu=1$, so this tests template precision, not data fluctuations.
+
+The coarser grids merge adjacent cells of the **existing** 36-bin grid:
+two fine cells per axis for 18 bins and four for 9 bins. We retain its exact
+edges; generating fresh shifted grids would not produce nested partitions.
+All six sources are merged before NI morphing, preserving every source total.
+The primary 36-bin analysis and the moving 1D recap stay as above.
+
+Compare the fixed-NI scans first. Exact binning loses information, while
+finite-template noise can inflate apparent discrimination; agreement with the
+analytical curve can result from cancellation. Profiled scans additionally
+probe NI-anchor precision and the effect of morphing after merging. Nonlinear
+morphing need not commute with merging. The bounded-zeroing policy stays at
+$0.01$ events per bin and $0.05$ in total; invalid fits and corrections remain
+visible rather than being repaired by changing these thresholds.
+
+Merging raw components and zeroing their total do not commute. A coarse bin
+can have a positive Asimov count but a nonpositive predicted mean, even when
+the permitted correction is tiny. Its stat-only Poisson penalty is infinite;
+a profiled fit may move NI sharply to avoid that boundary. The tables count
+these **nominal-NI support mismatches**, including their Asimov yield. Crosses
+mark invalid fits; hollow diamonds mark valid fits whose nominal-NI prediction
+has such a mismatch. These are support artifacts to inspect, not extra physics
+information. No additional floor or smoothing is applied.
+
+Full scans, secondary-region zooms and differences from the analytical curve
+show both unbinned references. Sample-size panels show $q$ against
+$N_{\max}/N_{MC}$ at saved scan points nearest the requested probes. Prefixes
+overlap and are **correlated**: connecting the points is descriptive, not an
+independent-point fit or an extrapolation to infinite MC.
+''', 'convergence-note'), code('''from poodemo.discriminator_convergence import run_convergence_study, plot_convergence_study
+convergence_3d = run_convergence_study(run, study,
+    bin_counts=CONVERGENCE_3D_BINS, prefixes=CONVERGENCE_PREFIXES,
+    probes=CONVERGENCE_PROBES)
+display(convergence_3d['probe_mapping'])
+display(convergence_3d['scans'].groupby(
+    ['n_bins', 'selected_per_source', 'systematics']).valid.agg(['size','sum']))
+display(convergence_3d['scans'].loc[~convergence_3d['scans'].valid])
+print('Nonpositive nominal prediction with positive Asimov yield:')
+display(convergence_3d['scans'].loc[convergence_3d['scans'].nominal_support_mismatch_bins > 0,
+    ['n_bins','selected_per_source','mu','systematics','valid','q','alpha_NI',
+     'nominal_support_mismatch_bins','nominal_support_mismatch_asimov']])
+display(convergence_3d['occupancy'])
+display(convergence_3d['baseline_checks'].groupby('systematics').agg(
+    points=('mu','size'), passed=('passed','sum'),
+    max_abs_delta_q=('delta_q',lambda x:x.abs().max())))
+display(convergence_3d['scans'].groupby(['n_bins','selected_per_source','systematics']).agg(
+    max_zeroed_total=('zeroed_total','max'), max_zeroed_bins=('zeroed_bins','max'),
+    rejected_points=('rejected_negative','sum')))
+print('3D convergence tables and count archives:', convergence_3d['output'])
+''', 'convergence-study'), md(r'''### Precision of the difference between hypotheses
+
+Good relative precision on a large total yield need not imply good precision
+on the much smaller change between hypotheses. At nominal NI define
+$$
+\Delta\nu_b=\nu_b(\mu)-\nu_b(1),\qquad
+\sigma^2_{\Delta,b}=\sum_j[c_j(\mu)-c_j(1)]^2
+\widehat{\mathrm{Var}}(\widehat\nu_{jb}).
+$$
+This includes the correlation from using the same component templates in both
+hypotheses. The per-cell tables retain the raw contrast, its MC uncertainty,
+and the raw Poisson contribution to $q$. The scatter panels compare
+$|\Delta\nu_b|/\nu_b(1)$ with $\sigma_{\Delta,b}/\nu_b(1)$ near the secondary
+region; points above the diagonal have more estimated MC noise than contrast.
+Cells with undefined quantities remain explicitly recorded in the tables.
+
+For strictly positive test and truth yields $x_b,y_b$, a second-order estimate
+of the upward MC bias is also tabulated:
+$$
+\widehat B=\sum_{b:x_b,y_b>0}y_b\sum_j
+\widehat{\mathrm{Var}}(\widehat\nu_{jb})
+\left[\frac{c_j(\mu)}{x_b}-\frac{c_j(1)}{y_b}\right]^2.
+$$
+This is a diagnostic using estimated quantities. It can be unreliable in sparse
+bins, excludes support boundaries and rate/network uncertainty, and applies
+only with NI fixed. It is **never subtracted** from a scan and is not used to
+select binning. No MC statistical nuisance parameters are introduced here.
+''', 'contrast-note'), code('''display(convergence_3d['contrast_summary'])
+CONVERGENCE_FIGURE_DIR = FIGURE_DIR / '3d_convergence_v1' / convergence_3d['identity'][:20]
+for name, figure in plot_convergence_study(convergence_3d, output=CONVERGENCE_FIGURE_DIR):
+    print(name)
+    display(figure)
+    plt.close(figure)
+''', 'convergence-plots'), md(r'''### Relative MC statistical uncertainty in every cell
 
 For independent source $j$, with $N_j$ selected events and frozen yield $\nu_j$,
 let $n_{jb}$ be its count in cell $b$ and $\widehat p_{jb}=n_{jb}/N_j$. We use
