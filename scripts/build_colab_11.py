@@ -8,7 +8,7 @@ from build_notebooks import BOOTSTRAP, COMMON_IMPORTS
 from build_reference_notebooks import MODEL_SOURCE_CODE
 from build_reference_spline_notebook import fresh_bootstrap
 
-SOURCE_COMMIT = '947d151df8a5a235894e82869087b6ad4c2298a6'  # Tested backend, independent of notebook output commits.
+SOURCE_COMMIT = 'a575954cea9bebb11b6983a5a598146513fd72e7'  # Tested backend, independent of notebook output commits.
 NOTEBOOK = Path(__file__).resolve().parents[1]/'notebooks/11_test_statistic_toys.ipynb'
 
 
