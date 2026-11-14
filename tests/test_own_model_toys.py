@@ -171,6 +171,7 @@ def test_plot_preserves_all_four_models_and_zero_mass(prepared, tmp_path):
     figures = plot_own_model_toys(result, tmp_path/'plots')
     assert len(figures) == 2
     for name, fig in figures:
+        assert fig.axes[0].get_yscale() == 'log'
         assert len(fig.axes[1].lines) == 4
         for line in fig.axes[2].lines:
             assert line.get_ydata()[-1] == 0
@@ -186,7 +187,8 @@ def test_notebook_has_explicit_production_budget_and_compiles():
     nb = nbformat.read(Path(__file__).resolve().parents[1]/'notebooks/11_test_statistic_toys.ipynb', as_version=4)
     nbformat.validate(nb)
     code = {cell.id: cell.source for cell in nb.cells if cell.cell_type == 'code'}
-    assert 'N_TOYS = 1000' in code['settings']
+    assert 'N_TOYS = 10_000' in code['settings']
+    assert 'MOVING_BIN_COUNTS = (36, 72, 108, 144)' in code['settings']
     assert 'MU_VALUES = (0.0, 1.4)' in code['settings']
     assert '250_000' not in code['model-source']
     assert 'run_toy_study(' not in '\n'.join(code.values())
@@ -226,4 +228,13 @@ def test_preparation_reuses_cached_ratios_and_merges_the_original_grid(tmp_path,
     # All source data and NN modules are unavailable; cached ratios suffice.
     again = prepare_own_model_toys(run, samples, progress=lambda _: None)
     assert again['configuration'] == result['configuration']
+    assert len(list(tmp_path.glob('*.npy'))) == 18
+    from poodemo.own_model_resolution import prepare_moving_resolution
+    resolution = prepare_moving_resolution(run, samples, result, progress=lambda _: None)
+    assert resolution['templates'][36] is result['templates']['moving36']
+    for n in (72, 108, 144):
+        for mu in (0., 1.4):
+            fields = resolution['templates'][n][mu].fields
+            assert fields.shape == (4, n)
+            np.testing.assert_allclose(fields.sum(axis=1), rates[:4])
     assert len(list(tmp_path.glob('*.npy'))) == 18

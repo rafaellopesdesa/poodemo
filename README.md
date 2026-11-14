@@ -17,7 +17,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Generate 10M selected events per source in Colab; validate no-floor learned histograms and MC convergence | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Validate empirical CDFs in $u$; study the floor, binning and nuisance morph order | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
-| [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare four own-model stat-only distributions: 1,000 toys each at $\mu_0=0$ and $1.4$ | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
+| [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Own-model stat-only distributions and 36/72/108/144-bin comparison; 10,000 toys per case at $\mu_0=0$ and $1.4$ | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
 | [13_learned_ratio_compression.ipynb](notebooks/13_learned_ratio_compression.ipynb) | Compare learned and analytical compression with independent simulator-derived 36-bin yields | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/13_learned_ratio_compression.ipynb) |
 
@@ -800,9 +800,14 @@ Regenerate only this notebook with `python scripts/build_colab_10.py`.
 
 ### Notebook 11
 
-Run **1,000 toys per case and hypothesis**, at $\mu_0=0$ and $1.4$ (8,000 fits).
-The four own-model, stat-only cases are analytical unbinned, learned unbinned,
+Run **10,000 toys per case and hypothesis**, at $\mu_0=0$ and $1.4$.
+The four baseline cases remain analytical unbinned, learned unbinned,
 36-bin moving learned observable, and nested $9\times9\times9$ learned ratios.
+Add the **72/108/144-bin** moving observables for **seven cases and 140,000
+fits total**, all own-model and stat-only. The 36-bin case is reused in both
+comparisons. New templates use the same <=10M bank and 08/10 edge convention;
+these 1D grids are not all nested. More bins can reduce discretization loss
+while information lost in scalar compression and finite-template effects remain.
 Each model generates and fits its own independent null ensemble. No common-data
 closure, nuisance profiling, template fluctuations or coverage splitting is performed.
 
@@ -811,7 +816,8 @@ intervals using a 129-point $\sqrt\mu$ grid and refine every resolved minimum,
 including boundaries within $[0,3]$. The moving partition remains frozen at
 $\eta=\mu_0$ throughout the free fit, with power 100 and no floor. The fixed
 3D grid merges adjacent groups of four cells from 10's original 36-bin axes.
-Both binned cases draw independent Poisson counts. The bounded-zeroing policy
+All binned cases draw independent Poisson counts, with independent toy streams
+across resolutions. Templates remain fixed and share the same MC bank. The bounded-zeroing policy
 (0.01 events/bin, 0.05 total) applies identically to generation and likelihood,
 including the corrected rate term; unsupported positive observations are invalid.
 
@@ -831,10 +837,20 @@ a normalization diagnostic. Fresh toy events do not enlarge the 10M template ban
 
 Checkpoints live under `results/11_own_model_statonly_10M_36_9_v1` in the shared
 08 evaluation directory. Independent case/hypothesis/toy-ID seeds allow exact
-resume and extension by increasing `N_TOYS`. Atomic checkpoints occur every five
-toys and on ordinary interruption. Input fingerprints reject stale results.
-Histograms, empirical CDFs, survival curves and quantile tables retain explicit
-failure counts, zero mass and upper-bound diagnostics. Notebook 12's historical
+resume and extension by increasing `N_TOYS`. The original four-case backend
+and its fingerprints are unchanged: completed 1,000-toy ensembles resume under
+the same `OUTPUT_TAG`. The three additional binnings have independent checkpoints
+in `moving_resolution_v1/bins_<N>` beneath this directory. The combined CSVs
+include all seven cases without duplicating the 36-bin ensemble.
+
+Atomic checkpoints default to every **100 toys** and occur on ordinary
+interruption; a hard runtime loss can repeat up to 100 deterministic toys.
+Input fingerprints reject stale results. **Test-statistic histograms and survival
+curves use logarithmic y-axes**, while CDFs stay linear and retain the atom at
+zero. Every resolution plot includes both unbinned references. Best-fit
+distributions and the fraction on the other branch (descriptive split at
+$\widehat\mu=0.5$) accompany quantiles, zero mass, failures, upper-bound
+diagnostics and zeroing. The split does not restrict the global fit. Notebook 12's historical
 inputs remain separate and require their own review before migration.
 
 Builders: `scripts/build_reference_notebooks.py` updates 08/09;

@@ -1,4 +1,4 @@
-"""Build notebook 11: four own-model null ensembles, 1000 toys each."""
+"""Build notebook 11: own-model null ensembles, binning convergence, 10000 toys each."""
 import re
 from pathlib import Path
 
@@ -22,17 +22,20 @@ def toy_cells():
     bootstrap = re.sub(r'SOURCE_COMMIT = "[0-9a-f]+"', f'SOURCE_COMMIT = "{SOURCE_COMMIT}"', bootstrap)
     model = MODEL_SOURCE_CODE.split('# Cap selected integration events per source; all events estimate acceptance.')[0]
     model += "\nrun = use_practical_run(run)\nprint('Practical evaluation:', run.evaluation_root)"
-    return [md(r'''# 11. Four test-statistic distributions under their own models
+    return [md(r'''# 11. Own-model test statistics and moving-observable binning
 
-Generate **1,000 toys for each of four models**, at each of
-$\mu_0=0$ and $\mu_0=1.4$: **8,000 fits in total**, all stat-only.
-The four two-sided statistics are
+Generate **10,000 toys per model and hypothesis**, at $\mu_0=0$ and
+$\mu_0=1.4$. Keep the original four-case comparison and add moving-observable
+resolutions of **72, 108 and 144 bins** alongside the 36-bin baseline.
+There are **seven cases and 140,000 fits in total**, all stat-only.
+The two-sided statistics are
 $$
 q_{\mu_0}=-2\log\frac{L(\mu_0)}{L(\widehat\mu)},\qquad 0\leq\widehat\mu\leq3.
 $$
 Each statistic is evaluated on toys generated from **its own model at
 $\mu=\mu_0$**. These are separate null ensembles, not four fits of a common
-physical sample. Their distributions may be similar without being identical.
+physical sample. The bin-resolution study also uses independent toys at each
+resolution. Their distributions may be similar without being identical.
 There are no nuisance parameters, upper-limit truncation, MC-statistical
 nuisances, or fluctuations of trained models/templates.
 
@@ -40,7 +43,7 @@ nuisances, or fluctuations of trained models/templates.
 |---|---|
 | Analytical unbinned | Fresh continuous physical Poisson experiments, including preselection |
 | Learned unbinned | Poisson-resample the existing selected $S$ bank with learned intensity weights |
-| Moving learned observable, 36 bins | Independent Poisson counts from the frozen 36-bin means |
+| Moving learned observable, 36/72/108/144 bins | Independent Poisson counts from each frozen partition |
 | Fixed learned ratios, $9\times9\times9$ bins | Independent Poisson counts from the nested 3D means |
 
 The baseline remains **36 moving bins**, **$a=100$**, **no observable floor**,
@@ -59,12 +62,15 @@ events. Ratio networks are **not evaluated per toy**. Scalar likelihood fits
 run on the CPU. Fresh analytical experiments are the requested toy data;
 they are separate from the fixed 10M reference banks.
 
-The default is 1,000 per case and hypothesis even in smoke mode. The settings
+The default is 10,000 per case and hypothesis even in smoke mode. The settings
 cell explicitly controls this budget. Results are saved on Drive; the final
 plots can be regenerated from checkpoints without repeating completed toys.
+Keep the same `OUTPUT_TAG`: the completed 1,000-toy baseline ensembles are
+reused and extended. Only the three additional resolutions start new ensembles.
 ''', 'runtime'), code(bootstrap, 'bootstrap'), code(COMMON_IMPORTS, 'imports'),
     code('''MU_VALUES = (0.0, 1.4)  # Either hypothesis may be run alone in a new OUTPUT_TAG.
-N_TOYS = 1000  # Per model AND per hypothesis; no 200-toy pilot.
+N_TOYS = 10_000  # Per case AND per hypothesis, including every 1D resolution.
+MOVING_BIN_COUNTS = (36, 72, 108, 144)
 EXPOSURE = 1.0
 SEED = 110923
 MU_BOUNDS = (0.0, 3.0)
@@ -74,13 +80,13 @@ REFERENCE_RATIO_A = 100.0
 REFERENCE_RATIO_ETA_MIN = 0.0
 MC_ZERO_MAX_BIN = 0.01
 MC_ZERO_MAX_TOTAL = 0.05
-CHECKPOINT_EVERY = 5
-PROGRESS_EVERY = 25
+CHECKPOINT_EVERY = 100  # Limit repeated Drive writes for the larger ensembles.
+PROGRESS_EVERY = 100
 OUTPUT_TAG = "11_own_model_statonly_10M_36_9_v1"
 run = run.with_config(reference_ratio_power=REFERENCE_RATIO_A,
     reference_ratio_eta_floor=REFERENCE_RATIO_ETA_MIN,
     mc_zero_max_bin=MC_ZERO_MAX_BIN, mc_zero_max_total=MC_ZERO_MAX_TOTAL)
-print('Requested fits:', len(MU_VALUES) * 4 * N_TOYS)
+print('Requested fits:', len(MU_VALUES) * (3 + len(MOVING_BIN_COUNTS)) * N_TOYS)
 ''', 'settings'), md('''### Reuse the frozen model selection and 08 bank
 
 Retain notebook 03's strict ensemble filtering and the same Unity bundle.
@@ -91,6 +97,7 @@ run, samples_08 = load_08_baseline(run, 36, max_selected=MAX_SELECTED_PER_SOURCE
     local_cache=Path('/content/poodemo-11-ratios') if IN_COLAB else None)
 RESULT_DIR = run.path('results', OUTPUT_TAG)
 FIGURE_DIR = run.path('plots', OUTPUT_TAG)
+RESOLUTION_DIR = RESULT_DIR / 'moving_resolution_v1'
 print('Selected bank events per source:', samples_08['target'])
 print('Checkpoint directory:', RESULT_DIR)
 ''', 'load-bank'), md(r'''### Define each generating model and matching likelihood once
@@ -138,6 +145,9 @@ exact analytic integral of the NN preselection. The count-mean pull in the
 summary helps detect normalization discrepancies across toys.
 ''', 'models'), code('''from poodemo.own_model_toys import prepare_own_model_toys, run_own_model_toys
 prepared = prepare_own_model_toys(run, samples_08, mu_values=MU_VALUES, exposure=EXPOSURE)
+from poodemo.own_model_resolution import prepare_moving_resolution, run_moving_resolution
+resolution_prepared = prepare_moving_resolution(run, samples_08, prepared,
+    bin_counts=MOVING_BIN_COUNTS)
 display(pd.DataFrame({
     'component': ['S', 'SBI', 'B', 'NI'],
     'observable_normalizer_08': samples_08['normalizers'],
@@ -156,11 +166,15 @@ fixed throughout the denominator fit**; only the physical yields vary with
 $\mu$. Nothing is frozen at 0.2.
 
 Independent random streams depend on the case, hypothesis and toy ID.
-Checkpoints are saved every five completed toys and on an ordinary notebook
-interrupt. Rerunning this cell resumes; increasing `N_TOYS` extends the same
-streams. A hard runtime loss can repeat at most five deterministic toys.
-Scientific changes require a new `OUTPUT_TAG`; an input fingerprint blocks
-mixing incompatible results. Failures are retained and never replaced by
+Checkpoints are saved every `CHECKPOINT_EVERY` completed toys (default 100)
+and on an ordinary notebook interrupt. Rerunning this cell resumes; increasing
+`N_TOYS` extends the same streams. A hard runtime loss can repeat at most 100
+deterministic toys with the default checkpoint interval.
+The original four-case backend and input fingerprints are preserved, so the
+previous 1,000 toys resume under the same tag. Each new binning has a separate
+checkpoint directory and stable independent random stream. Scientific changes
+require a new `OUTPUT_TAG`; an input fingerprint blocks mixing incompatible
+results. Failures are retained and never replaced by
 new toys. Progress messages report the most recent toy's runtime.
 ''', 'execution-note'), code('''study = run_own_model_toys(prepared, RESULT_DIR, n_toys=N_TOYS, seed=SEED,
     mu_bounds=MU_BOUNDS, grid_size=FIT_GRID_SIZE,
@@ -175,15 +189,16 @@ print('Detailed per-toy rows and source diagnostics:', study['output'])
 ''', 'run-toys'), md(r'''### Compare the distributions
 
 Overlay all four distributions separately at each generating hypothesis.
-Histograms use common edges; empirical CDFs retain any atom at $q=0$, and
-survival curves show the tails. The summary gives means with their toy
-standard errors, quantiles, the fraction at zero, upper-bound frequency,
+Histograms use common edges and a **logarithmic y-axis**. Empirical CDFs
+retain any atom at $q=0$ on a linear scale; survival curves use a logarithmic
+y-axis. The horizontal $q$ axis stays linear, retaining zero without an offset.
+The summary gives means with their toy standard errors, quantiles, the fraction at zero, upper-bound frequency,
 failures and count-mean pulls. Plots state the valid/attempted count for every
 case and are explicitly conditional on successful fits.
 
 At $\mu_0=0$, the physical boundary matters. At either point, branch switching
 or finite-sample effects can change the shape. No asymptotic law is imposed.
-With 1,000 toys the 99th-percentile tail contains only about ten events;
+With 10,000 toys the 99th-percentile tail contains about 100 events;
 its precision should be assessed before drawing tail conclusions.
 
 This study measures null distributions conditional on the frozen models and
@@ -197,7 +212,48 @@ for name, figure in plot_own_model_toys(study, FIGURE_DIR):
     display(figure)
     plt.close(figure)
 print('Saved plots:', FIGURE_DIR)
-''', 'plots')]
+''', 'plots'), md(r'''### Moving-observable binning: 36, 72, 108 and 144 bins
+
+Use the same learned map, $a=100$, no floor, frozen rates and the same 10M
+source bank at every resolution. Fill the additional templates directly from
+cached ratios. No reference events are added and no ratio networks are run.
+The 36-bin toys above are reused once, not regenerated for this comparison.
+Each additional case has 10,000 own-model toys at each hypothesis.
+
+Use the bin-edge convention of 08/10 independently at each resolution. These
+partitions are not all nested, and the toy experiments are independent across
+resolutions. Template MC is shared and fixed. No monotonic improvement is
+assumed: finer bins reduce discretization loss but can expose sparse-template
+and support effects. The same bounded-zeroing policy is used throughout;
+invalid cases, zeroing and failures remain visible.
+
+The scalar ratio at $\eta=\mu_0$ is designed to compare the tested point with
+$\mu=1$. Finer bins can approximate that scalar observable better, while
+information already lost in the compression can remain lost. The full global
+fit over $0\leq\mu\leq3$ is kept at every resolution, including the secondary
+minimum. There is no local-fit restriction in the reported statistics.
+
+Alongside the log-scale $q$ distributions, show the global $\widehat\mu$
+distributions and the fraction on the other branch. For these two hypotheses,
+$\widehat\mu=0.5$ is a descriptive split between the observed near-zero and
+high-strength branches: count $\widehat\mu>0.5$ at truth zero and
+$\widehat\mu\leq0.5$ at truth 1.4. This line never constrains a fit. Inspect
+the distributions if the branches cease to be well separated. The table also
+reports zero mass, quantiles, failures and the largest yield correction.
+''', 'resolution-note'), code('''resolution_study = run_moving_resolution(resolution_prepared, study, RESOLUTION_DIR,
+    n_toys=N_TOYS, seed=SEED, mu_bounds=MU_BOUNDS, grid_size=FIT_GRID_SIZE,
+    checkpoint_every=CHECKPOINT_EVERY, progress_every=PROGRESS_EVERY)
+display(resolution_study['sources'])
+display(resolution_study['summary'])
+display(resolution_study['results'].loc[~resolution_study['results'].valid])
+print('All seven cases, including reused baseline rows:', RESOLUTION_DIR)
+''', 'resolution-toys'), code('''from poodemo.own_model_toy_plots import plot_moving_resolution
+for name, figure in plot_moving_resolution(resolution_study, FIGURE_DIR / 'moving_resolution'):
+    print(name)
+    display(figure)
+    plt.close(figure)
+print('Resolution plots:', FIGURE_DIR / 'moving_resolution')
+''', 'resolution-plots')]
 
 
 if __name__ == '__main__':
