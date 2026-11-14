@@ -8,7 +8,7 @@ from build_notebooks import BOOTSTRAP, COMMON_IMPORTS
 from build_reference_notebooks import MODEL_SOURCE_CODE
 from build_reference_spline_notebook import fresh_bootstrap
 
-SOURCE_COMMIT = '6ab5fc6e2578e1745d1d2858a60bbb17af0b08bd'
+SOURCE_COMMIT = 'f7de151b4bfdad94cd4e144bcbdb2997ce8206f1'
 
 
 def discriminator_cells():
