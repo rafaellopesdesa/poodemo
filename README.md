@@ -17,7 +17,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Generate 10M selected events per source in Colab; validate no-floor learned histograms and MC convergence | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Validate empirical CDFs in $u$; study the floor, binning and nuisance morph order | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
-| [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare stat-only likelihood-ratio distributions for simulator and model toys at mu=0 and 1.4 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
+| [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Compare four own-model stat-only distributions: 1,000 toys each at $\mu_0=0$ and $1.4$ | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
 | [13_learned_ratio_compression.ipynb](notebooks/13_learned_ratio_compression.ipynb) | Compare learned and analytical compression with independent simulator-derived 36-bin yields | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/13_learned_ratio_compression.ipynb) |
 
@@ -25,16 +25,16 @@ to lie between zero and one while S has a visibly distinct shape.
 
 1. The physical-reference workflow is **01–03 → 08**, followed by the studies
    in 09, 10 and 11. Notebook 12 retains its historical diagnostic inputs;
-   its source is not automatically switched to the new floored ensemble. Notebook 11
-   builds its own direct bin yields and does not require 09's splines.
+   its source is not automatically switched to the new own-model ensemble. Notebook 11
+   reuses the 08/10 bank and direct bin yields; it does not require 09's interpolation.
    Notebooks 04–07 are retired; their earlier studies remain in the history.
    For a private repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
 2. Choose a GPU runtime for notebooks 2–3. Both PyTorch training and JAX
    likelihood fits use the GPU. `JAX_BACKEND = "auto"` detects an NVIDIA GPU;
    use `"gpu"` to require one, or `"cpu"` for an intentional CPU run.
-   Notebooks 11–12 also benefit from a GPU for evaluating the saved networks on
-   fresh simulator toys. The histogram and scalar fitting code runs on the CPU.
+   Notebook 11 benefits from a GPU for preselecting fresh analytical toys; its
+   learned and binned cases reuse cached ratios and never evaluate NNs per toy. The histogram and scalar fitting code runs on the CPU.
    Other histogram notebooks can use a CPU runtime.
 3. In each notebook use the same `RUN_NAME` and `MODE`. Defaults are
    `RUN_NAME = "paper-distinct-s-v4"` and `MODE = "production"`. For an initial
@@ -567,13 +567,13 @@ The full 165-million-event generation and production ratio training are separate
 Run **08** from the top with the completed
 `RUN_NAME="paper-distinct-s-v4"`, the original `MODE`/`CONFIG_OVERRIDES`, and
 notebook 03's Unity directory and filtering policy. Notebook 10 also requires
-the completed 08 baseline; notebook 11 can run independently after 01–03.
+the completed 08 baseline; notebook 11 reuses that baseline and 10's nested 3D grid.
 Each downloads its pinned backend into a fresh
 Colab checkout and clears cached package imports. No new training, event
 transfer, or physics run name is required. The default bundle directory is
 `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`.
 Notebook 08 generates/reuses a 10M-selected-event campaign in Colab. Its final
-cell exports a baseline manifest; notebooks 09 and 10 require that manifest and reuse
+cell exports a baseline manifest; notebooks 09, 10 and 11 require that manifest and reuse
 the exact same bank, rates, learned-map normalizers and yield-zeroing policy.
 
 The notebooks verify and reuse **all five frozen member selections from 03**,
@@ -621,8 +621,9 @@ At $\eta=1$ the coordinate is exactly $1/2$; the shared bin edges place it
 strictly inside one bin. Physical hypotheses and fit domains remain unchanged.
 Learned ratios do not have an exact sufficiency guarantee.
 
-In 10–11, `SIMULATION_EVENTS_PER_SAMPLE=250_000` caps **selected** integration events used
-per source. All selected events determine its acceptance. A retained event in
+The original practical workflow capped integration events at 250,000 per source.
+Notebooks 08–11 now share the completed bank of up to 10M selected events per
+source, with frozen acceptance estimates and rates. A retained event in
 source $j$ receives weight $\nu_j/n_j$, where
 
 $$
@@ -799,32 +800,47 @@ Regenerate only this notebook with `python scripts/build_colab_10.py`.
 
 ### Notebook 11
 
-Retain five stat-only comparisons: analytical unbinned and learned unbinned on
-paired fresh simulator experiments, learned unbinned on learned-bank toys, and
-MC histograms on simulator and binned-model toys. The two-sided statistic is
-$q_{\mu_0}=-2\log[L(\mu_0)/L(\hat\mu)]$, with hypotheses 0 and 1.4, physical fit
-bounds $[0,3]$, and a 129-point $\sqrt\mu$ grid followed by local refinement.
-Freeze the learned coordinate at each tested point throughout both fits.
-Histogram simulator events once, without a second Poisson fluctuation.
+Run **1,000 toys per case and hypothesis**, at $\mu_0=0$ and $1.4$ (8,000 fits).
+The four own-model, stat-only cases are analytical unbinned, learned unbinned,
+36-bin moving learned observable, and nested $9\times9\times9$ learned ratios.
+Each model generates and fits its own independent null ensemble. No common-data
+closure, nuisance profiling, template fluctuations or coverage splitting is performed.
 
-The learned likelihood uses fields relative to $S$; that unknown common PDF
-cancels from the statistic. Its own toys Poisson-resample an importance-weighted
-S simulation bank, a finite-bank approximation rather than a continuous neural
-sampler. All normalizers remain frozen. Binned-model toys use Poisson counts
-from the direct MC bin means and require no notebook-09 interpolation products.
-The default is 5,000 toys per hypothesis and case (12 in smoke mode). Increasing
-`N_TOYS` resumes deterministic streams; changed templates, model identity,
-normalizers or other scientific settings reject old checkpoints.
+The statistic is $q_{\mu_0}=-2\log[L(\mu_0)/L(\widehat\mu)]$. Search all allowed
+intervals using a 129-point $\sqrt\mu$ grid and refine every resolved minimum,
+including boundaries within $[0,3]$. The moving partition remains frozen at
+$\eta=\mu_0$ throughout the free fit, with power 100 and no floor. The fixed
+3D grid merges adjacent groups of four cells from 10's original 36-bin axes.
+Both binned cases draw independent Poisson counts. The bounded-zeroing policy
+(0.01 events/bin, 0.05 total) applies identically to generation and likelihood,
+including the corrected rate term; unsupported positive observations are invalid.
 
-Even self-model toy IDs estimate critical values and odd IDs test acceptance.
-Failures remain in coverage denominators/bounds. Errors condition on estimated
-critical values. New products use `toy_learned_mc_36_no_floor`; notebook 12's old
-tags and inputs are preserved. Do not repoint it at these products without a
-separate diagnostic update.
+Learned toys Poisson-resample the existing selected S bank using nonnegative
+combined learned intensity weights. Ratio means are normalized **once on that
+bank**, preserving selected component rates and making the generator and fitted
+rate integral identical. These normalizers can differ from the smaller original
+integration sample used by 03/08, whose normalizers still define the histograms.
+Duplicates are integer multiplicities; the sampler is a finite-bank approximation,
+with effective size and largest sampling probability reported. No per-toy ratio
+NN evaluation, retraining or template-bank enlargement is needed.
+
+Analytical toys are fresh continuous physical Poisson experiments with the
+frozen preselection. The analytical likelihood retains the selected numerical
+quadrature rates and their finite integration error. Count-mean pulls provide
+a normalization diagnostic. Fresh toy events do not enlarge the 10M template banks.
+
+Checkpoints live under `results/11_own_model_statonly_10M_36_9_v1` in the shared
+08 evaluation directory. Independent case/hypothesis/toy-ID seeds allow exact
+resume and extension by increasing `N_TOYS`. Atomic checkpoints occur every five
+toys and on ordinary interruption. Input fingerprints reject stale results.
+Histograms, empirical CDFs, survival curves and quantile tables retain explicit
+failure counts, zero mass and upper-bound diagnostics. Notebook 12's historical
+inputs remain separate and require their own review before migration.
 
 Builders: `scripts/build_reference_notebooks.py` updates 08/09;
 `scripts/build_reference_spline_notebook.py` updates 09 only;
-`scripts/build_comparison_notebooks.py` updates 10/11. They clear stale notebook
+`scripts/build_colab_11.py` updates 11 only;
+`scripts/build_comparison_notebooks.py` routes 10/11 to their current builders. They clear stale notebook
 outputs and preserve user run/model controls while applying the new baseline.
 
 ## Learned compression with simulator-derived yields (13)

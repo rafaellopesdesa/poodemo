@@ -229,4 +229,6 @@ def test_builder_is_current_and_notebook_has_no_generation_entry_point(monkeypat
     for forbidden in ['prepare_colab_samples(', 'sample_component(', 'prepare_simulation_bank(', '250_000']:
         assert forbidden not in sources
     assert 'MAX_SELECTED_PER_SOURCE = 10_000_000' in sources
-    assert all(not c.outputs and c.execution_count is None for c in actual.cells if c.cell_type == 'code')
+    # Committed notebooks may contain the user's completed run; the builder
+    # must emit clean cells without requiring deletion of those results.
+    assert all(not c.outputs and c.execution_count is None for c in built if c.cell_type == 'code')

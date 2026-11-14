@@ -262,7 +262,7 @@ print("Toy records:", ROOT / "results" / f"{OUTPUT_TAG}_results.csv")
 '''
 
 
-def toy_cells():
+def legacy_toy_cells():
     cells = start("11. Test-statistic distributions and calibration with toys", r"""
     Measure the **stat-only** sampling distribution at the two requested
     hypotheses, $\mu=0$ and $\mu=1.4$. In each ensemble the tested value is
@@ -447,6 +447,11 @@ def build_comparison_notebooks():
 
 def discriminator_cells():
     from build_colab_10 import discriminator_cells as colab_cells
+    return colab_cells()
+
+
+def toy_cells():
+    from build_colab_11 import toy_cells as colab_cells
     return colab_cells()
 
 
