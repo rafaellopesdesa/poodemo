@@ -310,7 +310,7 @@ def fill_colab_histograms(run, samples, *, etas, bin_counts=(4,12,24,36,60),
             length=min(chunk['count'],max(prefixes)-start)
             if ci<completed[si]:
                 start+=chunk['count']; continue
-            ratio=np.vstack([np.ones(length)]+[_read_array(samples['directory'],chunk['ratios'][p])[:length]
+            ratio=np.vstack([np.ones(length)]+[_read_array(samples.get('ratio_directory', samples['directory']),chunk['ratios'][p])[:length]
                                               for p in PROCESSES[1:]])
             fields=samples['rates'][:4,None]*ratio/samples['normalizers'][:,None]
             for ei,eta in enumerate(etas):

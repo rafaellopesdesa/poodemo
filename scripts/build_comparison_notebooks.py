@@ -98,7 +98,7 @@ print("Tables:", ROOT / "results" / OUTPUT_TAG)
 '''
 
 
-def discriminator_cells():
+def legacy_discriminator_cells():
     cells = start("10. How much information do individual process discriminators retain?", r"""
     Compare the **36-bin moving likelihood-ratio observable with a numerator floor** from notebook 08
     with fixed one-, two-, and three-dimensional process-ratio histograms.
@@ -443,6 +443,11 @@ def toy_cells():
 def build_comparison_notebooks():
     write("10_discriminator_histograms.ipynb", discriminator_cells())
     write("11_test_statistic_toys.ipynb", toy_cells())
+
+
+def discriminator_cells():
+    from build_colab_10 import discriminator_cells as colab_cells
+    return colab_cells()
 
 
 if __name__ == "__main__":

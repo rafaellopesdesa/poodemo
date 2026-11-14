@@ -305,6 +305,10 @@ def plot_discriminator_study(study, output=None):
               REFERENCE_LABEL: f"Moving reference ratio ({settings['n_bins']} bins)",
               **{name: f"{name} ({settings['n_bins']}" + (f"$^{i}$" if i > 1 else "") + " cells)"
                  for i, name in enumerate(FIXED_LABELS, 1)}}
+    from .discriminator_unbinned import LEARNED_LABEL
+    if LEARNED_LABEL in set(study['scans'].model):
+        colors[LEARNED_LABEL] = 'C4'
+        labels[LEARNED_LABEL] = 'Learned unbinned (03 physical Asimov)'
     with plt.style.context(hep.style.ATLAS):
         fig, axes = plt.subplots(1, 3, figsize=(17, 5), layout="constrained")
         for axis, name in zip(axes, AXES):
@@ -333,7 +337,11 @@ def plot_discriminator_study(study, output=None):
                                            (study["scans"].model == label)].sort_values("mu")
                 valid = rows.valid.to_numpy(dtype=bool)
                 axis.plot(rows.mu, np.where(valid, rows.q, np.nan), color=color,
-                          ls="--" if label == "analytic unbinned" else "-", label=labels[label], linewidth=1.8)
+                          ls="--" if label == "analytic unbinned" else (':' if label == LEARNED_LABEL else '-'), label=labels[label], linewidth=1.8)
+                if (~valid).any():
+                    marker, = axis.plot(rows.mu[~valid], np.zeros((~valid).sum()), 'x', color=color,
+                                        transform=axis.get_xaxis_transform(), clip_on=False)
+                    marker.set_in_layout(False)
             axis.set(xlabel=r"Tested $\mu$", ylabel=r"$-2\log\lambda(\mu)$",
                      title="Profiled NI nuisance" if syst else "Stat only", ylim=(0, None))
             axis.legend(fontsize=11)
@@ -348,8 +356,8 @@ def plot_discriminator_study(study, output=None):
                     axis.plot(rows.eta, rows.information_fraction, color=color, label=labels[label])
                 else:
                     axis.axhline(rows.information_fraction.iloc[0], color=color,
-                                 ls="--" if label == "analytic unbinned" else "-", label=labels[label])
-            axis.set(xlabel=r"Moving-observable anchor $\eta$", ylabel="Retained local information",
+                                 ls="--" if label == "analytic unbinned" else (':' if label == LEARNED_LABEL else '-'), label=labels[label])
+            axis.set(xlabel=r"Moving-observable anchor $\eta$", ylabel="Local information / curvature fraction",
                      title=("Profiled" if syst else "Stat only") + rf", truth $\mu={settings['asimov_mu']:g}$",
                      xlim=(min(settings["scan_grid"]), max(settings["scan_grid"])), ylim=(0, None))
             axis.legend(fontsize=11)

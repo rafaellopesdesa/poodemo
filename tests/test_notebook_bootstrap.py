@@ -89,4 +89,12 @@ def test_notebooks_use_shared_bootstrap_or_explicit_09_refresh(monkeypatch):
             from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
             from build_colab_08 import SOURCE_COMMIT as colab_commit
             expected = expected.replace(old_commit, colab_commit)
+        if number == 10:
+            from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
+            from build_colab_10 import SOURCE_COMMIT as colab_commit
+            expected = expected.replace(old_commit, colab_commit)
+        if number == 11:
+            # 11 remains on its independently published backend until reviewed.
+            from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
+            expected = expected.replace(old_commit, '18e7fae7714387da787af1cf06695f97fc7d529b')
         assert "".join(first_code["source"]).strip() == expected, path.name

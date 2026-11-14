@@ -34,7 +34,7 @@ def publish_08_baseline(base_run, study_run, samples, templates, n_bins):
     return root/'colab_08_baseline.json'
 
 
-def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print):
+def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print, max_selected=None):
     """Read the matching completed 08 campaign, with no generation or NN calls."""
     if isinstance(base_run, ColabStudyRun):
         base_run = base_run.base_run
@@ -43,6 +43,8 @@ def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print):
     if not marker.exists():
         raise FileNotFoundError('Rerun the updated notebook 08 through its final cell first')
     saved = json.loads(marker.read_text())
+    if max_selected is not None and saved['selected_per_source'] > max_selected:
+        raise ValueError('Completed 08 bank exceeds the selected-event limit for this notebook')
     expected = dict(n_bins=int(n_bins), power=float(base_run.config['reference_ratio_power']),
                     eta_floor=float(base_run.config['reference_ratio_eta_floor']),
                     yield_policy=yield_policy(base_run.config).metadata())
@@ -72,7 +74,8 @@ def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print):
     samples = dict(directory=directory, fingerprint=saved['sample_fingerprint'], target=target,
         rates=np.array([r['rate'] for r in configuration['original_samples']]),
         normalizers=np.array(json.loads((directory/'normalizers.json').read_text())), manifests=manifests)
-    histogram_config = json.loads((contained('histogram_directory')/'configuration.json').read_text())
+    samples['histogram_directory'] = contained('histogram_directory')
+    histogram_config = json.loads((samples['histogram_directory']/'configuration.json').read_text())
     if (histogram_config['sample_fingerprint'] != samples['fingerprint']
             or not np.array_equal(histogram_config['rates'], samples['rates'])
             or not np.array_equal(histogram_config['normalizers'], samples['normalizers'])

@@ -566,13 +566,14 @@ The full 165-million-event generation and production ratio training are separate
 
 Run **08** from the top with the completed
 `RUN_NAME="paper-distinct-s-v4"`, the original `MODE`/`CONFIG_OVERRIDES`, and
-notebook 03's Unity directory and filtering policy. Notebooks 10 and 11 can run
-independently after 01–03. Each downloads its pinned backend into a fresh
-Colab checkouts and clear cached package imports. No new training, event
+notebook 03's Unity directory and filtering policy. Notebook 10 also requires
+the completed 08 baseline; notebook 11 can run independently after 01–03.
+Each downloads its pinned backend into a fresh
+Colab checkout and clears cached package imports. No new training, event
 transfer, or physics run name is required. The default bundle directory is
 `My Drive/poodemo/unity_models/paper-distinct-s-v4-unity100/`.
 Notebook 08 generates/reuses a 10M-selected-event campaign in Colab. Its final
-cell exports a baseline manifest; notebook 09 requires that manifest and reuses
+cell exports a baseline manifest; notebooks 09 and 10 require that manifest and reuse
 the exact same bank, rates, learned-map normalizers and yield-zeroing policy.
 
 The notebooks verify and reuse **all five frozen member selections from 03**,
@@ -594,7 +595,7 @@ larger campaign has its own sample and histogram fingerprints beneath this tree.
 | Selected rates and histogram component templates | Labelled held-out simulator events and generated yields |
 | NI nuisance anchors | Separate selected NI-down and NI-up simulation samples |
 | Binned Asimov observations | The same nominal MC templates at the generating truth |
-| External inference benchmark | Analytical unbinned likelihood only |
+| External inference benchmarks | Analytical unbinned; 10 also overlays the saved filtered learned-unbinned physical-Asimov result from 03 |
 | Toy physics | The original simulator, with frozen preselection |
 
 No analytical PDF supplies a coordinate or a binned template. In particular,
@@ -740,11 +741,37 @@ evaluation; two full-event CDFs are cached to bound memory.
 
 Compare fixed NI, NI × SBI, and NI × SBI × B coordinates against the moving
 learned reference ratio. Each fixed axis has 36 bins (36, 1,296, 46,656 cells),
-with powers $a_{NI}=1$, $a_{SBI}=a_B=2$. `AXIS_SOURCE="learned"` is separate from
-the Unity/Drive model-source choice. The comparison retains fixed/profiled NI,
-occupancy/effective-statistics tables, invalid-fit reports and local information.
-Sparse Cartesian cells are not filled with artificial events. Default products
-are in `results/10_learned_mc_36_no_floor/` under the practical evaluation.
+with powers $a_{NI}=1$, $a_{SBI}=a_B=2$. Run the updated **08 through its final
+cell first**. Notebook 10 reuses that completed 10M-selected-event-per-source
+bank, frozen rates/normalizers and filtered learned ratios. It stages cached
+ratios and fills fixed histograms in chunks with resumable count checkpoints.
+It never generates events, evaluates networks or increases the sample size;
+10M selected events per source is a hard ceiling. The moving 36-bin, $a=100$,
+no-floor histograms are loaded directly from 08 and checked against its scans.
+A recap fills **36, 72, 108 and 144 moving bins** from the same cached ratios,
+keeping 36 bins as the primary baseline. Every likelihood/information panel
+includes analytical unbinned and the filtered notebook-03 learned-unbinned
+physical-Asimov comparison (not its learned-model self-Asimov curve). The
+learned reference retains 03's original quadrature normalization and rates;
+its information line is local objective curvature at the common generating
+truth, with a finite-difference step check, not a coverage guarantee.
+NI morphing and bounded total-yield zeroing are identical to 08/09. The
+comparison retains fixed/profiled NI, invalid-fit reports and local information.
+
+Per-bin MC precision plots show raw total-yield relative uncertainties at
+$\mu=0.02,0.054,0.122,1$ and every moving scan point at all four recap resolutions. Every fixed 3D cell appears
+in labelled B-coordinate slices. Six-source tables include nominal/up/down NI;
+`SOURCE_3D_PLOTS` optionally adds source-specific 3D atlases. Errors use
+fixed-sample multinomial marginal variances, conditional on frozen rates and
+the learned map, with squared physical coefficients for independent sources.
+They exclude rate and neural-model uncertainty. Empty sampled cells and
+nonpositive raw totals are explicitly marked; zeroing never enters the
+uncertainty denominator. These diagnostics do not add MC nuisance parameters,
+merge cells, change powers or trigger additional events. Full per-cell tables
+are compressed CSVs and raw six-source counts are saved in `source_counts.npz`.
+Products are in `results/10_colab_10M_precision_v1/` beneath the completed 08
+study directory, with PNG/PDF plots under the corresponding `plots/` directory.
+Regenerate only this notebook with `python scripts/build_colab_10.py`.
 
 ### Notebook 11
 
