@@ -71,7 +71,8 @@ def test_stream_matches_independent_numpy_histogram_and_resumes(setup, monkeypat
         module.fixed_counts({**samples, 'target':10_000_001}, 4)
 
 
-def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_path, monkeypatch):
+@pytest.mark.parametrize("signal_reference", [False, True])
+def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_path, monkeypatch, signal_reference):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -80,6 +81,8 @@ def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_
     from poodemo.discriminator_study import plot_discriminator_study
     base, calls = setup
     base = base.with_config(mc_zero_max_bin=.01, mc_zero_max_total=.05)
+    if signal_reference:
+        base = base.with_config(reference_ratio_denominator='S', reference_ratio_power=1.)
     samples = prepare(base)
     grid = pipeline._positive_study_grid(base)
     bank = fill_colab_histograms(base, samples, etas=grid, bin_counts=[4], prefixes=[13], progress=lambda _:None)
@@ -100,15 +103,20 @@ def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_
                   for s in (False, True)]).to_csv(owner.path('results', 'unbinned_fits.csv'), index=False)
     monkeypatch.setattr(unbinned, '_load_objective', lambda _:(lambda p:50*(p[0]-1)**2+10*p[1]**2, []))
     convergence_scans(run, bank, etas=grid, n_bins=4)
-    marker = publish_08_baseline(base, run, samples, bank, 4)
+    publish, load = publish_08_baseline, load_08_baseline
+    if signal_reference:
+        from poodemo.signal_reference import publish_signal_baseline, load_signal_baseline
+        publish, load = publish_signal_baseline, load_signal_baseline
+    marker = publish(base, run, samples, bank, 4)
     with pytest.raises(ValueError, match='selected-event limit'):
-        load_08_baseline(base, 4, max_selected=12)
-    run, cached = load_08_baseline(base, 4, max_selected=10_000_000, local_cache=tmp_path/'stage', progress=lambda _:None)
+        load(base, 4, max_selected=12)
+    run, cached = load(base, 4, max_selected=10_000_000, local_cache=tmp_path/'stage', progress=lambda _:None)
     before = calls.copy()
     monkeypatch.setattr(practical, 'prepare_binning_bank', lambda *a:pytest.fail('Old dense bank requested'))
     sentinel = run.path('results', 'reference_ratio_mc_convergence.csv').read_bytes()
     # Execute the notebook's actual study/plot cells on the completed fixture.
-    notebook = json.loads((Path(__file__).resolve().parents[1]/'notebooks/10_discriminator_histograms.ipynb').read_text())
+    notebook_name = '06_signal_discriminator_histograms.ipynb' if signal_reference else '10_discriminator_histograms.ipynb'
+    notebook = json.loads((Path(__file__).resolve().parents[1]/'notebooks'/notebook_name).read_text())
     cells = {c['id']:''.join(c['source']) for c in notebook['cells']}
     ns = dict(run=run, samples_08=cached, N_BINS=4, POWERS=module.DEFAULT_POWERS,
               RECAP_BIN_COUNTS=[4, 8, 12, 16],
@@ -116,6 +124,7 @@ def test_08_to_10_direct_closure_precision_and_actual_notebook_cells(setup, tmp_
               CONVERGENCE_PROBES=[.2, .8, 1.4],
               OUTPUT_TAG='test10', PRECISION_MUS=[.02, .122, 1.], SOURCE_3D_PLOTS=['NI_down'],
               display=lambda *a:None, plt=plt, pd=pd, np=np)
+    if signal_reference: ns['samples_04'] = cached
     for name in ['study', 'comparison-plots', 'recap-plots', 'convergence-study',
                  'convergence-plots', 'precision-plots']:
         exec(cells[name], ns)

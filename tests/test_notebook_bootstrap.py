@@ -84,7 +84,11 @@ def test_notebooks_use_shared_bootstrap_or_explicit_09_refresh(monkeypatch):
         first_code = next(cell for cell in notebook["cells"] if cell["cell_type"] == "code")
         number = int(path.name.split('_')[0])
         expected = (fresh_bootstrap(bootstrap).replace('poodemo-09-', f'poodemo-{number:02}-').replace('Notebook 09', f'Notebook {number:02}').replace('notebook 09 source', f'notebook {number:02} source')
-                    if number in (8, 9, 10, 11) else bootstrap)
+                    if number in (4, 5, 6, 7, 8, 9, 10, 11) else bootstrap)
+        if number in (4, 5, 6, 7):
+            from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
+            from build_signal_reference_notebooks import SOURCE_COMMIT as signal_commit
+            expected = expected.replace(old_commit, signal_commit)
         if number == 8:
             from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
             from build_colab_08 import SOURCE_COMMIT as colab_commit

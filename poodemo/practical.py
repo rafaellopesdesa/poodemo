@@ -68,9 +68,9 @@ class LearnedMap:
     def evaluate(self, x):
         return self.rates[:, None] * self.raw_ratios(x) / self.normalizers[:, None]
 
-    def coordinate(self, fields, eta, power=100., floor=0.):
-        from .toy_study import reference_observable
-        return reference_observable(fields, self.rates, eta, power, floor)
+    def coordinate(self, fields, eta, power=100., floor=0., *, denominator="physical_1"):
+        from .signal_reference import learned_observable
+        return learned_observable(fields, self.rates, eta, power, floor, denominator=denominator)
 
     def u(self, fields, eta):
         """Stable learned log-ratio/(eta-1), including its exact score limit."""

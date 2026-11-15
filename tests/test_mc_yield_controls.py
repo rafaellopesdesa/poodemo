@@ -61,13 +61,18 @@ def test_raw_interpolation_errors_remain_visible_after_zeroing():
     assert report['max_bin_pull']>0
 
 
-def test_completed_08_reuse_streamed_cdf_and_policy_match(setup,tmp_path,monkeypatch):
+@pytest.mark.parametrize("signal_reference", [False, True])
+def test_completed_08_reuse_streamed_cdf_and_policy_match(setup,tmp_path,monkeypatch,signal_reference):
     from poodemo.colab_mc import fill_colab_histograms
     from poodemo.colab_reference import publish_08_baseline,load_08_baseline,ColabTemplateBank
     from poodemo.reference_splines import CumulativeTemplates,run_reference_spline_comparison,SplineStudySettings
     from poodemo import pipeline
     base,calls=setup
     base=base.with_config(mc_zero_max_bin=.01,mc_zero_max_total=.05)
+    if signal_reference:
+        from poodemo.signal_reference import (signal_log_ratio,
+            publish_signal_baseline as publish_08_baseline, load_signal_baseline as load_08_baseline)
+        base=base.with_config(reference_ratio_denominator='S',reference_ratio_power=1.)
     samples=prepare(base)
     etas=[0.,.2,.99,1.,1.01,1.4]
     bank=fill_colab_histograms(base,samples,etas=etas,bin_counts=[8],prefixes=[13],progress=lambda _:None)
@@ -88,7 +93,9 @@ def test_completed_08_reuse_streamed_cdf_and_policy_match(setup,tmp_path,monkeyp
     for anchor,eta in [(.2,.3),(1.,.98),(1.,1.02),(1.4,1.3)]:
         raw=[]
         for state in cached['manifests'].values():
-            zs=[expit(cdf.power*(eta-1)*cdf.map.u(fields,anchor)) for _,fields in cdf._fields(state)]
+            zs=[expit(cdf.power*signal_log_ratio(fields,cdf.map.rates,anchor)
+                      if signal_reference else cdf.power*(eta-1)*cdf.map.u(fields,anchor))
+                for _,fields in cdf._fields(state)]
             raw.append(np.histogram(np.concatenate(zs),cdf.edges)[0])
         np.testing.assert_allclose(cdf.cdf_u_bins(anchor,eta),cdf._anchors(raw),atol=1e-14)
     assert len(cdf.cdf_cache)<=2

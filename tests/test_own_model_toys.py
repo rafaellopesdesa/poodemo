@@ -180,11 +180,16 @@ def test_plot_preserves_all_four_models_and_zero_mass(prepared, tmp_path):
         plt.close(fig)
 
 
-def test_notebook_has_explicit_production_budget_and_compiles():
+def test_notebook_has_explicit_production_budget_and_compiles(monkeypatch):
     import ast
     from pathlib import Path
     import nbformat
     nb = nbformat.read(Path(__file__).resolve().parents[1]/'notebooks/11_test_statistic_toys.ipynb', as_version=4)
+    # Colab may attach nonstandard metadata to stream outputs. Validate the
+    # runnable source without rewriting the user's committed results.
+    for cell in nb.cells:
+        if cell.cell_type == "code":
+            cell.outputs = []; cell.execution_count = None
     nbformat.validate(nb)
     code = {cell.id: cell.source for cell in nb.cells if cell.cell_type == 'code'}
     assert 'N_TOYS = 10_000' in code['settings']
@@ -195,10 +200,16 @@ def test_notebook_has_explicit_production_budget_and_compiles():
     for cell in nb.cells:
         if cell.cell_type == 'code':
             ast.parse(cell.source)
+    # Committed Colab results are valid; only newly generated cells must be clean.
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]/'scripts'))
+    from build_colab_11 import toy_cells
+    for cell in toy_cells():
+        if cell.cell_type == 'code':
             assert cell.outputs == [] and cell.execution_count is None
 
 
-def test_preparation_reuses_cached_ratios_and_merges_the_original_grid(tmp_path, monkeypatch):
+@pytest.mark.parametrize("signal_reference", [False, True])
+def test_preparation_reuses_cached_ratios_and_merges_the_original_grid(tmp_path, monkeypatch, signal_reference):
     from poodemo import colab_discriminators as cd, colab_mc as cm, toy_sources
     target = 20
     rng = np.random.default_rng(9)
@@ -217,7 +228,13 @@ def test_preparation_reuses_cached_ratios_and_merges_the_original_grid(tmp_path,
     quad = dict(nominal=np.ones((4, 3)), weights=np.ones(3))
     monkeypatch.setattr(cd, 'cached_analytic_quadrature', lambda run: quad)
     monkeypatch.setattr(toy_sources, 'load_frozen_selector', lambda run: (object(), .5, {'frozen': True}))
-    result = prepare_own_model_toys(run, samples, progress=lambda _: None)
+    prepare_models = prepare_own_model_toys
+    if signal_reference:
+        from poodemo.signal_reference_toys import prepare_signal_model_toys
+        prepare_models = prepare_signal_model_toys
+        run.config.update(reference_ratio_denominator='S', reference_ratio_power=1.)
+    result = prepare_models(run, samples, progress=lambda _: None)
+    assert result['configuration'].get('reference_ratio_denominator', 'physical_1') == ('S' if signal_reference else 'physical_1')
     assert result['templates']['fixed9'].fields.shape == (4, 729)
     np.testing.assert_allclose(result['templates']['fixed9'].fields.sum(axis=1), rates[:4])
     np.testing.assert_allclose(result['learned_fields'].mean(axis=1), rates[:4])
@@ -226,7 +243,7 @@ def test_preparation_reuses_cached_ratios_and_merges_the_original_grid(tmp_path,
     for mu in (0., 1.4):
         assert result['templates']['moving36'][mu].fields.shape == (4, 36)
     # All source data and NN modules are unavailable; cached ratios suffice.
-    again = prepare_own_model_toys(run, samples, progress=lambda _: None)
+    again = prepare_models(run, samples, progress=lambda _: None)
     assert again['configuration'] == result['configuration']
     assert len(list(tmp_path.glob('*.npy'))) == 18
     from poodemo.own_model_resolution import prepare_moving_resolution

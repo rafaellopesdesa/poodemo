@@ -11,14 +11,15 @@ COLORS = dict(direct="black", ecdf_u="#1f77b4")
 def plot_reference_spline_comparison(run, study, *, scan_xlim=(.02, 1.15),
                                      scan_ylim=(0., 8.), focus_xlim=(.94, 1.06)):
     import mplhep as hep
-    destination = run.path("plots", "09_interpolation")
+    number = "05" if run.config.get("reference_ratio_denominator") == "S" else "09"
+    destination = run.path("plots", number+"_interpolation")
     destination.mkdir(parents=True, exist_ok=True)
     figures = []
 
     def save(fig, name):
         fig.tight_layout()
         for extension in ("pdf", "png"):
-            fig.savefig(destination / f"09_{name}.{extension}", bbox_inches="tight", dpi=150)
+            fig.savefig(destination / f"{number}_{name}.{extension}", bbox_inches="tight", dpi=150)
         figures.append(fig)
 
     with plt.style.context(hep.style.ATLAS):

@@ -271,7 +271,7 @@ def fill_colab_histograms(run, samples, *, etas, bin_counts=(4,12,24,36,60),
                           prefixes=(250_000,1_000_000,10_000_000), progress=print):
     """Stream cached predictions once; checkpoint integer counts after each chunk."""
     from .pipeline import observable_bin_edges
-    from .toy_study import reference_observable
+    from .signal_reference import learned_observable, reference_denominator, reference_metadata
     prefixes=sorted(set(_integer(n,'prefix',2) for n in prefixes))
     if not prefixes or max(prefixes)>samples['target']:
         raise ValueError('Prefixes must not exceed the prepared selected-event target')
@@ -285,6 +285,7 @@ def fill_colab_histograms(run, samples, *, etas, bin_counts=(4,12,24,36,60),
     metadata=dict(version=VERSION,sample_fingerprint=samples['fingerprint'],prefixes=prefixes,
                   specifications=specs,power=power,rates=samples['rates'].tolist(),
                   normalizers=samples['normalizers'].tolist())
+    metadata.update(reference_metadata(run.config))
     fingerprint=_digest(metadata)
     directory=samples['directory']/'histograms'/fingerprint[:20]
     directory.mkdir(parents=True,exist_ok=True)
@@ -314,7 +315,8 @@ def fill_colab_histograms(run, samples, *, etas, bin_counts=(4,12,24,36,60),
                                               for p in PROCESSES[1:]])
             fields=samples['rates'][:4,None]*ratio/samples['normalizers'][:,None]
             for ei,eta in enumerate(etas):
-                z=reference_observable(fields,samples['rates'][:4],eta,power,0.)
+                z=learned_observable(fields,samples['rates'][:4],eta,power,0.,
+                    denominator=reference_denominator(run.config))
                 for bi,n in enumerate(bin_counts):
                     i=ei*len(bin_counts)+bi
                     indices=_bin_indices(z,np.asarray(specs[i]['edges']))

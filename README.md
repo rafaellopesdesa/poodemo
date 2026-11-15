@@ -14,6 +14,10 @@ to lie between zero and one while S has a visibly distinct shape.
 | [01_generate_amplitudes.ipynb](notebooks/01_generate_amplitudes.ipynb) | Generate coherent S/B amplitudes, SBI and NI samples, and nuisance variations | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/01_generate_amplitudes.ipynb) |
 | [02_preselection.ipynb](notebooks/02_preselection.ipynb) | Train S/B/NI multiclass preselection and select approximately S/NI = 0.1 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/02_preselection.ipynb) |
 | [03_unbinned_nsbi.ipynb](notebooks/03_unbinned_nsbi.ipynb) | Train density ratios, build workspaces, and compare analytical and learned Asimov fits | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/03_unbinned_nsbi.ipynb) |
+| [04_signal_ratio_histograms.ipynb](notebooks/04_signal_ratio_histograms.ipynb) | Parallel to 08: learned selected-signal denominator, 36 bins, no floor, shared 10M banks | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/04_signal_ratio_histograms.ipynb) |
+| [05_signal_ratio_spline_templates.ipynb](notebooks/05_signal_ratio_spline_templates.ipynb) | Parallel to 09: exact empirical CDFs in the signal log ratio and interpolation validation | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/05_signal_ratio_spline_templates.ipynb) |
+| [06_signal_discriminator_histograms.ipynb](notebooks/06_signal_discriminator_histograms.ipynb) | Parallel to 10: fixed discriminator studies and 36/72/108/144-bin signal-reference recap | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/06_signal_discriminator_histograms.ipynb) |
+| [07_signal_test_statistic_toys.ipynb](notebooks/07_signal_test_statistic_toys.ipynb) | Parallel to 11: own-model stat-only distributions, 10,000 toys per case and hypothesis | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/07_signal_test_statistic_toys.ipynb) |
 | [08_reference_ratio_histograms.ipynb](notebooks/08_reference_ratio_histograms.ipynb) | Generate 10M selected events per source in Colab; validate no-floor learned histograms and MC convergence | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/08_reference_ratio_histograms.ipynb) |
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Validate empirical CDFs in $u$; study the floor, binning and nuisance morph order | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
@@ -27,7 +31,8 @@ to lie between zero and one while S has a visibly distinct shape.
    in 09, 10 and 11. Notebook 12 retains its historical diagnostic inputs;
    its source is not automatically switched to the new own-model ensemble. Notebook 11
    reuses the 08/10 bank and direct bin yields; it does not require 09's interpolation.
-   Notebooks 04–07 are retired; their earlier studies remain in the history.
+   The parallel signal-reference workflow is **01–03 → 04 → 05/06/07**.
+   These new 04–07 notebooks replace the retired filenames; older studies remain in history.
    For a private repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
 2. Choose a GPU runtime for notebooks 2–3. Both PyTorch training and JAX
@@ -1127,3 +1132,49 @@ sample generation, 100-member GPU Slurm arrays for all five ratio tasks,
 resumable training, model collection for SCP transfer to Google Drive, and
 notebook 03 evaluation on the existing Drive samples. Only inference models and metadata return from Unity;
 Colab computes the event weights again.
+
+
+## Parallel signal-reference notebooks 04–07
+
+The pairs **04/08, 05/09, 06/10 and 07/11** share the same studies and physical
+model. The new family uses the normalized selected ratio
+$R^S_\eta=p(x;\eta)/p_S(x)$ and $z^S_\eta=R^S_\eta/(1+R^S_\eta)$ (**$a=1$**).
+The reference density cancels through the learned component ratios: no analytical
+PDF defines an observable or a histogram yield. The fixed process-ratio axes in
+06/07 already used $p_S$ and remain unchanged. A single scalar ratio still need
+not preserve the information required by every alternative in the global fit.
+
+Run **04 first**, through the final baseline-export cell, with the same run name,
+filtered Unity ensemble, generation seed and chunk settings as 08. Matching
+selected events and predictions are reused; only histograms are refilled. The
+primary budget stays at **10M selected events per source**, with **36 moving
+bins**, **no floor**, and the same half-step bin edges and bounded-yield policy.
+Power controls are $0.5,1,1.5$, around the new baseline of 1. The parallel changes
+both denominator and power; it is not a denominator-only comparison at fixed power.
+
+04 publishes `practical_v1/results/colab_04_baseline.json`. The reference identity
+is part of histogram, interpolation and toy configurations; 05–07 reject a
+mismatched baseline. Sample caches and fixed-grid count caches are shared, while
+inference outputs are under the new signal-reference histogram directory.
+The original 08–11 notebooks and completed results are preserved.
+
+05 uses the exact empirical CDF of $u^S_\eta=\log R^S_\eta$ and the same
+refinement/validation controls as 09. There is no division by $\eta-1$ or forced
+collapse at 1. The sigmoid bin boundaries are fixed in this coordinate, so convex
+CDF interpolation is equivalent to linear interpolation of anchor bin yields;
+off-anchor closure must still be checked. 06 retains the 3D resolution/MC precision
+studies and the 36/72/108/144-bin recap. 07 retains the **9×9×9** baseline,
+**10,000 toys per case at $\mu_0=0,1.4$**, the four moving resolutions, and log-scale
+test-statistic histograms/survival plots. It uses direct templates, not 05's
+interpolator. Analytical toy events are separate from the fixed reference banks.
+
+06 uses `06_signal_colab_10M_precision_v1`; 07 uses
+`07_signal_own_model_statonly_10M_36_9_v1` beneath the completed 04 study root.
+07 starts separate checkpoints and resumes its own matching results; it does
+not reinterpret 11's moving-observable toys. The analytical, learned-unbinned
+and fixed-grid models and their random streams remain the same.
+
+Regenerate these four notebooks with
+`python scripts/build_signal_reference_notebooks.py`. This copies the current
+08–11 cell sources, adapts reference-specific definitions and checks, clears
+execution outputs in the new files, and leaves 08–11 untouched.

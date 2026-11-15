@@ -13,10 +13,11 @@ from .inference import component_coefficients
 from .mc_yields import yield_policy
 from .pipeline import observable_bin_edges, _histogram_model
 from .practical import LearnedMap
-from .toy_study import reference_observable
+from .signal_reference import (learned_observable, signal_log_ratio, reference_denominator,
+                               reference_metadata)
 
 
-def publish_08_baseline(base_run, study_run, samples, templates, n_bins):
+def publish_08_baseline(base_run, study_run, samples, templates, n_bins, *, baseline="08"):
     """Publish only after 08's analysis cells finish; raw samples stay reusable."""
     root = base_run.path('results')
     metadata = dict(version=1, sample_fingerprint=samples['fingerprint'],
@@ -27,29 +28,32 @@ def publish_08_baseline(base_run, study_run, samples, templates, n_bins):
         power=float(study_run.config['reference_ratio_power']),
         eta_floor=float(study_run.config['reference_ratio_eta_floor']),
         yield_policy=yield_policy(study_run.config).metadata())
-    save_json(root/'colab_08_baseline.json', metadata)
+    metadata.update(reference_metadata(study_run.config))
+    save_json(root/f'colab_{baseline}_baseline.json', metadata)
     provenance = root/'reference_ratio_model_source.json'
     if provenance.exists():
         save_json(study_run.path('results','reference_ratio_model_source.json'), json.loads(provenance.read_text()))
-    return root/'colab_08_baseline.json'
+    return root/f'colab_{baseline}_baseline.json'
 
 
-def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print, max_selected=None):
+def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print, max_selected=None, baseline="08"):
     """Read the matching completed 08 campaign, with no generation or NN calls."""
     if isinstance(base_run, ColabStudyRun):
         base_run = base_run.base_run
     root = base_run.path('results')
-    marker = root/'colab_08_baseline.json'
+    marker = root/f'colab_{baseline}_baseline.json'
     if not marker.exists():
-        raise FileNotFoundError('Rerun the updated notebook 08 through its final cell first')
+        raise FileNotFoundError(f'Run notebook {baseline} through its final baseline-export cell first')
     saved = json.loads(marker.read_text())
     if max_selected is not None and saved['selected_per_source'] > max_selected:
         raise ValueError('Completed 08 bank exceeds the selected-event limit for this notebook')
     expected = dict(n_bins=int(n_bins), power=float(base_run.config['reference_ratio_power']),
                     eta_floor=float(base_run.config['reference_ratio_eta_floor']),
                     yield_policy=yield_policy(base_run.config).metadata())
-    if any(saved.get(k) != v for k,v in expected.items()):
-        raise ValueError('08/09 bin count, power, eta floor or yield-zeroing policy differ; rerun matching 08')
+    expected.update(reference_metadata(base_run.config))
+    if (reference_denominator(saved) != reference_denominator(base_run.config)
+            or any(saved.get(k) != v for k,v in expected.items())):
+        raise ValueError(f'Completed {baseline} reference, bin count, power, floor or yield-zeroing policy differs')
     def contained(name):
         path = (root/saved[name]).resolve()
         if not path.is_relative_to(root.resolve()):
@@ -76,7 +80,9 @@ def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print, max_
         normalizers=np.array(json.loads((directory/'normalizers.json').read_text())), manifests=manifests)
     samples['histogram_directory'] = contained('histogram_directory')
     histogram_config = json.loads((samples['histogram_directory']/'configuration.json').read_text())
-    if (histogram_config['sample_fingerprint'] != samples['fingerprint']
+    if (reference_denominator(histogram_config) != reference_denominator(base_run.config)
+            or histogram_config['power'] != expected['power']
+            or histogram_config['sample_fingerprint'] != samples['fingerprint']
             or not np.array_equal(histogram_config['rates'], samples['rates'])
             or not np.array_equal(histogram_config['normalizers'], samples['normalizers'])
             or max(histogram_config['prefixes']) != target):
@@ -103,7 +109,7 @@ def load_08_baseline(base_run, n_bins, *, local_cache=None, progress=print, max_
                     if file_digest(dest) != item['sha256']:
                         raise ValueError('Staged ratio cache hash mismatch')
             count += chunk['count']
-        progress(f'08 ratios verified/staged: {sample}, {target:,} events')
+        progress(f'{baseline} ratios verified/staged: {sample}, {target:,} events')
     samples['ratio_directory'] = target_dir
     return ColabStudyRun(base_run, contained('study_directory'), target), samples
 
@@ -115,6 +121,7 @@ class ColabTemplateBank:
         self.edges = observable_bin_edges(n_bins, 'reference_ratio')
         self.floor = float(run.config['reference_ratio_eta_floor'])
         self.power = float(run.config['reference_ratio_power'])
+        self.denominator = reference_denominator(run.config)
         self.yield_policy = yield_policy(run.config)
         self.cache_size = cdf_cache_size
         self.histograms, self.cdf_cache = {}, OrderedDict()
@@ -147,12 +154,13 @@ class ColabTemplateBank:
         eta = max(float(eta), self.floor)
         if eta not in self.histograms:
             raw = np.zeros((6, len(self.edges)-1), dtype=np.int64)
-            if eta == 1.:
+            if eta == 1. and self.denominator == "physical_1":
                 raw[:,self.central] = self.samples['target']
             else:
                 for si,state in enumerate(self.samples['manifests'].values()):
                     for _,fields in self._fields(state):
-                        z = reference_observable(fields,self.samples['rates'][:4],eta,self.power,0.)
+                        z = learned_observable(fields,self.samples['rates'][:4],eta,self.power,0.,
+                                               denominator=self.denominator)
                         raw[si] += np.histogram(z,self.edges)[0]
             self.histograms[eta] = self._anchors(raw)
         return self.histograms[eta]
@@ -171,13 +179,21 @@ class ColabTemplateBank:
         for state in self.samples['manifests'].values():
             u = np.empty(self.samples['target'])
             for start,fields in self._fields(state):
-                u[start:start+fields.shape[1]] = self.map.u(fields, anchor)
+                u[start:start+fields.shape[1]] = (signal_log_ratio(fields, self.map.rates, anchor)
+                    if self.denominator == "S" else self.map.u(fields, anchor))
             u.sort()
             coordinates.append(u)
         self.cdf_cache[anchor] = coordinates
         return coordinates
 
     def cdf_u_bins(self, anchor, eta):
+        if self.denominator == 'S':
+            if not np.isfinite(eta) or eta < 0:
+                raise ValueError('eta must be finite and nonnegative')
+            boundaries = logit(self.edges)/self.power
+            raw = np.array([np.diff(np.searchsorted(u, boundaries, side='left'))
+                            for u in self._cdf(anchor)])
+            return self._anchors(raw)
         if not np.isfinite(eta) or eta == 1.:
             raise ValueError('Use exact collapse for eta=1')
         boundaries = logit(self.edges)/(self.power*(eta-1.))

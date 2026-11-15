@@ -39,7 +39,9 @@ def completed_histograms(run, samples):
     meta = json.loads((root/'configuration.json').read_text())
     if _digest({k: v for k, v in meta.items() if k != 'fingerprint'}) != meta['fingerprint']:
         raise ValueError('Completed 08 histogram metadata changed')
-    if (meta['sample_fingerprint'] != samples['fingerprint']
+    from .signal_reference import reference_denominator
+    if (reference_denominator(meta) != reference_denominator(run.config)
+            or meta['sample_fingerprint'] != samples['fingerprint']
             or meta['power'] != run.config['reference_ratio_power']
             or not np.array_equal(meta['rates'], samples['rates'])
             or not np.array_equal(meta['normalizers'], samples['normalizers'])):
@@ -279,6 +281,8 @@ def run_colab_discriminator_study(run, samples, *, n_bins=36, powers=None,
                   yield_policy=policy.metadata(), likelihood_source='simulation', ratio_source='learned',
                   asimov_source='same MC templates', uncertainty='fixed-N multinomial marginal; frozen rates/map',
                   no_generation=True, adaptive_binning=False, learned_unbinned=learned_provenance)
+    from .signal_reference import reference_metadata
+    config.update(reference_metadata(run.config))
     result = dict(scans=pd.concat(scans, ignore_index=True), information=pd.DataFrame(information),
                   occupancy=pd.DataFrame(occupancy), axis_summary=pd.DataFrame(summaries),
                   axis_histograms=pd.DataFrame(marginals), joint_histograms=joints,

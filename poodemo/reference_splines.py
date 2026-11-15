@@ -93,6 +93,8 @@ class TemplateBank:
         settings = pipeline.observable_configuration(run, "reference_ratio")
         self.floor = settings["reference_ratio_eta_floor"]
         self.power = settings["reference_ratio_power"]
+        if settings.get("reference_ratio_denominator") == "S":
+            raise ValueError("Use the streamed ColabTemplateBank for signal-reference empirical CDFs")
         self.yield_policy = yield_policy(run.config) if quad.get('practical') else YieldPolicy()
         self.weighted = np.stack([quad["nominal"], quad["down"][0], quad["up"][0]]) * quad["weights"]
         self.totals = self.weighted.sum(axis=-1)
@@ -421,9 +423,11 @@ def _safe_nll(model, mu, alpha):
 
 def _fingerprint(bank):
     if hasattr(bank, 'samples'):
+        from .signal_reference import reference_metadata
         return hashlib.sha256(json.dumps(dict(sample=bank.samples['fingerprint'],
             target=bank.samples['target'], edges=bank.edges.tolist(), power=bank.power,
-            floor=bank.floor, normalizers=bank.samples['normalizers'].tolist()), sort_keys=True).encode()).hexdigest()
+            floor=bank.floor, normalizers=bank.samples['normalizers'].tolist(),
+            **reference_metadata(bank.run.config)), sort_keys=True).encode()).hexdigest()
     digest = hashlib.sha256()
     for value in (bank.quad["x"], bank.quad["weights"], bank.weighted, bank.quad["truth"],
                   bank.quad.get("learned_fields", np.empty(0))):

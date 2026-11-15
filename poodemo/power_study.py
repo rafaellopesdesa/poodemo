@@ -9,7 +9,7 @@ from .mc_yields import yield_policy
 from .pipeline import observable_bin_edges
 from .practical import SimulationHistogram, fit_direct_asimov
 from .toy_integration_diagnostics import _atomic_npz
-from .toy_study import reference_observable
+from .signal_reference import learned_observable, reference_denominator, reference_metadata
 
 
 def run_power_study(run, samples, *, powers=(50.,100.,150.), etas=(0.,.02,.12,.2), n_bins=36, progress=print):
@@ -22,6 +22,7 @@ def run_power_study(run, samples, *, powers=(50.,100.,150.), etas=(0.,.02,.12,.2
     metadata = dict(version=1, sample_fingerprint=samples['fingerprint'], target=samples['target'],
                     powers=powers.tolist(), etas=etas.tolist(), edges=edges.tolist(),
                     rates=samples['rates'].tolist(), normalizers=samples['normalizers'].tolist())
+    metadata.update(reference_metadata(run.config))
     fingerprint = _digest(metadata)
     root = samples['directory']/'power_checks'/fingerprint[:20]
     root.mkdir(parents=True,exist_ok=True)
@@ -49,7 +50,8 @@ def run_power_study(run, samples, *, powers=(50.,100.,150.), etas=(0.,.02,.12,.2
             fields=samples['rates'][:4,None]*ratios/samples['normalizers'][:,None]
             for ei,eta in enumerate(etas):
                 for pi,power in enumerate(powers):
-                    z=reference_observable(fields,samples['rates'][:4],eta,power,0.)
+                    z=learned_observable(fields,samples['rates'][:4],eta,power,0.,
+                        denominator=reference_denominator(run.config))
                     counts[pi,ei,si]+=np.bincount(_bin_indices(z,edges),minlength=n_bins)
                     saturated[pi,ei,si]+=[np.count_nonzero(z==0),np.count_nonzero(z==1)]
             completed[si]=ci+1;start+=take

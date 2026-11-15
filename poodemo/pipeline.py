@@ -369,6 +369,8 @@ def observable_configuration(run, observable="score"):
         settings.update(observable_source="filtered_learned", template_source=run.config.get("template_source", "simulation_v1"),
                         simulation_per_sample=run.config.get("simulation_per_sample", run.config.get("quadrature_per_process", 250_000)))
     if observable == "reference_ratio":
+        from .signal_reference import reference_metadata
+        settings.update(reference_metadata(run.config))
         power = run.config.get("reference_ratio_power", 1.)
         try:
             power = float(power)
@@ -388,7 +390,9 @@ def _annotate_observable_endpoints(frame, settings):
     """Keep nominal eta and the actual numerator endpoint explicit in tables."""
     if settings["observable"] == "reference_ratio" and "eta" in frame:
         frame["eta_effective"] = np.maximum(frame["eta"], settings["reference_ratio_eta_floor"])
-        frame["eta_reference"] = 1.
+        frame["eta_reference"] = np.nan if settings.get("reference_ratio_denominator") == "S" else 1.
+        if settings.get("reference_ratio_denominator") == "S":
+            frame["reference_denominator"] = "S"
 
 
 def observable_bin_edges(n_bins, observable="score"):
@@ -473,7 +477,10 @@ def observable_values(run, quad, eta, observable="score"):
         if observable != "reference_ratio":
             raise ValueError("Practical studies use the learned reference ratio")
         return quad["learned_map"].coordinate(quad["learned_fields"], eta,
-            settings["reference_ratio_power"], settings["reference_ratio_eta_floor"])
+            settings["reference_ratio_power"], settings["reference_ratio_eta_floor"],
+            denominator=settings.get("reference_ratio_denominator", "physical_1"))
+    if settings.get("reference_ratio_denominator") == "S":
+        raise ValueError("The parallel signal-reference studies require learned coordinates")
     eta = float(eta)
     if not np.isfinite(eta) or eta < 0 or (observable == "score" and eta == 0):
         requirement = "strictly positive" if observable == "score" else "nonnegative"
@@ -718,7 +725,9 @@ def run_spline_study(run, n_bins=None, *, observable="score"):
     anchor_values = np.stack([_histogram_anchors(quad, observable_values(run, quad, eta, observable), edges) for eta in etas])
     spline = YieldFractionSpline(etas, anchor_values)
     endpoint_metadata = (dict(etas_effective=np.maximum(etas, settings["reference_ratio_eta_floor"]),
-                              eta_reference=1.) if observable == "reference_ratio" else {})
+                              eta_reference=np.nan if settings.get("reference_ratio_denominator") == "S" else 1.,
+                              **({"reference_denominator": "S"} if settings.get("reference_ratio_denominator") == "S" else {}))
+                         if observable == "reference_ratio" else {})
     np.savez_compressed(run.path("results", options["prefix"] + "spline_templates.npz"), etas=etas,
                         edges=edges, bin_yields=anchor_values, totals=spline.totals,
                         **settings, **endpoint_metadata)
