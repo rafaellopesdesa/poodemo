@@ -10,6 +10,7 @@ import nbformat
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_COMMIT = "087c8a0d0c3d726ffd9974bff465521d12c852c5"  # Validated backend; independent of later output commits.
+DOWNSTREAM_SOURCE_COMMIT = "087c8a0d0c3d726ffd9974bff465521d12c852c5"
 NAMES = {
     4: '04_signal_ratio_histograms.ipynb',
     5: '05_signal_ratio_spline_templates.ipynb',
@@ -71,15 +72,20 @@ $$
 \widehat F_{j,k}(u)=\frac{\sum_i w_{ij}\mathbf{1}[u^S_{\eta_k}(x_i)\leq u]}
 {\sum_i w_{ij}}.
 $$
-Use binary searches with the same half-open bin convention as direct fills;
-endpoint bins include the full support. Ties stay together. Interpolate
+Use the same half-open bin convention as direct fills; endpoint bins include
+the full support and ties stay together. Interpolate
 convexly between neighboring $\eta$ anchors, preserving nonnegative component
 bins and their totals. With fixed $u$ boundaries, this is also linear
 interpolation of the anchor bin yields. It is exact at anchors on this finite
 bank, while off-anchor accuracy still needs validation.
 
-Keep the same refinement, held-out checks, nuisance treatments and two-anchor
-memory cache as 09. The extra anchors near 1 are retained for the parallel
+Because these boundaries are fixed, evaluate the CDF bin masses by streaming
+direct anchor histograms and cache their compact counts. This gives exactly the
+same empirical-CDF integrals without sorting or retaining full coordinate
+arrays. No smooth density or additional events are introduced.
+
+Keep the same refinement, held-out checks and nuisance treatments as 09.
+The extra anchors near 1 are retained for the parallel
 comparison, although there is no special contraction there in this family.
 '''
 
@@ -109,6 +115,10 @@ def references(source):
     return source
 
 
+def source_commit(number):
+    return SOURCE_COMMIT if number == 4 else DOWNSTREAM_SOURCE_COMMIT
+
+
 def signal_cells(number):
     original = number + 4
     path = next((ROOT/'notebooks').glob(f'{original:02}_*.ipynb'))
@@ -117,7 +127,7 @@ def signal_cells(number):
         s = c.source
         if c.cell_type == 'code' and 'SOURCE_COMMIT = ' in s:
             # Avoid touching bootstrap behavior, controls or package installation.
-            s = re.sub(r'SOURCE_COMMIT = [\'"][0-9a-f]+[\'"]', f'SOURCE_COMMIT = "{SOURCE_COMMIT}"', s)
+            s = re.sub(r'SOURCE_COMMIT = [\'"][0-9a-f]+[\'"]', f'SOURCE_COMMIT = "{source_commit(number)}"', s)
             s = s.replace(f'poodemo-{original:02}-', f'poodemo-{number:02}-')
             s = s.replace(f'Notebook {original:02}', f'Notebook {number:02}')
             s = s.replace(f'notebook {original:02} source', f'notebook {number:02} source')
@@ -183,10 +193,73 @@ ranges.to_csv(run.path('results','signal_ratio_ranges.csv'),index=False)''')
     elif number == 5:
         put('spline-theory', THEORY)
         put('spline-exact-limits', LIMITS)
+        put('cell-001', '''### Runtime and completed 04 baseline
+
+Run all with the completed $a=2$, no-floor, 36-bin notebook **04** campaign.
+Keep the same run name, filtered Unity ensemble and zeroing limits. Setup loads
+a fresh pinned checkout; the next cell must report study version 5. There is
+no need to rerun 04 if its final baseline-export cell completed successfully.
+
+05 reuses the exact 04 bank and both saved unbinned benchmarks. Ratios are
+verified and staged on Colab local disk once (about 1.4 GB for 10M events per
+source). Anchor histograms are evaluated in chunks and cached as compact counts;
+full coordinate sorting is unnecessary for this signal-reference map.
+Interpolation refinement and fits still take CPU time. There is no generation,
+NN evaluation or training, and no fallback to the old 250k integration bank.
+The selected bank may not exceed 10M events per source.
+''')
+        change('mc-review-load', '_mc_base_run, N_BINS,', '_mc_base_run, N_BINS, max_selected=10_000_000,')
+        by_id['mc-review-load'].source += '''
+from poodemo.signal_benchmarks import load_signal_benchmarks, add_signal_benchmarks
+reference_benchmarks, reference_provenance = load_signal_benchmarks(run)
+print('References:', reference_benchmarks.model.unique().tolist())
+print(reference_provenance['asimov_note'])
+'''
+        change('spline-run', 'display(splines["summary"])',
+               'splines = add_signal_benchmarks(splines, reference_benchmarks, reference_provenance)\ndisplay(splines["summary"])')
+        change('spline-plots', 'focus_xlim=FOCUS_XLIM)', 'focus_xlim=FOCUS_XLIM, secondary_xlim=(0.02, 0.30))')
+        change('floor-run', 'display(floor_study["summary"])',
+               'floor_study = add_signal_benchmarks(floor_study, reference_benchmarks, reference_provenance)\ndisplay(floor_study["summary"])')
+        change('floor-plots', '# Also supports an already-running runtime',
+               'floor_study = add_signal_benchmarks(floor_study, reference_benchmarks, reference_provenance)\n\n# Also supports an already-running runtime')
         change('spline-interpretation',
                'Near $\\eta=1$, all events may occupy one bin over a small interval. Distinct\nphysical strengths with the same total rate can then be equally good MLEs;\ncompare objectives before interpreting a branch change as numerical failure.',
                'There is no forced collapse near $\\eta=1$. Compression and finite MC can\nstill create competing minima; compare objectives before interpreting a\nbranch change as numerical failure.')
         by_id['spline-source-check'].source += '\nfrom poodemo.signal_reference import signal_log_ratio\nprint("Signal-reference coordinate available:", signal_log_ratio.__module__)'
+        by_id['spline-interpretation'].source += r'''
+
+The primary closure comparison is **interpolation versus direct fills on the
+same 04 bank**, with 36 bins and $a=2$. Its numerical checks remain unchanged.
+Analytical unbinned and learned unbinned curves are displayed separately,
+including a zoom of the secondary minimum. Their gaps to the direct curve
+already exist before interpolation and do not determine interpolation acceptance.
+The learned reference is 03's physical-Asimov curve; the binned curves use
+same-template MC Asimov counts. Their difference is therefore not a pure measure
+of compression loss. Saved `benchmark_comparison.csv` tables label each reference.
+
+The dense Fisher sweep in 04 was diagnostic only. Undefined Fisher points from
+zero means with nonzero derivatives remain undefined; they do not select bins
+or prevent this explicitly chosen 36-bin study. The 0.2-floor control remains
+a diagnostic; no floor is restored to the baseline.
+'''
+    elif number == 6:
+        change('settings', 'N_BINS = 36', 'N_BINS = 36  # Moving baseline and fine grid used for exact 3D merging.\nBASELINE_3D_BINS = 9')
+        change('convergence-note', 'The primary 36-bin analysis and the moving 1D recap stay as above.',
+               'The 36-bin-per-axis comparison above is retained as a fine-grid control.\nThe adopted fixed 3D baseline is 9 bins per axis at the full 10M prefix;\nthe moving 1D baseline remains 36 bins.')
+        by_id['convergence-study'].source += '''
+baseline_3d = convergence_3d['scans'].loc[
+    convergence_3d['scans'].n_bins.eq(BASELINE_3D_BINS)
+    & convergence_3d['scans'].selected_per_source.eq(samples_04['target'])].copy()
+print('Adopted 3D baseline: 9 x 9 x 9, full completed 04 bank')
+display(baseline_3d)
+baseline_3d.to_csv(convergence_3d['output']/'baseline_9x9x9_scans.csv', index=False)
+'''
+        by_id['load-bank'].source += '''
+from poodemo.signal_benchmarks import load_signal_benchmarks
+reference_benchmarks, reference_provenance = load_signal_benchmarks(run)
+print('Verified the same two unbinned references used in 04.')
+print(reference_provenance['asimov_note'])
+'''
     elif number == 7:
         change('prepare', 'from poodemo.own_model_toys import prepare_own_model_toys, run_own_model_toys',
                'from poodemo.own_model_toys import run_own_model_toys\nfrom poodemo.signal_reference_toys import prepare_signal_model_toys')
@@ -214,6 +287,35 @@ not require successful interpolation in 05.
 '''.replace('SOURCE',f'{original:02}')
     if number == 4:
         overview += '\nPower controls compare $a=1,2,3$, retaining the same relative\nvariations around the new baseline. The event-cache seed and chunk settings\nmatch 08; keep them unchanged to reuse exactly the same events.\n'
+    else:
+        overview += r'''
+
+Carry forward the accepted 04 baseline: **$a=2$, no floor, 36 moving bins**,
+the same frozen filtered ratios, rates and normalizers, and at most **10M
+selected events per source**. Keep bounded total-yield zeroing at 0.01 event
+per bin and 0.05 events in total; larger negative means remain invalid.
+The denser information plot in 04 did not change the baseline binning.
+'''
+        if number == 6:
+            overview += r'''
+
+The fixed 3D baseline remains **$9\times9\times9$**. The 18- and 36-bin axes
+and 36/72/108/144 moving-bin recap are resolution diagnostics, with per-bin MC
+precision plots and both unbinned benchmarks. They reuse the same bank; poor
+precision does not trigger more event generation. Agreement with the learned
+physical-Asimov reference is informative but is not a pure binning-closure test.
+'''
+        elif number == 7:
+            overview += r'''
+
+Keep **10,000 toys per case and hypothesis**, at $\mu_0=0$ and $1.4$, with
+no systematics: analytical unbinned, learned unbinned, 36-bin moving and
+$9\times9\times9$ fixed models, plus 72/108/144 moving-bin controls.
+Each ensemble is generated under its own model. This is a different comparison
+from the learned physical-Asimov curve in 03--06. Test-statistic histograms and
+survival plots retain logarithmic vertical axes. The 10M cap applies to the
+reference banks, with fresh analytical toy events generated as needed.
+'''
     cells.insert(1, nbformat.v4.new_markdown_cell(overview.strip(), id='signal-parallel'))
     return cells
 
@@ -316,8 +418,9 @@ plt.close(figure)
 print('Full information and per-source bin diagnostics:', information_study['output'])
 """.strip()
 
-def build():
-    for number,name in NAMES.items():
+def build(numbers=(4, 5, 6, 7)):
+    for number in numbers:
+        name = NAMES[number]
         nb = nbformat.v4.new_notebook(cells=signal_cells(number), metadata={
             'kernelspec': {'display_name':'Python 3', 'language':'python', 'name':'python3'},
             'language_info': {'name':'python'},
@@ -328,4 +431,8 @@ def build():
 
 
 if __name__ == '__main__':
-    build()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('numbers', nargs='*', type=int, choices=tuple(NAMES))
+    args = parser.parse_args()
+    build(args.numbers or tuple(NAMES))

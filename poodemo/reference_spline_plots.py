@@ -9,7 +9,7 @@ COLORS = dict(direct="black", ecdf_u="#1f77b4")
 
 
 def plot_reference_spline_comparison(run, study, *, scan_xlim=(.02, 1.15),
-                                     scan_ylim=(0., 8.), focus_xlim=(.94, 1.06)):
+                                     scan_ylim=(0., 8.), focus_xlim=(.94, 1.06), secondary_xlim=None):
     import mplhep as hep
     number = "05" if run.config.get("reference_ratio_denominator") == "S" else "09"
     destination = run.path("plots", number+"_interpolation")
@@ -25,27 +25,32 @@ def plot_reference_spline_comparison(run, study, *, scan_xlim=(.02, 1.15),
     with plt.style.context(hep.style.ATLAS):
         scans = study["scans"]
         main = scans.loc[scans.on_scan]
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        for ax, syst in zip(axes, (False, True)):
-            for method in ("direct", *METHODS):
-                values = main.loc[(main.method == method) & (main.systematics == syst)].sort_values("eta")
-                ax.plot(values.eta, values.q.where(values.valid), color=COLORS[method],
-                        label=LABELS[method], lw=2 if method == "direct" else 1.5)
-            unbinned = study["unbinned"]
-            if not unbinned.empty:
-                for name, values in unbinned.loc[unbinned.systematics == syst].groupby("model"):
-                    values = values.sort_values("mu")
-                    ax.plot(values.mu, values.q, ls="--", lw=1, alpha=.7, label=name)
-            ax.axhline(1., color=".5", ls=":", lw=1)
-            ax.set(xlabel=r"Tested signal strength $\mu_0=\eta$", ylabel=r"$q(\mu_0)$",
-                   title="NI profiled" if syst else "NI fixed")
-            if scan_xlim is not None:
-                ax.set_xlim(scan_xlim)
-            if scan_ylim is not None:
-                ax.set_ylim(scan_ylim)
-            ax.legend(fontsize=9)
-        save(fig, "scans")
-
+        regions = [('scans', scan_xlim)]
+        if secondary_xlim is not None:
+            regions.append(('scans_secondary', secondary_xlim))
+        for region_name, region_xlim in regions:
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            for ax, syst in zip(axes, (False, True)):
+                for method in ("direct", *METHODS):
+                    values = main.loc[(main.method == method) & (main.systematics == syst)].sort_values("eta")
+                    ax.plot(values.eta, values.q.where(values.valid), color=COLORS[method],
+                            label=LABELS[method], lw=2 if method == "direct" else 1.5)
+                unbinned = study["unbinned"]
+                if not unbinned.empty:
+                    for name, values in unbinned.loc[unbinned.systematics == syst].groupby("model"):
+                        values = values.sort_values("mu")
+                        style = dict(color='black', ls='--') if name == 'analytic unbinned' else dict(color='#CC79A7', ls='-.')
+                        ax.plot(values.mu, values.q.where(values.valid) if 'valid' in values else values.q,
+                                lw=1.5, label=name, **style)
+                ax.axhline(1., color=".5", ls=":", lw=1)
+                ax.set(xlabel=r"Tested signal strength $\mu_0=\eta$", ylabel=r"$q(\mu_0)$",
+                       title="NI profiled" if syst else "NI fixed")
+                if region_xlim is not None:
+                    ax.set_xlim(region_xlim)
+                if scan_ylim is not None:
+                    ax.set_ylim(scan_ylim)
+                ax.legend(fontsize=9)
+            save(fig, region_name)
         fig, axes = plt.subplots(2, 2, figsize=(14, 9))
         tolerance = study["metadata"]["settings"]["q_tolerance"]
         for col, syst in enumerate((False, True)):

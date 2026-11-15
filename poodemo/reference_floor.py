@@ -207,13 +207,14 @@ def plot_reference_floor_study(run, study, *, scan_xlim=(.02, 1.15), scan_ylim=(
                               secondary_xlim=(.02, .3)):
     import matplotlib.pyplot as plt
     import mplhep as hep
-    destination = run.path("plots", "09_floor_study")
+    number = "05" if run.config.get("reference_ratio_denominator") == "S" else "09"
+    destination = run.path("plots", number+"_floor_study")
     destination.mkdir(parents=True, exist_ok=True)
     figures = []
     def save(fig, name):
         fig.tight_layout()
         for extension in ("png", "pdf"):
-            fig.savefig(destination/f"09_{name}.{extension}", bbox_inches="tight", dpi=150)
+            fig.savefig(destination/f"{number}_{name}.{extension}", bbox_inches="tight", dpi=150)
         figures.append(fig)
     scans = study["scans"]
     floors, bins = study["metadata"]["floors"], study["metadata"]["bin_counts"]
@@ -232,9 +233,13 @@ def plot_reference_floor_study(run, study, *, scan_xlim=(.02, 1.15), scan_ylim=(
                             ax.plot(frame.eta, frame.q.where(frame.valid), color=colors[floor],
                                     ls="-" if count == bins[0] else "--", lw=1.7,
                                     label=f"Floor {floor:g}, {count} bins")
-                reference = study["unbinned"].query("model == 'analytic unbinned' and systematics == @syst").sort_values("mu")
+                references = study["unbinned"].loc[study["unbinned"].systematics.eq(syst)]
                 for row, ax in enumerate(axes[:, column]):
-                    ax.plot(reference.mu, reference.q, color="black", lw=1.5, label="Analytic unbinned")
+                    for label, reference in references.groupby('model'):
+                        reference = reference.sort_values('mu')
+                        style = dict(color='black', ls='--') if label == 'analytic unbinned' else dict(color='#CC79A7', ls='-.')
+                        ax.plot(reference.mu, reference.q.where(reference.valid) if 'valid' in reference else reference.q,
+                                lw=1.5, label=label, **style)
                     ax.axhline(1., color=".5", ls=":", lw=1)
                     ax.set(xlabel=r"Tested $\mu_0=\eta$", ylabel=r"$q(\mu_0)$",
                            title=("NI profiled" if syst else "NI fixed")+(" — secondary region" if row else ""),

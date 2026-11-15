@@ -87,8 +87,8 @@ def test_notebooks_use_shared_bootstrap_or_explicit_09_refresh(monkeypatch):
                     if number in (4, 5, 6, 7, 8, 9, 10, 11) else bootstrap)
         if number in (4, 5, 6, 7):
             from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
-            from build_signal_reference_notebooks import SOURCE_COMMIT as signal_commit
-            expected = expected.replace(old_commit, signal_commit)
+            from build_signal_reference_notebooks import source_commit
+            expected = expected.replace(old_commit, source_commit(number))
         if number == 8:
             from build_reference_spline_notebook import SOURCE_COMMIT as old_commit
             from build_colab_08 import SOURCE_COMMIT as colab_commit

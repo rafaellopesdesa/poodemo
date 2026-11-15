@@ -124,6 +124,24 @@ def test_completed_08_reuse_streamed_cdf_and_policy_match(setup,tmp_path,monkeyp
     floor=run_reference_floor_study(loaded,n_bins=8,template_bank=cdf,progress=lambda _:None,
         settings=FloorStudySettings(resolution_multiplier=2,alpha_grid_points=5))
     assert set(floor['scans'].n_bins)=={8,16}
+    if signal_reference:
+        from poodemo.signal_benchmarks import add_signal_benchmarks
+        from poodemo.discriminator_unbinned import LEARNED_LABEL
+        from poodemo.reference_spline_plots import plot_reference_spline_comparison
+        from poodemo.reference_floor import plot_reference_floor_study
+        import matplotlib.pyplot as plt
+        references=pd.concat([result['unbinned'],result['unbinned'].assign(model=LEARNED_LABEL)],ignore_index=True)
+        summary=result['summary'].copy(deep=True)
+        add_signal_benchmarks(result,references,{'test':'display only'})
+        add_signal_benchmarks(floor,references,{'test':'display only'})
+        pd.testing.assert_frame_equal(result['summary'],summary)
+        plots=plot_reference_spline_comparison(loaded,result,secondary_xlim=(.02,.3))
+        floor_plots=plot_reference_floor_study(loaded,floor,secondary_xlim=(.02,.3))
+        for fig in (plots[0],plots[1],floor_plots[0]):
+            labels=fig.axes[0].get_legend_handles_labels()[1]
+            assert LEARNED_LABEL in labels and 'analytic unbinned' in labels
+        assert loaded.path('plots','05_interpolation','05_scans_secondary.png').is_file()
+        for fig in [*plots,*floor_plots]: plt.close(fig)
     with pytest.raises(ValueError,match='differ'):
         load_08_baseline(base.with_config(reference_ratio_power=99.),8)
     # Changes to staged data are repaired from a verified source; changes to

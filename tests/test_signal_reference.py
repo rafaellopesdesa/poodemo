@@ -90,10 +90,33 @@ def test_zero_physical_density_is_retained_in_first_cdf_bin():
     # Exercise endpoint/tie handling, including -infinity at a true zero.
     bank=ColabTemplateBank(SimpleNamespace(config={'reference_ratio_power':1.,'reference_ratio_eta_floor':0.,
                            'reference_ratio_denominator':'S'}),
-        dict(rates=np.ones(6),normalizers=np.ones(4),target=3,fingerprint='zero-endpoint'),n_bins=36)
-    bank._cdf=lambda _: [np.sort(u)]*6
+        dict(rates=np.ones(6),normalizers=np.ones(4),target=3,fingerprint='zero-endpoint',
+             manifests=dict.fromkeys(range(6))),n_bins=36)
+    bank._fields=lambda _: [(0,fields)]
     direct=np.histogram(expit(u),bank.edges)[0]
     np.testing.assert_allclose(bank.cdf_u_bins(0.,1.),bank._anchors(np.tile(direct,(6,1))))
+
+
+@pytest.mark.parametrize('power',[1.,2.,3.])
+def test_compact_signal_cdf_matches_sorted_empirical_integrals(setup,power):
+    from scipy.special import logit
+    from poodemo.colab_reference import ColabTemplateBank
+    base,_=setup
+    base=base.with_config(reference_ratio_denominator='S',reference_ratio_power=power)
+    bank=ColabTemplateBank(base,prepare(base),36)
+    for anchor in (0.,.2,1.,1.4):
+        boundaries=logit(bank.edges)/power
+        sorted_coordinates=bank._cdf(anchor)
+        raw=[]
+        for u in sorted_coordinates:
+            indices=np.searchsorted(u,boundaries,side='left')
+            indices[0]=0;indices[-1]=len(u)
+            raw.append(np.diff(indices))
+        expected=bank._anchors(raw)
+        np.testing.assert_allclose(bank.cdf_u_bins(anchor,.7),expected,atol=1e-14)
+    # Subsequent queries use compact counts, not sorted arrays.
+    bank._cdf=lambda _:pytest.fail('unnecessary full-bank sort')
+    np.testing.assert_array_equal(bank.cdf_u_bins(1.,1.4),bank.exact(1.))
 
 
 def test_parallel_notebooks_are_clean_and_match_builder(monkeypatch):
@@ -103,14 +126,19 @@ def test_parallel_notebooks_are_clean_and_match_builder(monkeypatch):
     for number,name in NAMES.items():
         nb=nbformat.read(root/'notebooks'/name,as_version=4)
         old=nbformat.read(next((root/'notebooks').glob(f'{number+4:02}_*.ipynb')),as_version=4)
-        nbformat.validate(nb)
-        assert [c.source for c in nb.cells]==[c.source for c in signal_cells(number)]
+        # Preserve the user's executed 04; validate its sources without Colab's
+        # nonstandard output metadata. Downstream notebooks are ready to run.
+        clean=nbformat.v4.new_notebook(cells=signal_cells(number))
+        nbformat.validate(clean)
+        normalized=lambda cells:['\n'.join(line.rstrip() for line in c.source.splitlines()) for c in cells]
+        assert normalized(nb.cells)==normalized(signal_cells(number))
         assert {c.id for c in nb.cells}=={c.id for c in old.cells}|{'signal-parallel'}
         code={c.id:c.source for c in nb.cells if c.cell_type=='code'}
         for c in nb.cells:
             if c.cell_type=='code':
                 compile(c.source,name+':'+c.id,'exec')
-                assert c.execution_count is None and c.outputs==[]
+                if number > 4:
+                    assert c.execution_count is None and c.outputs==[]
             else:
                 assert r'\(' not in c.source and r'\[' not in c.source
         controls=code.get('settings',code.get('cell-003'))
@@ -118,6 +146,10 @@ def test_parallel_notebooks_are_clean_and_match_builder(monkeypatch):
         assert 'REFERENCE_RATIO_A = 2.0' in controls
         assert 'REFERENCE_RATIO_ETA_MIN = 0.0' in controls
         if number>4: assert 'load_signal_baseline' in '\n'.join(code.values())
+        if number==5:
+            assert 'max_selected=10_000_000' in code['mc-review-load']
+            assert 'add_signal_benchmarks' in code['spline-run'] and 'add_signal_benchmarks' in code['floor-run']
+            assert 'secondary_xlim=(0.02, 0.30)' in code['spline-plots']
         if number==7:
             for setting in ('N_TOYS = 10_000','MU_VALUES = (0.0, 1.4)',
                             'MOVING_BIN_COUNTS = (36, 72, 108, 144)','FIT_GRID_SIZE = 129'):

@@ -190,10 +190,11 @@ class ColabTemplateBank:
         if self.denominator == 'S':
             if not np.isfinite(eta) or eta < 0:
                 raise ValueError('eta must be finite and nonnegative')
-            boundaries = logit(self.edges)/self.power
-            raw = np.array([np.diff(np.searchsorted(u, boundaries, side='left'))
-                            for u in self._cdf(anchor)])
-            return self._anchors(raw)
+            # For log(p_eta/p_S), the query's u edges do not depend on eta.
+            # Direct anchor counts are exactly these empirical-CDF bin masses,
+            # including ties/endpoints. Reuse compact counts rather than sort
+            # all 60M coordinates again for every neighboring anchor query.
+            return self.exact(anchor).copy()
         if not np.isfinite(eta) or eta == 1.:
             raise ValueError('Use exact collapse for eta=1')
         boundaries = logit(self.edges)/(self.power*(eta-1.))

@@ -1168,6 +1168,19 @@ studies and the 36/72/108/144-bin recap. 07 retains the **9×9×9** baseline,
 test-statistic histograms/survival plots. It uses direct templates, not 05's
 interpolator. Analytical toy events are separate from the fixed reference banks.
 
+05–07 carry forward the accepted $a=2$ result from the completed 04 run. 05
+computes the exact empirical-CDF bin masses from streamed anchor histograms,
+avoiding full-bank sorts and coordinate caches because the boundaries are fixed.
+Its primary closure test compares interpolation with direct fills on the same
+36-bin bank. Both analytical and learned unbinned benchmarks appear in the
+likelihood plots, including a secondary-minimum zoom; their disagreement with
+direct fills is not an interpolation failure. The learned benchmark is the
+matching physical-Asimov curve saved by 04 from 03, verified against its source
+and filtered ensemble before lengthy computations. 06 verifies the same source.
+Both studies retain the distinction between physical-Asimov and same-template
+MC-Asimov comparisons. Undefined Fisher points in 04 do not select bins or
+block the explicitly chosen 36-bin interpolation study.
+
 06 uses `06_signal_colab_10M_precision_v1`; 07 uses
 `07_signal_own_model_statonly_10M_36_9_v1` beneath the completed 04 study root.
 07 starts separate checkpoints and resumes its own matching results; it does
@@ -1178,6 +1191,9 @@ Regenerate these four notebooks with
 `python scripts/build_signal_reference_notebooks.py`. This copies the current
 08–11 cell sources, adapts reference-specific definitions and checks, clears
 execution outputs in the new files, and leaves 08–11 untouched.
+To refresh only the downstream notebooks while preserving the executed 04, use
+`python scripts/build_signal_reference_notebooks.py 5 6 7`. Their backend pin is
+independent of 04's pin; a completed matching 04 baseline does not need rerunning.
 
 
 04 also overlays the matching notebook-03 learned physical-Asimov likelihood
