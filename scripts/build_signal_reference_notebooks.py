@@ -10,7 +10,7 @@ import nbformat
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_COMMIT = "087c8a0d0c3d726ffd9974bff465521d12c852c5"  # Validated backend; independent of later output commits.
-DOWNSTREAM_SOURCE_COMMIT = "087c8a0d0c3d726ffd9974bff465521d12c852c5"
+DOWNSTREAM_SOURCE_COMMIT = "449be27b0b603c376fc94d00ff3738f65996e0e2"
 NAMES = {
     4: '04_signal_ratio_histograms.ipynb',
     5: '05_signal_ratio_spline_templates.ipynb',
