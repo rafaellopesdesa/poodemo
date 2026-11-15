@@ -115,7 +115,7 @@ def test_parallel_notebooks_are_clean_and_match_builder(monkeypatch):
                 assert r'\(' not in c.source and r'\[' not in c.source
         controls=code.get('settings',code.get('cell-003'))
         assert 'reference_ratio_denominator="S"' in controls
-        assert 'REFERENCE_RATIO_A = 1.0' in controls
+        assert 'REFERENCE_RATIO_A = 2.0' in controls
         assert 'REFERENCE_RATIO_ETA_MIN = 0.0' in controls
         if number>4: assert 'load_signal_baseline' in '\n'.join(code.values())
         if number==7:
@@ -125,4 +125,4 @@ def test_parallel_notebooks_are_clean_and_match_builder(monkeypatch):
             assert 'prepare_signal_model_toys' in code['prepare']
         if number==4:
             assert 'MC_SEED = 20261111' in code['colab-sampling-setup']
-            assert 'POWER_VALUES = [0.5, 1.0, 1.5]' in code['mc-review-power']
+            assert 'POWER_VALUES = [1.0, 2.0, 3.0]' in code['mc-review-power']

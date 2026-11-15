@@ -20,9 +20,10 @@ def prepare_signal_model_toys(run, samples, *, mu_values=(0., 1.4), exposure=1.,
     mus = tuple(float(mu) for mu in mu_values)
     if (not mus or len(set(mus)) != len(mus) or any(not np.isfinite(mu) or mu < 0 for mu in mus)):
         raise ValueError('Use unique finite nonnegative hypotheses')
-    if (reference_denominator(run.config) != 'S' or run.config.get('reference_ratio_power') != 1.
+    power = float(run.config['reference_ratio_power'])
+    if (reference_denominator(run.config) != 'S' or not np.isfinite(power) or power <= 0
             or run.config.get('reference_ratio_eta_floor', 0.) != 0.):
-        raise ValueError('Notebook 07 requires the S reference, a=1 and no eta floor')
+        raise ValueError('Notebook 07 requires the S reference, positive finite power and no eta floor')
     _integer(samples['target'], 'selected target', 2)
     if samples['target'] > 10_000_000:
         raise ValueError('Notebook 07 reference banks may not exceed 10M per source')
@@ -59,7 +60,7 @@ def prepare_signal_model_toys(run, samples, *, mu_values=(0., 1.4), exposure=1.,
         learned_fields_sha256=_array_digest(fields), fixed_counts_sha256=_array_digest(merged),
         fixed_edges=edges.tolist(), fixed_powers=fine['powers'],
         moving_fields_sha256={str(mu): _array_digest(templates['moving36'][mu].fields) for mu in sorted(mus)},
-        moving_bins=36, reference_power=1., reference_ratio_denominator="S", eta_floor=0., yield_policy=policy.metadata(),
+        moving_bins=36, reference_power=power, reference_ratio_denominator="S", eta_floor=0., yield_policy=policy.metadata(),
         analytic_rates=analytic_rates.tolist(), selection=selection, physics=run.model.to_dict(),
         backend_sha256={name: file_digest(Path(__file__).with_name(name+'.py'))
                         for name in ('own_model_toys', 'toy_likelihood', 'toy_sources', 'mc_yields', 'physics',

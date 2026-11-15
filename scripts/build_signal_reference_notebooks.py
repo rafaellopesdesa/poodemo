@@ -25,8 +25,8 @@ R^S_\eta(x)=\frac{p(x;\eta_{\mathrm{eff}},0)}{p_S(x)},\qquad
 \eta_{\mathrm{eff}}=\max(\eta,\eta_{\min}),\qquad
 z^S_\eta(x)=\operatorname{sigmoid}\!\left(a\log R^S_\eta(x)\right).
 $$
-The baseline is **no floor**, **$a=1$**, and **36 bins**, so
-$z^S_\eta=R^S_\eta/(1+R^S_\eta)$. The denominator is the selected pure-signal
+The baseline is **no floor**, **$a=2$**, and **36 bins**, so
+$z^S_\eta=(R^S_\eta)^2/[1+(R^S_\eta)^2]$. The denominator is the selected pure-signal
 shape, not the physical mixture at $\mu=1$. It stays fixed during every fit.
 
 Use the same filtered learned component ratios $\hat r_j$, frozen normalizers
@@ -123,8 +123,8 @@ def signal_cells(number):
             s = s.replace(f'notebook {original:02} source', f'notebook {number:02} source')
         else:
             s = references(s)
-            s = s.replace('REFERENCE_RATIO_A = 100.0', 'REFERENCE_RATIO_A = 1.0')
-            s = s.replace('$a=100$', '$a=1$').replace('**$a=100$**', '**$a=1$**')
+            s = s.replace('REFERENCE_RATIO_A = 100.0', 'REFERENCE_RATIO_A = 2.0')
+            s = s.replace('$a=100$', '$a=2$').replace('**$a=100$**', '**$a=2$**')
             s = s.replace('samples_08', 'samples_04').replace('normalizer_08', 'normalizer_04')
             s = s.replace('poodemo-09-ratios', 'poodemo-05-ratios').replace('poodemo-10-ratios', 'poodemo-06-ratios').replace('poodemo-11-ratios', 'poodemo-07-ratios')
             s = s.replace('from poodemo.colab_reference import load_08_baseline, ColabTemplateBank',
@@ -159,6 +159,7 @@ def signal_cells(number):
     if number in (4,5):
         put('cell-004' if number == 4 else 'cell-005', DEFINITION)
     if number == 4:
+        configure_04_review(by_id)
         change('cell-000', 'Learned reference-ratio', 'Learned signal-reference ratio')
         change('cell-000', 'Generate fresh independent simulation **in Colab**',
                'Reuse the matching completed 08 event/prediction cache, or generate simulation **in Colab**')
@@ -173,8 +174,8 @@ ranges.to_csv(run.path('results','signal_ratio_ranges.csv'),index=False)''')
                'There is no imposed loss of all shape information at $\\eta=1$.')
         change('cell-017', 'At $\\eta=1$ this is a rate-only measurement: multiple physical $\\mu$ values\ncan have equal rates.',
                'The signal reference has no forced rate-only point. Multiple physical $\\mu$ values\ncan nevertheless compete in a coarse or information-losing compression.')
-        change('mc-review-power', 'POWER_VALUES = [50., 100., 150.]', 'POWER_VALUES = [0.5, 1.0, 1.5]')
-        change('mc-review-power-note', '$a=50,100,150$', '$a=0.5,1,1.5$')
+        change('mc-review-power', 'POWER_VALUES = [50., 100., 150.]', 'POWER_VALUES = [1.0, 2.0, 3.0]')
+        change('mc-review-power-note', '$a=50,100,150$', '$a=1,2,3$')
         change('colab-sampling-setup', 'mc_run = run',
                'assert 2 <= SELECTED_EVENTS_PER_SOURCE <= 10_000_000\nmc_run = run')
         for ident in ('cell-006','cell-015','cell-019'):
@@ -198,7 +199,7 @@ ranges.to_csv(run.path('results','signal_ratio_ranges.csv'),index=False)''')
                'The scalar ratio at $\\eta=\\mu_0$ compares the tested physical shape with\nthe selected pure-signal shape.')
     overview = r'''### Parallel signal-reference study
 
-This notebook parallels **SOURCE**. It uses $p(x;\eta)/p_S(x)$ with **$a=1$**
+This notebook parallels **SOURCE**. It uses $p(x;\eta)/p_S(x)$ with **$a=2$**
 in place of $p(x;\eta)/p(x;1)$ with $a=100$. Both are normalized selected
 shapes. The fixed process-ratio axes already use $p_S(x)$ and are unchanged.
 The scalar observable remains frozen throughout each physical fit.
@@ -212,10 +213,108 @@ from 08--11. Run **04, then 05, 06 and 07**; 07 uses direct templates and does
 not require successful interpolation in 05.
 '''.replace('SOURCE',f'{original:02}')
     if number == 4:
-        overview += '\nPower controls are rescaled to $a=0.5,1,1.5$, retaining the same relative\nvariations around the new baseline. The event-cache seed and chunk settings\nmatch 08; keep them unchanged to reuse exactly the same events.\n'
+        overview += '\nPower controls compare $a=1,2,3$, retaining the same relative\nvariations around the new baseline. The event-cache seed and chunk settings\nmatch 08; keep them unchanged to reuse exactly the same events.\n'
     cells.insert(1, nbformat.v4.new_markdown_cell(overview.strip(), id='signal-parallel'))
     return cells
 
+
+
+def configure_04_review(cells):
+    cells['colab-sampling-setup'].source += """
+# Additional resolutions ONLY for the information plot at eta=mu=1.
+# Keep the primary 36-bin fit and the full likelihood-scan bin counts unchanged.
+INFORMATION_BIN_COUNTS = [4, 6, 8, 10, 12, 16, 20, 24, 28, 32, 36, 40, 48, 60, 72, 96, 108, 144]
+INFORMATION_ETA = 1.0
+"""
+    cells['cell-009'].source = r"""### Analytical and learned unbinned benchmarks
+
+Retain the analytical unbinned reference and add notebook 03's **learned
+unbinned curve on the physical Asimov sample**, using the matching filtered
+ensemble. Both appear in the likelihood comparisons, including the secondary
+minimum zoom. The saved learned-model self-Asimov curve is a different study.
+
+The binned curves use same-template MC Asimov counts and their frozen selected
+rates; the learned reference retains 03's quadrature normalization. Thus these
+curves diagnose different sources of disagreement but do not form an exact
+decomposition into learning and binning error. Neither reference is used to
+choose bin edges or fit $a$ to the analytical answer. No networks are retrained.
+""".strip()
+    cells['cell-010'].source += """
+from poodemo.discriminator_unbinned import learned_reference
+learned_unbinned, learned_widths, learned_provenance = learned_reference(run, scan_grid)
+learned_unbinned.to_csv(run.path('results','signal_learned_unbinned_reference.csv'),index=False)
+save_json(run.path('results','signal_learned_unbinned_reference.json'),learned_provenance)
+display(learned_unbinned)
+print('Learned comparison: notebook 03, physical Asimov; original frozen normalization.')
+"""
+    # Use the same reference styles in all likelihood comparisons.
+    cells['cell-012'].source = cells['cell-012'].source.replace(
+        '        ax.plot(group[x_column], group[y_column].where(group["valid"]) if "valid" in group else group[y_column], marker=".", ms=3, label=" | ".join(parts))',
+        '        model_label = str(group["model"].iloc[0]) if "model" in group else ""\n'
+        '        style = ({"color":"black", "linestyle":"--", "linewidth":1.8} if model_label == "analytic unbinned"\n'
+        '                 else {"color":"#CC79A7", "linestyle":"-.", "linewidth":1.8} if model_label.startswith("learned unbinned") else {})\n'
+        '        ax.plot(group[x_column], group[y_column].where(group["valid"]) if "valid" in group else group[y_column], marker=".", ms=3, label=" | ".join(parts), **style)')
+    # Leave the analytical-only saved unbinned table intact: downstream helpers
+    # explicitly consume it as the oracle reference. Append only in comparisons.
+    cells['cell-013'].source = cells['cell-013'].source.replace(
+        'scans = binning["scans"]',
+        'scans = pd.concat([binning["scans"], learned_unbinned.loc[~learned_unbinned.systematics]], ignore_index=True)\n'
+        'scans.to_csv(run.path("results","signal_likelihood_comparison.csv"),index=False)')
+    cells['cell-013'].source += r"""
+# Same curves, with a dedicated view of the secondary minimum.
+plot_scans(shown_scans, scan_title + ': secondary minimum', '04_binning_scans_secondary.pdf',
+           xlim=(0.02,0.30), ylim=None);
+"""
+    for ident in ('colab-convergence','mc-review-power'):
+        source=cells[ident].source
+        needle="    ax.plot(ref.mu,ref.q.where(ref.valid),'k--',label='Analytical unbinned')"
+        assert needle in source
+        selection='learned_unbinned.systematics.eq(syst)'
+        if ident=='mc-review-power':selection+=' & learned_unbinned.mu.le(.3)'
+        source=source.replace(needle,needle+"\n    learned_ref=learned_unbinned.loc["+selection+"].sort_values('mu')\n"
+            "    ax.plot(learned_ref.mu,learned_ref.q.where(learned_ref.valid),color='#CC79A7',ls='-.',\n"
+            "            label='Learned unbinned (03, physical Asimov)')")
+        cells[ident].source=source
+    cells['cell-014'].source += r"""
+
+The next plot has a separate dense sweep of **18 bin counts, from 4 to 144**,
+at fixed $\eta=\mu=1$, with NI fixed. It reads the same cached predictions;
+there are no new events and no extra likelihood scans at these resolutions.
+Nested MC prefixes expose sensitivity to rare sampled bins.
+
+For each model, the extended information separates into
+$$
+I=\sum_b\frac{(\partial_\mu\nu_b)^2}{\nu_b},\qquad
+I_{\rm rate}=\frac{(\partial_\mu\sum_b\nu_b)^2}{\sum_b\nu_b},\qquad
+I_{\rm shape}=I-I_{\rm rate}.
+$$
+Each model subtracts its own rate information before the shape comparison.
+The denominators of the plotted fractions remain analytical unbinned Fisher
+information. The learned physical-Asimov curvature is not automatically Fisher
+information for an imperfect model and is not substituted for it.
+
+An empty bin with zero derivative contributes zero. A zero mean with nonzero
+derivative makes the usual Fisher expression undefined; bounded zeroing does
+not restore regularity. Such resolutions appear as red crosses at the bottom,
+with source counts in the diagnostic table, rather than disappearing silently
+or being assigned an artificial information value. No means or derivatives are
+floored. These local quantities do not determine the global secondary minimum.
+"""
+    cells['cell-015'].source = """from poodemo.signal_information import run_signal_information_study, plot_signal_information
+information_study = run_signal_information_study(run, samples,
+    bin_counts=INFORMATION_BIN_COUNTS, eta=INFORMATION_ETA, prefixes=MC_PREFIXES)
+information = information_study['information']
+display(information)
+display(information.groupby('selected_per_source').information_valid.agg(['size','sum']))
+invalid_information = information_study['diagnostics'].query('nonregular or raw_mean < 0')
+print('Bins responsible for undefined Fisher points (no artificial floors):')
+display(invalid_information)
+figure = plot_signal_information(information_study,
+    selected_per_source=SELECTED_EVENTS_PER_SOURCE, output=run.path('plots'))
+display(figure)
+plt.close(figure)
+print('Full information and per-source bin diagnostics:', information_study['output'])
+""".strip()
 
 def build():
     for number,name in NAMES.items():

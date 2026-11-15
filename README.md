@@ -1138,7 +1138,7 @@ Colab computes the event weights again.
 
 The pairs **04/08, 05/09, 06/10 and 07/11** share the same studies and physical
 model. The new family uses the normalized selected ratio
-$R^S_\eta=p(x;\eta)/p_S(x)$ and $z^S_\eta=R^S_\eta/(1+R^S_\eta)$ (**$a=1$**).
+$R^S_\eta=p(x;\eta)/p_S(x)$ and $z^S_\eta=(R^S_\eta)^2/[1+(R^S_\eta)^2]$ (**$a=2$**).
 The reference density cancels through the learned component ratios: no analytical
 PDF defines an observable or a histogram yield. The fixed process-ratio axes in
 06/07 already used $p_S$ and remain unchanged. A single scalar ratio still need
@@ -1149,7 +1149,7 @@ filtered Unity ensemble, generation seed and chunk settings as 08. Matching
 selected events and predictions are reused; only histograms are refilled. The
 primary budget stays at **10M selected events per source**, with **36 moving
 bins**, **no floor**, and the same half-step bin edges and bounded-yield policy.
-Power controls are $0.5,1,1.5$, around the new baseline of 1. The parallel changes
+Power controls are $1,2,3$, around the new baseline of 2. The parallel changes
 both denominator and power; it is not a denominator-only comparison at fixed power.
 
 04 publishes `practical_v1/results/colab_04_baseline.json`. The reference identity
@@ -1178,3 +1178,19 @@ Regenerate these four notebooks with
 `python scripts/build_signal_reference_notebooks.py`. This copies the current
 08–11 cell sources, adapts reference-specific definitions and checks, clears
 execution outputs in the new files, and leaves 08–11 untouched.
+
+
+04 also overlays the matching notebook-03 learned physical-Asimov likelihood
+curve alongside the analytical unbinned reference, including a secondary-minimum
+zoom. The learned curve retains its original normalization and physical-Asimov
+construction; the histograms use same-template MC Asimov counts. These differences
+remain explicit rather than treating their comparison as a pure binning test.
+
+The information plot uses a separate 18-resolution sweep from 4 to 144 bins at
+$\eta=\mu=1$, with NI fixed, and the existing 250k/1M/10M prefixes. It refills
+only that coordinate from cached predictions; it does not add events or repeat
+all likelihood scans. Each model's shape information subtracts its own rate term.
+Zero-yield/nonzero-derivative bins make the standard Fisher expression undefined;
+red crosses and per-source diagnostic tables preserve these cases. The analytical
+unbinned Fisher information remains the reference for these fractions. The learned
+physical-Asimov curvature is not silently substituted for Fisher information.

@@ -232,7 +232,7 @@ def test_preparation_reuses_cached_ratios_and_merges_the_original_grid(tmp_path,
     if signal_reference:
         from poodemo.signal_reference_toys import prepare_signal_model_toys
         prepare_models = prepare_signal_model_toys
-        run.config.update(reference_ratio_denominator='S', reference_ratio_power=1.)
+        run.config.update(reference_ratio_denominator='S', reference_ratio_power=2.)
     result = prepare_models(run, samples, progress=lambda _: None)
     assert result['configuration'].get('reference_ratio_denominator', 'physical_1') == ('S' if signal_reference else 'physical_1')
     assert result['templates']['fixed9'].fields.shape == (4, 729)
