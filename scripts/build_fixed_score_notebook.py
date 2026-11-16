@@ -56,10 +56,11 @@ $$
 The per-event intensity score at nominal NI is
 $$
 t_1(x)=\left.\partial_\mu\log f(x;\mu)\right|_1
+=\frac{1}{2}\frac{1+F_{SBI}/F_S-F_B/F_S}{F_{SBI}/F_S+F_{NI}/F_S}
 =\frac{F_S+F_{SBI}-F_B}{2(F_{SBI}+F_{NI})}.
 $$
-Thus $(1+F_{SBI}/F_S-F_B/F_S)/(F_{SBI}/F_S+F_{NI}/F_S)$
-equals $2t_1$, or the derivative with respect to $\sqrt\mu$ at 1.
+The implementation includes this factor of $1/2$ before centering and applying
+the sigmoid, so the observable uses the derivative with respect to $\mu$.
 When the component ratios refer to normalized PDFs, their selected rates must
 be included. The full extended-likelihood score is
 $-\nu'_1+\sum_i t_1(x_i)$, rather than just one event's score.
