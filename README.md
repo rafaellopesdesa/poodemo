@@ -22,16 +22,16 @@ to lie between zero and one while S has a visibly distinct shape.
 | [09_reference_ratio_spline_templates.ipynb](notebooks/09_reference_ratio_spline_templates.ipynb) | Validate empirical CDFs in $u$; study the floor, binning and nuisance morph order | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/09_reference_ratio_spline_templates.ipynb) |
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Own-model stat-only distributions and 36/72/108/144-bin comparison; 10,000 toys per case at $\mu_0=0$ and $1.4$ | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
-| [12_toy_diagnostics.ipynb](notebooks/12_toy_diagnostics.ipynb) | Investigate branch switching, fit bounds, finite integration error, bin refinement, and coverage uncertainty in notebook 11 | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_toy_diagnostics.ipynb) |
-| [13_learned_ratio_compression.ipynb](notebooks/13_learned_ratio_compression.ipynb) | Compare learned and analytical compression with independent simulator-derived 36-bin yields | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/13_learned_ratio_compression.ipynb) |
+| [12_fixed_score_histograms.ipynb](notebooks/12_fixed_score_histograms.ipynb) | Fixed learned score at $\mu=1$: stat-only and NI-profiled scans versus 03, with 36/144 bins | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_fixed_score_histograms.ipynb) |
 
 ## Run in Colab
 
 1. The physical-reference workflow is **01–03 → 08**, followed by the studies
-   in 09, 10 and 11. Notebook 12 retains its historical diagnostic inputs;
-   its source is not automatically switched to the new own-model ensemble. Notebook 11
+   in 09, 10 and 11. Notebook 11
    reuses the 08/10 bank and direct bin yields; it does not require 09's interpolation.
    The parallel signal-reference workflow is **01–03 → 04 → 05/06/07**.
+   Notebook **12** also reuses the completed 04 bank for a fixed-score comparison
+   with 03; it requires no new simulation, training, interpolation or toys.
    These new 04–07 notebooks replace the retired filenames; older studies remain in history.
    For a private repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
@@ -864,7 +864,10 @@ Builders: `scripts/build_reference_notebooks.py` updates 08/09;
 `scripts/build_comparison_notebooks.py` routes 10/11 to their current builders. They clear stale notebook
 outputs and preserve user run/model controls while applying the new baseline.
 
-## Learned compression with simulator-derived yields (13)
+## Historical learned compression study (retired 13)
+
+This section documents the retired `13_learned_ratio_compression.ipynb`,
+available in git history. It is not part of the current notebook sequence.
 
 Run **only notebook 13** in a fresh runtime with the completed v4 `RUN_NAME`,
 `MODE`, and `CONFIG_OVERRIDES` from 01–03. It reuses the saved selector and
@@ -913,7 +916,11 @@ for their physics, selection, networks, frozen normalizers, seeds and generated
 counts. Changing those dependencies requires a new output tag. Earlier
 notebooks, their execution outputs, and their study products are preserved.
 
-## Investigating toy discrepancies (12)
+## Historical toy diagnostics (retired 12)
+
+This section documents the retired `12_toy_diagnostics.ipynb`, available in
+git history. The current notebook 12 is the separate fixed-score study below;
+its results do not overwrite these historical diagnostic outputs.
 
 Run **only notebook 12**, in a fresh runtime, with the same completed v4 run,
 mode and configuration overrides. It reads notebook 11's direct-yield
@@ -1210,3 +1217,34 @@ Zero-yield/nonzero-derivative bins make the standard Fisher expression undefined
 red crosses and per-source diagnostic tables preserve these cases. The analytical
 unbinned Fisher information remains the reference for these fractions. The learned
 physical-Asimov curvature is not silently substituted for Fisher information.
+
+## Fixed learned score at the SM point (12)
+
+`12_fixed_score_histograms.ipynb` freezes a single learned shape score at
+$\mu=1$, nominal NI, and maps it with $z_1=\operatorname{sigmoid}(s_1/0.04)$.
+It retains 36 bins as baseline and adds a 144-bin resolution control. Both the
+stat-only and NI-profiled scans use the same event partition at every tested
+strength; component yields retain the full $\mu$ and $\sqrt\mu$ dependence.
+For intensity fields, the per-event score is
+$s_1=(F_S+F_{SBI}-F_B)/[2(F_{SBI}+F_{NI})]-\nu'_1/\nu_1$.
+The learned fields include selected rates and frozen ratio normalizers; the
+extended Poisson term separately retains the event-count information.
+
+Run after the completed 04 with the same run name and filtered Unity ensemble.
+The notebook reuses its at-most-10M selected events/source and saved analytical
+and learned physical-Asimov references from 03. It fills fixed component/NI
+variation histograms once, with no additional generation or NN evaluation.
+The main scan, a neighborhood-of-1 zoom and a secondary-region zoom all show
+both unbinned references. The score curve includes zero exactly; the saved 03
+curves retain their original grid. A fourth figure shows fixed-score shapes.
+
+Local score sufficiency is the motivation, not a guarantee of global failure
+or of exact local closure for an imperfect learned model. A single nominal
+$\mu$ score may also lose nuisance information when NI is profiled. The
+36/144-bin comparison helps separate finite-bin effects from loss in the fixed
+coordinate. Histograms use same-template MC Asimov data; 03 retains its physical
+Asimov construction and normalization. Invalid fits and bounded-yield corrections
+remain visible. There are no toys or interpolation studies in this notebook.
+Results and figures are saved under the completed study's `results/12_fixed_score/`
+and `plots/12_fixed_score/`, with configuration-specific subdirectories.
+Rebuild only this notebook with `python scripts/build_fixed_score_notebook.py`.
