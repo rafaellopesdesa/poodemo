@@ -9,7 +9,7 @@ from build_reference_notebooks import MODEL_SOURCE_CODE
 from build_reference_spline_notebook import fresh_bootstrap
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = '5d4f8e8'  # Replaced with the tested backend commit before publishing.
+SOURCE_COMMIT = '36091e8eb77c8e5fda8654ea161879b99c40ce18'  # Tested fixed-score backend.
 NAME = '12_fixed_score_histograms.ipynb'
 
 
