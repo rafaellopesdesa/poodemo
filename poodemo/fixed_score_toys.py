@@ -18,6 +18,11 @@ from .toy_study import _array_digest, _atomic_csv, _failure, _fit, _rng
 
 VERSION = 1
 REFERENCE_BACKENDS = ('own_model_toys', 'toy_likelihood', 'toy_sources', 'mc_yields', 'physics')
+# The initial published backend has identical generation/fitting semantics.
+# Only diagnostic serialization and checkpoint metadata handling changed here.
+_DIAGNOSTICS_ONLY_PREDECESSORS = {
+    'ca6f8e6c08240557049254a1cddcc05e5c44a6c0da5a68f5b76189e7b21005c5',
+}
 
 
 def prepare_fixed_score_toys(run, samples, *, mu_values=(0., 1.4), bin_counts=(36, 144),
@@ -149,6 +154,55 @@ def score_toy_summary(frame, labels):
     return pd.DataFrame(rows)
 
 
+def _source_diagnostics_json(audits):
+    """Represent an unbounded interval endpoint as text, only in saved JSON.
+
+    The likelihood and displayed diagnostics keep their numeric +inf values.
+    Other nonfinite values are still rejected by the strict JSON writer.
+    """
+    records = []
+    for audit in audits:
+        record = dict(audit)
+        if 'forbidden_kappa_intervals' in record:
+            intervals = np.asarray(record['forbidden_kappa_intervals'], dtype=float)
+            if intervals.size == 0:
+                record['forbidden_kappa_intervals'] = []
+            else:
+                if (intervals.ndim != 2 or intervals.shape[1] != 2
+                        or not np.isfinite(intervals[:, 0]).all()
+                        or np.any(intervals[:, 0] < 0) or np.isnan(intervals[:, 1]).any()
+                        or np.any(intervals[:, 1] <= intervals[:, 0])):
+                    raise ValueError('Malformed forbidden kappa intervals in source diagnostics')
+                record['forbidden_kappa_intervals'] = [
+                    [float(low), 'Infinity' if np.isposinf(high) else float(high)]
+                    for low, high in intervals]
+        records.append(record)
+    return records
+
+
+def _checkpoint_compatibility(saved, config):
+    """Permit only the known diagnostics-only upgrade with identical physics."""
+    previous = saved.get('configuration')
+    if not isinstance(previous, dict) or saved.get('fingerprint') != _digest(previous):
+        raise ValueError('Score toy configuration fingerprint mismatch')
+    history = list(saved.get('compatibility', []))
+    if saved['fingerprint'] == _digest(config):
+        return history
+    old_hashes = previous.get('backend_sha256', {})
+    new_hashes = config.get('backend_sha256', {})
+    old_hash = old_hashes.get('fixed_score_toys')
+    if (old_hash in _DIAGNOSTICS_ONLY_PREDECESSORS
+            and new_hashes.get('fixed_score_toys') == file_digest(Path(__file__))):
+        updated = {**previous, 'backend_sha256': {
+            **old_hashes, 'fixed_score_toys': new_hashes['fixed_score_toys']}}
+        if _digest(updated) == _digest(config):
+            history.append(dict(previous_fingerprint=saved['fingerprint'],
+                previous_backend_sha256=old_hash,
+                reason='Diagnostic JSON infinity encoding; generation and fits unchanged'))
+            return history
+    raise ValueError('Score toy settings/models changed; use a new OUTPUT_TAG')
+
+
 def run_fixed_score_toys(prepared, output, *, reference_directory=None, n_toys=10_000,
                          seed=110923, mu_bounds=(0., 3.), grid_size=129,
                          checkpoint_every=100, progress_every=100, progress=print):
@@ -168,15 +222,16 @@ def run_fixed_score_toys(prepared, output, *, reference_directory=None, n_toys=1
     config = dict(**prepared['configuration'], seed=seed, mu_bounds=bounds.tolist(), grid_size=grid_size)
     fingerprint = _digest(config)
     path = output/'configuration.json'
+    compatibility = []
     if path.exists():
-        if json.loads(path.read_text()).get('fingerprint') != fingerprint:
-            raise ValueError('Score toy settings/models changed; use a new OUTPUT_TAG')
+        compatibility = _checkpoint_compatibility(json.loads(path.read_text()), config)
     elif list(output.glob('toys_*.csv')):
         raise ValueError('Score toy results have no configuration fingerprint')
     refs, ref_audits, provenance = _read_references(prepared, reference_directory,
         seed=seed, bounds=bounds, grid_size=grid_size, n_toys=n_toys)
     output.mkdir(parents=True, exist_ok=True)
-    save_json(path, dict(configuration=config, fingerprint=fingerprint, requested_toys=n_toys))
+    save_json(path, dict(configuration=config, fingerprint=fingerprint, requested_toys=n_toys,
+                         compatibility=compatibility))
     save_json(output/'reference_reuse.json', provenance)
     results, audits = [], []
     for mu in prepared['mu_values']:
@@ -210,7 +265,7 @@ def run_fixed_score_toys(prepared, output, *, reference_directory=None, n_toys=1
                     mu1_yield_in_zero_mean_bins=float(at_one[support].sum()),
                     forbidden_kappa_intervals=template.negative_intervals.tolist())
             audits.append(dict(audit, mu_test=mu, case=case))
-            save_json(output/'source_diagnostics.json', audits)
+            save_json(output/'source_diagnostics.json', _source_diagnostics_json(audits))
             progress(f'{label}, mu={mu:g}: {sum(i < n_toys for i in complete)}/{n_toys} cached/reused')
             dirty = 0
             try:

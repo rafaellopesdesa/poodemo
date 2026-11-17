@@ -62,6 +62,11 @@ Without those references, there are 80,000 fits in total. A CPU runtime is
 sufficient when all reference toys are reused. A GPU helps apply the frozen
 selector if fresh analytical toys are needed. Those experiments are toy data,
 not additional reference-bank events.
+
+If an earlier run stopped while saving source diagnostics, reopen this updated
+notebook and run from the top with the same `OUTPUT_TAG`. Its compatible
+checkpoints and the completed 07 references are retained; no cache deletion
+or rerun of 04/12 is needed.
 ''', 'runtime'), code(bootstrap, 'bootstrap'), code(COMMON_IMPORTS, 'imports'),
         code('''MU_VALUES = (0.0, 1.4)
 N_TOYS = 10_000  # Per case and per hypothesis, including in smoke mode.

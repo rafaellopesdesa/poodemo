@@ -1,4 +1,5 @@
 """Own-model score toys, reference reuse, deterministic resumption and notebook cells."""
+import json
 from pathlib import Path
 
 import nbformat
@@ -7,6 +8,7 @@ import pandas as pd
 import pytest
 
 from poodemo.data import file_digest
+from poodemo.colab_mc import _digest
 from poodemo.fixed_score_toys import (prepare_fixed_score_toys, run_fixed_score_toys,
                                      REFERENCE_BACKENDS)
 from poodemo.own_model_toys import PoissonTemplate, run_own_model_toys
@@ -171,6 +173,84 @@ def test_zero_support_null_is_valid_and_bad_generator_is_recorded(prepared, tmp_
     bad = run_fixed_score_toys(prepared, tmp_path/'bad', n_toys=2, grid_size=9, progress=lambda _:None)
     assert not bad['results'].query('case=="score36"').valid.any()
     assert bad['results'].query('case!="score36"').valid.all()
+
+
+def test_unbounded_positivity_intervals_are_saved_without_changing_fits(prepared, tmp_path):
+    # A bin with no S entries has a linear intensity that is negative at large
+    # kappa. Its legitimate forbidden interval ends at +inf, beyond our fit.
+    fields = np.array([[0., 1.], [.2, 4.], [1., 3.], [1., 2.]])
+    template = PoissonTemplate(fields)
+    prepared['templates']['score36'] = template
+    prepared['learned_fields'] = 2*fields
+    prepared['learned_rates'] = fields.sum(axis=1)
+    prepared['learned_intervals'] = StatOnlyLikelihood(np.empty((4, 0)), fields.sum(axis=1),
+        validity_fields=2*fields).negative_intervals
+    assert np.isposinf(template.negative_intervals[0, 1])
+    assert np.isposinf(prepared['learned_intervals'][0, 1])
+    result = run_fixed_score_toys(prepared, tmp_path, n_toys=2, grid_size=17, progress=lambda _:None)
+    assert result['results'].valid.all()
+    def reject_constant(value):
+        pytest.fail('Non-standard JSON constant: '+value)
+    audits = json.loads((tmp_path/'source_diagnostics.json').read_text(), parse_constant=reject_constant)
+    for case in ('score36', 'learned'):
+        for audit in [a for a in audits if a['case']==case]:
+            assert audit['forbidden_kappa_intervals'][0][1]=='Infinity'
+            assert np.isfinite(audit['forbidden_kappa_intervals'][0][0])
+        actual = result['sources'].loc[result['sources'].case.eq(case)].iloc[0]
+        assert np.isposinf(actual.forbidden_kappa_intervals[0][1])
+    # The fit still enforces that unbounded region; serialization is separate.
+    assert np.isinf(template.likelihood([0, 0]).nll(9.))
+    resumed = run_fixed_score_toys(prepared, tmp_path, n_toys=2, grid_size=17, progress=lambda _:None)
+    pd.testing.assert_frame_equal(normalized(result['results']), normalized(resumed['results']), check_dtype=False)
+
+
+@pytest.mark.parametrize('completed', [0, 2])
+def test_initial_backend_checkpoint_restarts_and_preserves_completed_rows(prepared, tmp_path, completed):
+    import poodemo.fixed_score_toys as module
+    original_hash = 'ca6f8e6c08240557049254a1cddcc05e5c44a6c0da5a68f5b76189e7b21005c5'
+    prepared['configuration']['backend_sha256'] = {
+        'fixed_score_toys':file_digest(Path(module.__file__)), 'toy_likelihood':'unchanged-fit'}
+    output = tmp_path/'resume'
+    output.mkdir()
+    kwargs = dict(seed=110923, mu_bounds=(0., 3.), grid_size=17, progress=lambda _:None)
+    if completed:
+        run_fixed_score_toys(prepared, output, n_toys=completed, **kwargs)
+    before = {p.name:pd.read_csv(p) for p in output.glob('toys_*.csv')}
+    config = dict(**prepared['configuration'], seed=110923, mu_bounds=[0., 3.], grid_size=17)
+    config['backend_sha256'] = {**config['backend_sha256'], 'fixed_score_toys':original_hash}
+    old_fingerprint = _digest(config)
+    (output/'configuration.json').write_text(json.dumps(dict(configuration=config,
+        fingerprint=old_fingerprint, requested_toys=10_000)))
+    result = run_fixed_score_toys(prepared, output, n_toys=3, **kwargs)
+    direct = run_fixed_score_toys(prepared, tmp_path/'direct', n_toys=3, **kwargs)
+    pd.testing.assert_frame_equal(normalized(result['results']), normalized(direct['results']), check_dtype=False)
+    for name, original in before.items():
+        pd.testing.assert_frame_equal(original, pd.read_csv(output/name).iloc[:completed], check_dtype=False)
+    saved = json.loads((output/'configuration.json').read_text())
+    assert saved['fingerprint']==result['fingerprint']
+    assert saved['compatibility'][0]['previous_fingerprint']==old_fingerprint
+    assert len(saved['compatibility'])==1
+    run_fixed_score_toys(prepared, output, n_toys=3, **kwargs)
+    assert json.loads((output/'configuration.json').read_text())['compatibility']==saved['compatibility']
+
+
+@pytest.mark.parametrize('change', ['model', 'seed', 'unknown_backend', 'corrupt_fingerprint'])
+def test_diagnostics_update_does_not_allow_incompatible_checkpoints(prepared, tmp_path, change):
+    import poodemo.fixed_score_toys as module
+    prepared['configuration']['backend_sha256'] = {'fixed_score_toys':file_digest(Path(module.__file__))}
+    config = dict(**prepared['configuration'], seed=110923, mu_bounds=[0., 3.], grid_size=17)
+    config['backend_sha256'] = {'fixed_score_toys':'ca6f8e6c08240557049254a1cddcc05e5c44a6c0da5a68f5b76189e7b21005c5'}
+    if change=='model': config['score_scale']=.5
+    if change=='seed': config['seed']=42
+    if change=='unknown_backend': config['backend_sha256']['fixed_score_toys']='unknown'
+    fingerprint = 'corrupt' if change=='corrupt_fingerprint' else _digest(config)
+    path = tmp_path/'configuration.json'
+    text = json.dumps(dict(configuration=config, fingerprint=fingerprint))
+    path.write_text(text)
+    with pytest.raises(ValueError, match='OUTPUT_TAG|fingerprint mismatch'):
+        run_fixed_score_toys(prepared, tmp_path, n_toys=1, grid_size=17, progress=lambda _:None)
+    assert path.read_text()==text
+    assert not list(tmp_path.glob('toys_*.csv'))
 
 
 def test_actual_run_and_plot_cells(prepared, tmp_path):
