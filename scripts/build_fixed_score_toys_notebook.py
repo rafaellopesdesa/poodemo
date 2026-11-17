@@ -9,7 +9,7 @@ from build_reference_notebooks import MODEL_SOURCE_CODE
 from build_reference_spline_notebook import fresh_bootstrap
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = 'af50d5aaad8bc1d0b2c1eff247b5e97b1b2144a1'  # Tested fixed-score toy backend.
+SOURCE_COMMIT = 'c06c8ab2adc5716cae3ce2c1b6265ab6ff048ab5'  # Tested fixed-score toy backend.
 NAME = '13_fixed_score_toys.ipynb'
 
 
