@@ -23,6 +23,7 @@ to lie between zero and one while S has a visibly distinct shape.
 | [10_discriminator_histograms.ipynb](notebooks/10_discriminator_histograms.ipynb) | Compare fixed 36/36²/36³ process-ratio histograms with the moving 36-bin likelihood ratio | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/10_discriminator_histograms.ipynb) |
 | [11_test_statistic_toys.ipynb](notebooks/11_test_statistic_toys.ipynb) | Own-model stat-only distributions and 36/72/108/144-bin comparison; 10,000 toys per case at $\mu_0=0$ and $1.4$ | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/11_test_statistic_toys.ipynb) |
 | [12_fixed_score_histograms.ipynb](notebooks/12_fixed_score_histograms.ipynb) | Fixed learned score at $\mu=1$: stat-only and NI-profiled scans versus 03, with 36/144 bins | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/12_fixed_score_histograms.ipynb) |
+| [13_fixed_score_toys.ipynb](notebooks/13_fixed_score_toys.ipynb) | Fixed-score own-model toys, 36/144 bins, 10,000 per case at $\mu_0=0,1.4$, with unbinned references | [Open](https://colab.research.google.com/github/rafaellopesdesa/poodemo/blob/main/notebooks/13_fixed_score_toys.ipynb) |
 
 ## Run in Colab
 
@@ -32,6 +33,8 @@ to lie between zero and one while S has a visibly distinct shape.
    The parallel signal-reference workflow is **01–03 → 04 → 05/06/07**.
    Notebook **12** also reuses the completed 04 bank for a fixed-score comparison
    with 03; it requires no new simulation, training, interpolation or toys.
+   Notebook **13** follows 12 with stat-only score toys and reuses matching
+   unbinned ensembles from 07. Missing reference toys are generated in 13.
    These new 04–07 notebooks replace the retired filenames; older studies remain in history.
    For a private repository, authorize GitHub access in Colab's notebook browser. If the link
    does not open, download the `.ipynb` and upload it to Colab.
@@ -867,7 +870,8 @@ outputs and preserve user run/model controls while applying the new baseline.
 ## Historical learned compression study (retired 13)
 
 This section documents the retired `13_learned_ratio_compression.ipynb`,
-available in git history. It is not part of the current notebook sequence.
+available in git history. The current notebook 13 is the fixed-score toy study;
+it uses separate outputs from this retired compression study.
 
 Run **only notebook 13** in a fresh runtime with the completed v4 `RUN_NAME`,
 `MODE`, and `CONFIG_OVERRIDES` from 01–03. It reuses the saved selector and
@@ -1248,3 +1252,42 @@ remain visible. There are no toys or interpolation studies in this notebook.
 Results and figures are saved under the completed study's `results/12_fixed_score/`
 and `plots/12_fixed_score/`, with configuration-specific subdirectories.
 Rebuild only this notebook with `python scripts/build_fixed_score_notebook.py`.
+
+## Fixed-score own-model toys (13)
+
+`13_fixed_score_toys.ipynb` follows 12 with **10,000 stat-only toys per case and
+hypothesis**, at $\mu_0=0$ and $1.4$. Compare fixed-score histograms with 36 and
+144 bins to analytical and learned unbinned ensembles. The score is frozen at
+$\eta=1$ for generation and every fit; the likelihood retains the full physical
+coefficients and searches all resolved minima over $0\leq\mu\leq3$.
+
+The histogram toys draw independent Poisson counts from the nominal templates
+already filled in 12. The same corrected means enter generation and fitting,
+with the established 0.01 event/bin and 0.05 total bounded-zeroing policy.
+Support zeros, forbidden parameter intervals, corrections and failures are
+reported. No additional reference events or ratio-network evaluations are needed.
+
+With `REUSE_07=True`, matching analytical/learned rows from
+`07_signal_own_model_statonly_10M_36_9_v1` are checked and copied into 13's
+separate checkpoints, including failed IDs. Reuse requires matching models,
+bank, selected rates, normalizers, selector, reference implementation, seed,
+fit bounds and grid. A mismatch is explicit; use the correct `REFERENCE_TAG`
+or set `REUSE_07=False` to produce fresh references in 13. Missing IDs are
+generated with the same deterministic reference streams. Existing 07 files
+are never changed. A completed 07 leaves **40,000 new score fits**; a fully
+fresh run has 80,000 fits. A GPU only helps preselect fresh analytical toys.
+
+Results resume or extend under the same `OUTPUT_TAG`, with checkpoints every
+100 new toys and on an ordinary interruption. Scientific changes require a
+new tag. Figures include log-scale test-statistic densities and survival
+curves, linear empirical CDFs, and log-scale best-fit-strength distributions
+with the diagnostic branch split at 0.5. Tables report quantiles, mean errors,
+branch fractions and errors, failures, upper-bound fits and count-mean pulls.
+The analytical reference retains the finite selected-rate integration error
+of 07/11; the learned reference uses their normalized finite $S$-bank model.
+These own-model toys are conditional on frozen models/templates and are not
+a common-physical-data closure or training-uncertainty study.
+
+Default outputs: `results/13_fixed_score_statonly_10M_36_144_v1/` and
+`plots/13_fixed_score_statonly_10M_36_144_v1/` under the completed 04 study.
+Rebuild only 13 with `python scripts/build_fixed_score_toys_notebook.py`.

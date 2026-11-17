@@ -114,6 +114,10 @@ def test_notebook_matches_builder_and_math_uses_dollar_delimiters(monkeypatch):
     monkeypatch.syspath_prepend(str(root/'scripts'))
     from build_fixed_score_notebook import score_cells,NAME
     notebook=nbformat.read(root/'notebooks'/NAME,as_version=4)
+    # Validate runnable sources without rewriting committed Colab outputs.
+    for cell in notebook.cells:
+        if cell.cell_type=='code':
+            cell.outputs=[];cell.execution_count=None
     nbformat.validate(notebook)
     assert [c.source for c in notebook.cells]==[c.source for c in score_cells()]
     for cell in notebook.cells:
